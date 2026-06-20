@@ -122,7 +122,7 @@
   <header class="top">
     <div>
       <h1>KPI dashboard</h1>
-      <div class="sub">Red Square &amp; Luma Kitchen — invoice and weekly sales tracking <span style="color:var(--text-faint);font-size:11px;">· build 2026-06-20-v10</span></div>
+      <div class="sub">Red Square &amp; Luma Kitchen — invoice and weekly sales tracking <span style="color:var(--text-faint);font-size:11px;">· build 2026-06-20-v11</span></div>
     </div>
     <div class="data-status" id="dataStatus">
       <span class="dot" id="dataDot"></span>
@@ -622,8 +622,9 @@ function aggregate(start, end){
   const wages = weekly.reduce((s,w)=>s+w.wages,0);
   const supplierCost = inv.reduce((s,i)=>s+i.amount,0);
   const grossProfit = grossSales - supplierCost;
+  const contributionMargin = grossSales - supplierCost - wages;
   return {
-    grossSales, wages, supplierCost, grossProfit,
+    grossSales, wages, supplierCost, grossProfit, contributionMargin,
     labourPct: grossSales ? (wages/grossSales*100) : 0,
     foodPct: grossSales ? (supplierCost/grossSales*100) : 0,
     marginPct: grossSales ? (grossProfit/grossSales*100) : 0,
@@ -927,6 +928,7 @@ function renderSummaryTable(curr, prev){
     ["Gross sales", fmtCurrency(curr.grossSales), prev?fmtCurrency(prev.grossSales):"—"],
     ["Wages", fmtCurrency(curr.wages), prev?fmtCurrency(prev.wages):"—"],
     ["Supplier cost", fmtCurrency(curr.supplierCost), prev?fmtCurrency(prev.supplierCost):"—"],
+    ["Contribution margin", fmtCurrency(curr.contributionMargin), prev?fmtCurrency(prev.contributionMargin):"—"],
     ["Gross profit", fmtCurrency(curr.grossProfit), prev?fmtCurrency(prev.grossProfit):"—"],
     ["Labour %", fmtPct(curr.labourPct), prev?fmtPct(prev.labourPct):"—"],
     ["Food cost %", fmtPct(curr.foodPct), prev?fmtPct(prev.foodPct):"—"],
@@ -936,7 +938,11 @@ function renderSummaryTable(curr, prev){
     <table>
       <thead><tr><th>Metric</th><th class="num">This period</th><th class="num">Comparison</th></tr></thead>
       <tbody>
-        ${rows.map(([label,v,pv])=>`<tr><td>${label}</td><td class="num">${v}</td><td class="num" style="color:var(--text-soft)">${pv}</td></tr>`).join("")}
+        ${rows.map(([label,v,pv])=>{
+          const isHighlight = label === "Contribution margin";
+          const rowStyle = isHighlight ? ' style="background:var(--accent-soft);font-weight:600;"' : '';
+          return `<tr${rowStyle}><td>${label}</td><td class="num">${v}</td><td class="num" style="color:var(--text-soft);font-weight:400;">${pv}</td></tr>`;
+        }).join("")}
       </tbody>
     </table>
   `;
