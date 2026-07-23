@@ -1,0 +1,1468 @@
+<!DOCTYPE html>
+<!-- saved from url=(0056)file:///Users/adrian/Downloads/deputy-wage-analyser.html -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wage Cost Analyser · Deputy</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --ink:      #0d0f14;
+  --paper:    #f5f4f0;
+  --rule:     #dddbd4;
+  --mid:      #8a8880;
+  --white:    #ffffff;
+  --on:       #1a6b45;   /* wage % good — deep green */
+  --on-bg:    #e8f5ee;
+  --warn:     #b45309;   /* wage % near limit */
+  --warn-bg:  #fef3e2;
+  --over:     #991b1b;   /* wage % over */
+  --over-bg:  #fee2e2;
+  --accent:   #1d4ed8;   /* interactive blue */
+  --mono:     'IBM Plex Mono', monospace;
+  --sans:     'IBM Plex Sans', sans-serif;
+  --radius:   4px;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* ── LAYOUT ── */
+.app { display: grid; grid-template-rows: 48px 1fr; min-height: 100vh; }
+
+header {
+  background: var(--ink);
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 16px;
+  border-bottom: 2px solid var(--accent);
+}
+header .wordmark {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+header .divider { color: #444; }
+header .sub { font-size: 12px; color: #888; }
+header .spacer { flex: 1; }
+header .version { font-family: var(--mono); font-size: 10px; color: #555; }
+
+.body { display: grid; grid-template-columns: 260px 1fr; height: calc(100vh - 48px); overflow: hidden; }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  background: var(--white);
+  border-right: 1px solid var(--rule);
+  overflow-y: auto;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.sidebar-section { display: flex; flex-direction: column; gap: 10px; }
+
+.section-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mid);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 6px;
+}
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 11px; color: var(--mid); font-weight: 500; }
+
+input[type=text],
+input[type=password],
+input[type=date],
+input[type=number],
+select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper);
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus, select:focus { border-color: var(--accent); background: var(--white); }
+input[type=password] { letter-spacing: 0.1em; }
+
+.token-wrap { position: relative; }
+.token-wrap input { padding-right: 34px; }
+.token-eye {
+  position: absolute;
+  right: 8px; top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--mid);
+  background: none;
+  border: none;
+  padding: 0;
+  line-height: 1;
+}
+
+.btn {
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: var(--white); width: 100%; }
+.btn-primary:not(:disabled):hover { opacity: 0.85; }
+.btn-ghost { background: transparent; color: var(--mid); border: 1px solid var(--rule); font-size: 11px; padding: 5px 10px; }
+.btn-ghost:hover { border-color: var(--ink); color: var(--ink); }
+.btn-link { background: none; color: var(--accent); border: none; font-size: 11px; padding: 0; cursor: pointer; text-decoration: underline; font-family: var(--sans); }
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.dot-idle { background: var(--rule); }
+.dot-ok { background: #16a34a; }
+.dot-err { background: var(--over); }
+.dot-spin { background: var(--accent); animation: spin-dot 1s linear infinite; }
+@keyframes spin-dot { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+.venue-group { display: flex; flex-direction: column; gap: 4px; }
+.venue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 5px 6px;
+  border-radius: var(--radius);
+  transition: background 0.1s;
+  user-select: none;
+}
+.venue-item:hover { background: var(--paper); }
+.venue-item input[type=checkbox] { accent-color: var(--accent); width: 13px; height: 13px; cursor: pointer; }
+.venue-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--white);
+  flex-shrink: 0;
+  line-height: 18px;
+}
+.venue-name { font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.area-count { font-family: var(--mono); font-size: 10px; color: var(--mid); }
+
+/* ── MAIN ── */
+.main { overflow-y: auto; background: var(--paper); }
+
+/* Empty state */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: var(--mid);
+  text-align: center;
+  padding: 40px;
+}
+.empty-icon { font-size: 40px; }
+.empty h2 { font-size: 16px; color: var(--ink); font-weight: 500; }
+.empty p { font-size: 13px; max-width: 380px; line-height: 1.7; }
+.setup-steps { text-align: left; font-size: 12px; line-height: 2; }
+.setup-steps code { font-family: var(--mono); background: var(--rule); padding: 1px 5px; border-radius: 2px; font-size: 11px; }
+
+/* ── RESULTS ── */
+.results { padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; }
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.toolbar-title { font-weight: 600; font-size: 15px; flex: 1; }
+.toolbar select { width: auto; }
+
+/* KPI strip — the signature element: a single horizontal ticker-tape of numbers */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--white);
+}
+.kpi-cell {
+  padding: 14px 18px;
+  border-right: 1px solid var(--rule);
+  position: relative;
+}
+.kpi-cell:last-child { border-right: none; }
+.kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--mid); font-weight: 600; margin-bottom: 4px; }
+.kpi-val { font-family: var(--mono); font-size: 26px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+.kpi-sub { font-size: 11px; color: var(--mid); margin-top: 4px; }
+.kpi-bar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--rule);
+}
+.kpi-bar-fill { height: 100%; transition: width 0.4s; }
+
+/* Chart */
+.chart-card {
+  background: var(--white);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+.card-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mid); }
+.card-body { padding: 16px; }
+
+.chart-outer { position: relative; width: 100%; overflow-x: auto; }
+.chart-svg-wrap { min-width: 600px; }
+
+/* Table */
+.table-card {
+  background: var(--white);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.table-scroll { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th {
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--mid);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+thead th:hover { color: var(--ink); }
+thead th.sort-asc::after { content: ' ↑'; }
+thead th.sort-desc::after { content: ' ↓'; }
+
+tbody tr { border-bottom: 1px solid var(--rule); }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: #f9f8f5; }
+tbody td { padding: 8px 12px; font-family: var(--mono); font-size: 12px; vertical-align: middle; }
+tbody td.text { font-family: var(--sans); }
+tbody td.venue-col { font-family: var(--sans); font-size: 11px; }
+
+.pct-cell { display: flex; align-items: center; gap: 8px; }
+.mini-bar { flex: 1; height: 4px; background: var(--rule); border-radius: 2px; overflow: hidden; min-width: 40px; }
+.mini-bar-fill { height: 100%; border-radius: 2px; }
+.pct-val { min-width: 44px; text-align: right; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--sans);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.badge-on   { background: var(--on-bg);   color: var(--on); }
+.badge-warn { background: var(--warn-bg); color: var(--warn); }
+.badge-over { background: var(--over-bg); color: var(--over); }
+.badge-na   { background: var(--paper);   color: var(--mid); border: 1px solid var(--rule); }
+
+.staff-suggest { color: var(--accent); font-weight: 600; }
+.staff-delta   { font-size: 10px; }
+.delta-up      { color: var(--warn); }
+.delta-down    { color: var(--on); }
+
+/* Tabs */
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--rule); background: var(--white); }
+.tab-btn {
+  padding: 10px 18px;
+  border: none;
+  background: none;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--mid);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s;
+  font-weight: 400;
+}
+.tab-btn:hover { color: var(--ink); }
+.tab-btn.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 500; }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Optimiser table */
+.adj-up   { color: var(--warn); }
+.adj-down { color: var(--on); }
+.adj-ok   { color: var(--mid); }
+
+/* Alert / notice */
+.notice {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  line-height: 1.6;
+}
+.notice-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+.notice-warn { background: var(--warn-bg); border: 1px solid #fcd34d; color: var(--warn); }
+
+/* Loading overlay */
+.loading-bar {
+  height: 2px;
+  background: var(--rule);
+  overflow: hidden;
+  border-radius: 1px;
+}
+.loading-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: loading-pulse 1.4s ease-in-out infinite;
+  width: 40%;
+}
+@keyframes loading-pulse {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* Print */
+@media print {
+  .sidebar, header .spacer, .btn, .tabs { display: none !important; }
+  .body { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── HEADER ── -->
+<header>
+  <span class="wordmark">Wage Analyser</span>
+  <span class="divider">×</span>
+  <span class="sub">Deputy + ImPOS · 30-min intervals</span>
+  <div class="spacer"></div>
+  <span class="version" id="lastFetched"></span>
+</header>
+
+<div class="body">
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar">
+
+  <!-- Connection -->
+  <div class="sidebar-section">
+    <div class="section-label">Deputy Connection</div>
+
+    <div class="field">
+      <label>Install subdomain</label>
+      <input type="text" id="installName" placeholder="yourinstall" title="The part before .au.deputy.com in your URL">
+    </div>
+
+    <div class="field">
+      <label>Permanent token</label>
+      <div class="token-wrap">
+        <input type="password" id="apiToken" placeholder="Paste token here" autocomplete="off" spellcheck="false">
+        <button class="token-eye" onclick="toggleToken()" title="Show/hide">👁</button>
+      </div>
+    </div>
+
+    <div class="status-row" id="connStatus">
+      <span class="dot dot-err" id="connDot"></span>
+      <span id="connMsg">Connection failed</span>
+    </div>
+
+    <button class="btn btn-primary" onclick="connect()" id="connectBtn">Connect to Deputy</button>
+
+    <div style="font-size:11px; color:var(--mid); line-height:1.7;">
+      Get your token at:<br>
+      <code style="font-family:var(--mono);font-size:10px;background:var(--paper);padding:2px 4px;border-radius:2px;">
+        yourinstall.au.deputy.com/<br>exec/devapp/oauth_clients
+      </code><br>
+      → New OAuth Client → Get an Access Token
+    </div>
+  </div>
+
+  <!-- Date range -->
+  <div class="sidebar-section" id="dateSection" style="display:none;">
+    <div class="section-label">Date Range</div>
+    <div class="field">
+      <label>From</label>
+      <input type="date" id="dateFrom">
+    </div>
+    <div class="field">
+      <label>To</label>
+      <input type="date" id="dateTo">
+    </div>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-ghost" onclick="setQuick(&#39;today&#39;)">Today</button>
+      <button class="btn btn-ghost" onclick="setQuick(&#39;week&#39;)">This week</button>
+      <button class="btn btn-ghost" onclick="setQuick(&#39;month&#39;)">This month</button>
+    </div>
+  </div>
+
+  <!-- Venues -->
+  <div class="sidebar-section" id="venueSection" style="display:none;">
+    <div class="section-label">Venues
+      <button class="btn-link" style="margin-left:8px;" onclick="toggleAllVenues(true)">all</button>
+      <span style="color:var(--rule)"> / </span>
+      <button class="btn-link" onclick="toggleAllVenues(false)">none</button>
+    </div>
+    <div class="venue-group" id="venueList"></div>
+  </div>
+
+  <!-- Settings -->
+  <div class="sidebar-section" id="settingsSection" style="display:none;">
+    <div class="section-label">Settings</div>
+    <div class="field">
+      <label>Target wage %</label>
+      <input type="number" id="targetWage" value="28" min="1" max="100" step="0.5">
+    </div>
+    <div class="field">
+      <label>Near-limit buffer (%)</label>
+      <input type="number" id="warnBuffer" value="3" min="0" max="20" step="0.5" title="Intervals within this many points of target are flagged as Near Limit">
+    </div>
+    <div class="field">
+      <label>Avg hourly rate ($ AUD)</label>
+      <input type="number" id="avgRate" value="28.50" min="1" step="0.50" title="Used only for staffing suggestions — your actual costs come from Deputy">
+    </div>
+    <div class="field">
+      <label>Data source</label>
+      <select id="dataSource">
+        <option value="roster">Roster (scheduled cost — incl. future)</option>
+        <option value="timesheet">Timesheets (actual approved cost)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Fetch -->
+  <div id="fetchSection" style="display:none;">
+    <button class="btn btn-primary" onclick="fetchAndAnalyse()" id="fetchBtn">
+      Load data &amp; analyse
+    </button>
+  </div>
+
+</aside>
+
+<!-- ── MAIN ── -->
+<main class="main" id="mainPanel">
+  <div class="empty" id="emptyState">
+    <div class="empty-icon">📊</div>
+    <h2>Connect to Deputy to get started</h2>
+    <p>Enter your Deputy subdomain and permanent token, then click <strong>Connect to Deputy</strong>.</p>
+    <div class="setup-steps" style="margin-top:8px;">
+      <strong>Getting your token (2 min):</strong><br>
+      1. Go to <code>yourinstall.au.deputy.com/exec/devapp/oauth_clients</code><br>
+      2. Click <strong>New OAuth Client</strong> → fill in a name → Save<br>
+      3. Click <strong>Get an Access Token</strong> → copy it immediately<br>
+      4. Paste it in the sidebar
+    </div>
+  </div>
+</main>
+
+</div><!-- .body -->
+</div><!-- .app -->
+
+<script>
+/* ═══════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════ */
+const state = {
+  install: '',
+  token: '',
+  areas: [],          // [{Id, OperationalUnitName, Company, CompanyObject}]
+  venues: {},         // venueId → {name, color, areaIds:[]}
+  venueOrder: [],     // display order
+  results: null,
+  sortCol: 'slot',
+  sortDir: 'asc',
+};
+
+const VENUE_COLORS = [
+  '#1d4ed8','#0891b2','#7c3aed','#b45309','#16a34a',
+  '#db2777','#ea580c','#0284c7','#4f46e5','#0d9488',
+];
+
+/* ═══════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+
+function apiBase() {
+  return `https://${state.install}.au.deputy.com`;
+}
+
+async function deputyFetch(path, opts = {}) {
+  const url = apiBase() + path;
+  const resp = await fetch(url, {
+    ...opts,
+    headers: {
+      'Authorization': `Bearer ${state.token}`,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+    },
+  });
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`Deputy API ${resp.status}: ${txt.slice(0,200)}`);
+  }
+  return resp.json();
+}
+
+/* paginate a RESOURCE/QUERY endpoint until exhausted */
+async function queryAll(resource, body = {}) {
+  const results = [];
+  let start = 0;
+  const limit = 500;
+  while (true) {
+    const page = await deputyFetch(`/api/v1/resource/${resource}/QUERY`, {
+      method: 'POST',
+      body: JSON.stringify({ ...body, start, limit }),
+    });
+    if (!page || page.length === 0) break;
+    results.push(...page);
+    if (page.length < limit) break;
+    start += limit;
+  }
+  return results;
+}
+
+function toEpoch(dateStr, endOfDay = false) {
+  // dateStr = 'YYYY-MM-DD' — produce midnight AEST (UTC+10)
+  const d = new Date(dateStr + 'T00:00:00+10:00');
+  if (endOfDay) d.setTime(d.getTime() + 86399000);
+  return Math.floor(d.getTime() / 1000);
+}
+
+function epochToDate(ep) {
+  const d = new Date(ep * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+function fmt$(n) {
+  return '$' + n.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function fmtPct(n) {
+  return n.toFixed(1) + '%';
+}
+
+function minToTime(m) {
+  const h = Math.floor(m / 60) % 24;
+  const mm = m % 60;
+  return String(h).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+}
+
+function snap30(minOfDay) { return Math.floor(minOfDay / 30) * 30; }
+
+function epochToMinOfDay(ep) {
+  // local AEST offset — approximate using browser, but Deputy stores timestamps in local time
+  const d = new Date(ep * 1000);
+  // Use AEST = UTC+10
+  const aest = new Date(d.toLocaleString('en-AU', { timeZone: 'Australia/Sydney' }));
+  return aest.getHours() * 60 + aest.getMinutes();
+}
+
+function epochToAESTDate(ep) {
+  const d = new Date(ep * 1000);
+  return d.toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }); // YYYY-MM-DD
+}
+
+function pctClass(pct, target, buffer) {
+  if (pct === null) return 'na';
+  if (pct <= target) return 'on';
+  if (pct <= target + buffer) return 'warn';
+  return 'over';
+}
+
+function pctBadge(cls) {
+  const map = { on: ['badge-on','✓ On target'], warn: ['badge-warn','⚠ Near limit'], over: ['badge-over','✗ Over target'], na: ['badge-na','No sales'] };
+  return `<span class="badge ${map[cls][0]}">${map[cls][1]}</span>`;
+}
+
+function pctColor(cls) {
+  return { on: 'var(--on)', warn: 'var(--warn)', over: 'var(--over)', na: 'var(--mid)' }[cls];
+}
+
+/* ═══════════════════════════════════════════
+   UI UTILITIES
+═══════════════════════════════════════════ */
+function setConnStatus(state, msg) {
+  const dot = $('connDot');
+  dot.className = 'dot dot-' + state;
+  $('connMsg').textContent = msg;
+}
+
+function showLoading(msg) {
+  $('mainPanel').innerHTML = `
+    <div class="empty">
+      <div class="empty-icon">⏳</div>
+      <h2>${msg}</h2>
+      <div class="loading-bar" style="width:240px;margin-top:8px;">
+        <div class="loading-bar-fill"></div>
+      </div>
+    </div>`;
+}
+
+function showError(msg) {
+  $('mainPanel').innerHTML = `
+    <div class="empty">
+      <div class="empty-icon">⚠️</div>
+      <h2>Something went wrong</h2>
+      <p>${msg}</p>
+      <p style="margin-top:8px;font-size:12px;">Check your token and subdomain, then try again.</p>
+    </div>`;
+}
+
+function toggleToken() {
+  const inp = $('apiToken');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function setQuick(range) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const today = fmt(now);
+
+  if (range === 'today') {
+    $('dateFrom').value = today;
+    $('dateTo').value = today;
+  } else if (range === 'week') {
+    const mon = new Date(now);
+    mon.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+    $('dateFrom').value = fmt(mon);
+    $('dateTo').value = today;
+  } else if (range === 'month') {
+    $('dateFrom').value = `${now.getFullYear()}-${pad(now.getMonth()+1)}-01`;
+    $('dateTo').value = today;
+  }
+}
+
+/* ═══════════════════════════════════════════
+   CONNECT
+═══════════════════════════════════════════ */
+async function connect() {
+  const install = $('installName').value.trim().replace(/\.au\.deputy\.com.*/,'').replace(/https?:\/\//,'');
+  const token   = $('apiToken').value.trim();
+
+  if (!install || !token) {
+    alert('Please enter your Deputy subdomain and token.');
+    return;
+  }
+
+  state.install = install;
+  state.token   = token;
+
+  setConnStatus('spin', 'Connecting…');
+  $('connectBtn').disabled = true;
+
+  try {
+    // Verify token
+    const me = await deputyFetch('/api/v1/me');
+
+    // Load operational units (areas)
+    const areas = await deputyFetch('/api/v1/resource/OperationalUnit?limit=500');
+    state.areas = Array.isArray(areas) ? areas : Object.values(areas);
+
+    // Group areas into venues via Company (Location)
+    await buildVenueMap();
+
+    setConnStatus('ok', `Connected · ${me.Name || me.DeputyName || 'OK'}`);
+
+    // Show the rest of the sidebar
+    $('dateSection').style.display = '';
+    $('venueSection').style.display = '';
+    $('settingsSection').style.display = '';
+    $('fetchSection').style.display = '';
+
+    // Default date = today
+    setQuick('today');
+
+    // Render venue list
+    renderVenueList();
+
+    // Update main panel
+    $('mainPanel').innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">✅</div>
+        <h2>Connected to Deputy</h2>
+        <p>Select your date range and venues, then click <strong>Load data &amp; analyse</strong>.</p>
+      </div>`;
+
+    $('lastFetched').textContent = install + '.au.deputy.com';
+
+  } catch (err) {
+    setConnStatus('err', 'Connection failed');
+    alert('Could not connect: ' + err.message);
+  } finally {
+    $('connectBtn').disabled = false;
+  }
+}
+
+async function buildVenueMap() {
+  // Load locations to get venue (company) names
+  let locations = [];
+  try {
+    const locs = await deputyFetch('/api/v1/resource/Company?limit=500');
+    locations = Array.isArray(locs) ? locs : Object.values(locs);
+  } catch(e) { /* fall back to area names */ }
+
+  const locMap = {};
+  locations.forEach(l => { locMap[l.Id] = l.CompanyName || l.Portfolio || ('Venue ' + l.Id); });
+
+  state.venues = {};
+  state.venueOrder = [];
+
+  state.areas.forEach(area => {
+    const companyId = area.Company || 0;
+    const venueName = locMap[companyId] || area.OperationalUnitName || ('Area ' + area.Id);
+    const venueKey  = String(companyId || venueName);
+
+    if (!state.venues[venueKey]) {
+      const colorIdx = state.venueOrder.length % VENUE_COLORS.length;
+      state.venues[venueKey] = {
+        name: venueName,
+        color: VENUE_COLORS[colorIdx],
+        areaIds: [],
+      };
+      state.venueOrder.push(venueKey);
+    }
+    state.venues[venueKey].areaIds.push(area.Id);
+  });
+}
+
+function renderVenueList() {
+  const container = $('venueList');
+  container.innerHTML = '';
+
+  state.venueOrder.forEach(vk => {
+    const v = state.venues[vk];
+    const div = document.createElement('div');
+    div.className = 'venue-item';
+    div.innerHTML = `
+      <input type="checkbox" id="v-${vk}" checked onchange="onVenueToggle()"/>
+      <span class="venue-chip" style="background:${v.color};">${v.name.slice(0,2).toUpperCase()}</span>
+      <span class="venue-name" title="${v.name}">${v.name}</span>
+      <span class="area-count">${v.areaIds.length} area${v.areaIds.length===1?'':'s'}</span>`;
+    container.appendChild(div);
+  });
+}
+
+function toggleAllVenues(on) {
+  state.venueOrder.forEach(vk => {
+    const cb = document.getElementById('v-' + vk);
+    if (cb) cb.checked = on;
+  });
+}
+
+function onVenueToggle() { /* just re-check when user fetches */ }
+
+function selectedVenueKeys() {
+  return state.venueOrder.filter(vk => {
+    const cb = document.getElementById('v-' + vk);
+    return cb && cb.checked;
+  });
+}
+
+/* ═══════════════════════════════════════════
+   FETCH + ANALYSE
+═══════════════════════════════════════════ */
+async function fetchAndAnalyse() {
+  const dateFrom = $('dateFrom').value;
+  const dateTo   = $('dateTo').value;
+
+  if (!dateFrom || !dateTo) { alert('Please select a date range.'); return; }
+  if (dateFrom > dateTo)    { alert('Start date must be before end date.'); return; }
+
+  const venueKeys = selectedVenueKeys();
+  if (!venueKeys.length) { alert('Please select at least one venue.'); return; }
+
+  const allAreaIds = venueKeys.flatMap(vk => state.venues[vk].areaIds);
+
+  $('fetchBtn').disabled = true;
+  showLoading('Fetching data from Deputy…');
+
+  try {
+    const startEp = toEpoch(dateFrom, false);
+    const endEp   = toEpoch(dateTo, true);
+
+    // 1. Sales data (v2 metrics/raw) — ImPOS data lives here
+    showLoading('Fetching sales data from Deputy…');
+    const salesData = await fetchSales(allAreaIds, startEp, endEp);
+
+    // 2. Roster or Timesheet cost data
+    const source = $('dataSource').value;
+    showLoading(`Fetching ${source === 'roster' ? 'roster' : 'timesheet'} data from Deputy…`);
+    const wageData = source === 'roster'
+      ? await fetchRosterWages(allAreaIds, dateFrom, dateTo)
+      : await fetchTimesheetWages(allAreaIds, dateFrom, dateTo);
+
+    // 3. Crunch
+    showLoading('Calculating 30-min intervals…');
+    await new Promise(r => setTimeout(r, 50)); // let UI breathe
+
+    const target = parseFloat($('targetWage').value) || 28;
+    const buffer = parseFloat($('warnBuffer').value) || 3;
+    const avgRate = parseFloat($('avgRate').value) || 28.50;
+
+    state.results = crunch(salesData, wageData, venueKeys, target, buffer, avgRate, dateFrom, dateTo);
+
+    $('lastFetched').textContent = `Last fetched ${new Date().toLocaleTimeString('en-AU')}`;
+    renderResults();
+
+  } catch(err) {
+    showError(err.message);
+    console.error(err);
+  } finally {
+    $('fetchBtn').disabled = false;
+  }
+}
+
+/* ── Sales: /api/v2/metrics/raw ── */
+async function fetchSales(areaIds, startEp, endEp) {
+  // Fetch in weekly chunks to keep response sizes manageable
+  const CHUNK = 7 * 86400; // 7 days
+  const rows = [];
+
+  for (let s = startEp; s < endEp; s += CHUNK) {
+    const e = Math.min(s + CHUNK - 1, endEp);
+    const url = `/api/v2/metrics/raw?areas=${areaIds.join(',')}&types=Sales&start=${s}&end=${e}`;
+    try {
+      const data = await deputyFetch(url);
+      if (data && Array.isArray(data)) rows.push(...data);
+      else if (data && data.data) rows.push(...data.data);
+    } catch(e) {
+      console.warn('Sales fetch chunk error:', e.message);
+    }
+  }
+  return rows;
+}
+
+/* ── Roster wages: /api/v1/resource/Roster/QUERY ── */
+async function fetchRosterWages(areaIds, dateFrom, dateTo) {
+  const body = {
+    search: {
+      s1: { field: 'Date', data: dateFrom, type: 'ge' },
+      s2: { field: 'Date', data: dateTo,   type: 'le' },
+    },
+    sort: { column: 'Date', order: 'ASC' },
+  };
+
+  const all = await queryAll('Roster', body);
+
+  // Filter to selected areas
+  const areaSet = new Set(areaIds.map(String));
+  return all.filter(r => areaSet.has(String(r.OperationalUnit)));
+}
+
+/* ── Timesheet wages: /api/v1/resource/Timesheet/QUERY + cost from TimesheetPayReturn ── */
+async function fetchTimesheetWages(areaIds, dateFrom, dateTo) {
+  const body = {
+    search: {
+      s1: { field: 'Date', data: dateFrom, type: 'ge' },
+      s2: { field: 'Date', data: dateTo,   type: 'le' },
+    },
+    join: ['TimesheetPayReturnObject'],
+    sort: { column: 'Date', order: 'ASC' },
+  };
+
+  const all = await queryAll('Timesheet', body);
+  const areaSet = new Set(areaIds.map(String));
+  return all.filter(r => areaSet.has(String(r.OperationalUnit)));
+}
+
+/* ═══════════════════════════════════════════
+   CRUNCH — build 30-min interval rows
+═══════════════════════════════════════════ */
+function crunch(salesRaw, wageRaw, venueKeys, target, buffer, avgRate, dateFrom, dateTo) {
+
+  // Map areaId → venueKey
+  const areaToVenue = {};
+  venueKeys.forEach(vk => {
+    state.venues[vk].areaIds.forEach(aid => { areaToVenue[String(aid)] = vk; });
+  });
+
+  // ── Aggregate sales to 30-min slots ──
+  // salesRaw rows: { timestamp, area, value, type, ... }
+  const salesMap = {}; // key: `${venueKey}|${date}|${slot30}` → total $
+
+  salesRaw.forEach(row => {
+    const areaId = String(row.area);
+    const vk = areaToVenue[areaId];
+    if (!vk) return;
+
+    const ep = parseInt(row.timestamp);
+    const date = epochToAESTDate(ep);
+    const minOfDay = epochToMinOfDay(ep);
+    const slot = snap30(minOfDay);
+    const key = `${vk}|${date}|${slot}`;
+    salesMap[key] = (salesMap[key] || 0) + parseFloat(row.value || 0);
+  });
+
+  // ── Aggregate wages to 30-min slots ──
+  // Roster: StartTime (epoch), EndTime (epoch), Cost (total shift cost), OperationalUnit
+  // Timesheet: same structure, Cost from TimesheetPayReturnObject[].Cost summed
+  const wageMap  = {}; // key → total wage cost $
+  const staffMap = {}; // key → headcount
+
+  const source = $('dataSource').value;
+
+  wageRaw.forEach(shift => {
+    const areaId = String(shift.OperationalUnit);
+    const vk = areaToVenue[areaId];
+    if (!vk) return;
+
+    const startEp = parseInt(shift.StartTime);
+    const endEp   = parseInt(shift.EndTime);
+    if (!startEp || !endEp || endEp <= startEp) return;
+
+    // Total cost for this shift
+    let shiftCost = 0;
+    if (source === 'roster') {
+      shiftCost = parseFloat(shift.Cost || shift.OnCost || 0);
+    } else {
+      // Timesheet: sum pay return lines
+      const payLines = shift.TimesheetPayReturnObject || [];
+      if (Array.isArray(payLines)) {
+        shiftCost = payLines.reduce((s, l) => s + parseFloat(l.Cost || 0), 0);
+      } else {
+        shiftCost = parseFloat(shift.Cost || 0);
+      }
+    }
+
+    const totalMins = (endEp - startEp) / 60;
+    const costPerMin = totalMins > 0 ? shiftCost / totalMins : 0;
+
+    const date = epochToAESTDate(startEp);
+
+    // Distribute cost across 30-min slots the shift covers
+    const startMin = epochToMinOfDay(startEp);
+    const endMin   = epochToMinOfDay(endEp) || 24 * 60; // midnight edge case
+
+    let cur = snap30(startMin);
+    while (cur < endMin && cur < 24 * 60) {
+      const slotStart = cur;
+      const slotEnd   = cur + 30;
+      const overlapStart = Math.max(slotStart, startMin);
+      const overlapEnd   = Math.min(slotEnd, endMin);
+      const overlapMins  = overlapEnd - overlapStart;
+      if (overlapMins > 0) {
+        const key = `${vk}|${date}|${slotStart}`;
+        wageMap[key]  = (wageMap[key]  || 0) + costPerMin * overlapMins;
+        staffMap[key] = (staffMap[key] || 0) + 1;
+      }
+      cur += 30;
+    }
+  });
+
+  // ── Build unified rows ──
+  const allKeys = new Set([...Object.keys(salesMap), ...Object.keys(wageMap)]);
+  const rows = [];
+
+  allKeys.forEach(key => {
+    const [vk, date, slotStr] = key.split('|');
+    if (date < dateFrom || date > dateTo) return;
+    const slot   = parseInt(slotStr);
+    const sales  = salesMap[key] || 0;
+    const wages  = wageMap[key]  || 0;
+    const staff  = staffMap[key] || 0;
+    const wagePct = sales > 0 ? (wages / sales) * 100 : null;
+    const cls    = pctClass(wagePct, target, buffer);
+
+    rows.push({ key, vk, date, slot, sales, wages, staff, wagePct, cls });
+  });
+
+  rows.sort((a,b) => a.date.localeCompare(b.date) || a.slot - b.slot || a.vk.localeCompare(b.vk));
+
+  return { rows, venueKeys, target, buffer, avgRate, dateFrom, dateTo };
+}
+
+/* ═══════════════════════════════════════════
+   RENDER RESULTS
+═══════════════════════════════════════════ */
+function renderResults() {
+  const { rows, venueKeys, target, buffer, avgRate } = state.results;
+
+  const totalSales = rows.reduce((s,r) => s + r.sales, 0);
+  const totalWages = rows.reduce((s,r) => s + r.wages, 0);
+  const overallPct = totalSales > 0 ? (totalWages / totalSales) * 100 : 0;
+  const overCount  = rows.filter(r => r.cls === 'over').length;
+  const overallCls = pctClass(overallPct, target, buffer);
+
+  const pctBarColor  = pctColor(overallCls);
+  const pctBarWidth  = Math.min((overallPct / (target * 2)) * 100, 100);
+
+  $('mainPanel').innerHTML = `
+    <div class="results">
+
+      <!-- KPI strip -->
+      <div class="kpi-strip">
+        <div class="kpi-cell">
+          <div class="kpi-label">Total Sales</div>
+          <div class="kpi-val" style="color:var(--ink)">${fmt$(totalSales)}</div>
+          <div class="kpi-sub">${rows.length} intervals · ${$('dateFrom').value} – ${$('dateTo').value}</div>
+          <div class="kpi-bar"><div class="kpi-bar-fill" style="width:100%;background:var(--rule)"></div></div>
+        </div>
+        <div class="kpi-cell">
+          <div class="kpi-label">Total Wage Cost</div>
+          <div class="kpi-val" style="color:var(--ink)">${fmt$(totalWages)}</div>
+          <div class="kpi-sub">${$('dataSource').value === 'roster' ? 'Scheduled (roster)' : 'Actual (timesheets)'}</div>
+          <div class="kpi-bar"><div class="kpi-bar-fill" style="width:${pctBarWidth}%;background:${pctBarColor}"></div></div>
+        </div>
+        <div class="kpi-cell">
+          <div class="kpi-label">Overall Wage %</div>
+          <div class="kpi-val" style="color:${pctBarColor}">${fmtPct(overallPct)}</div>
+          <div class="kpi-sub">Target: ${target}%</div>
+          <div class="kpi-bar"><div class="kpi-bar-fill" style="width:${pctBarWidth}%;background:${pctBarColor}"></div></div>
+        </div>
+        <div class="kpi-cell">
+          <div class="kpi-label">Intervals Over Target</div>
+          <div class="kpi-val" style="color:${overCount > 0 ? 'var(--over)' : 'var(--on)'}">${overCount}</div>
+          <div class="kpi-sub">of ${rows.length} total intervals</div>
+          <div class="kpi-bar"><div class="kpi-bar-fill" style="width:${rows.length?overCount/rows.length*100:0}%;background:var(--over)"></div></div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="table-card">
+        <div class="tabs">
+          <button class="tab-btn active" onclick="switchTab('chart',this)">Wage % Chart</button>
+          <button class="tab-btn" onclick="switchTab('intervals',this)">Intervals</button>
+          <button class="tab-btn" onclick="switchTab('optimiser',this)">Staffing Optimiser</button>
+          <button class="tab-btn" onclick="switchTab('venues',this)">By Venue</button>
+        </div>
+
+        <div id="tab-chart" class="tab-content active card-body">
+          ${renderChart()}
+        </div>
+
+        <div id="tab-intervals" class="tab-content">
+          ${renderIntervalTable()}
+        </div>
+
+        <div id="tab-optimiser" class="tab-content card-body">
+          ${renderOptimiser()}
+        </div>
+
+        <div id="tab-venues" class="tab-content card-body">
+          ${renderByVenue()}
+        </div>
+      </div>
+
+    </div>`;
+
+  // Sort listeners
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      if (state.sortCol === col) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+      else { state.sortCol = col; state.sortDir = 'asc'; }
+      refreshIntervalTable();
+    });
+  });
+}
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  $('tab-' + name).classList.add('active');
+}
+
+/* ── CHART ── */
+function renderChart() {
+  const { rows, target, buffer, venueKeys } = state.results;
+
+  // Aggregate by slot across all selected venues for chart
+  const slotMap = {};
+  rows.forEach(r => {
+    const k = r.slot;
+    if (!slotMap[k]) slotMap[k] = { sales: 0, wages: 0 };
+    slotMap[k].sales += r.sales;
+    slotMap[k].wages += r.wages;
+  });
+
+  const slots = Object.keys(slotMap).map(Number).sort((a,b) => a-b);
+  if (!slots.length) return '<p style="color:var(--mid);padding:20px;">No data to chart.</p>';
+
+  const chartData = slots.map(slot => {
+    const { sales, wages } = slotMap[slot];
+    const pct = sales > 0 ? (wages / sales) * 100 : null;
+    return { slot, sales, wages, pct };
+  });
+
+  const maxPct = Math.max(...chartData.map(d => d.pct || 0), target * 1.5, 5);
+  const svgH = 160;
+  const svgPad = { top: 20, right: 16, bottom: 28, left: 44 };
+  const barW = 22;
+  const barGap = 4;
+  const svgW = Math.max(600, slots.length * (barW + barGap) + svgPad.left + svgPad.right);
+  const chartH = svgH - svgPad.top - svgPad.bottom;
+  const chartW = svgW - svgPad.left - svgPad.right;
+
+  const yScale = v => svgPad.top + chartH - (v / maxPct) * chartH;
+  const targetY = yScale(target);
+
+  // Y-axis labels
+  const yTicks = [0, target/2, target, target*1.5].filter(v => v <= maxPct * 1.05);
+  const yAxisLabels = yTicks.map(v =>
+    `<text x="${svgPad.left - 6}" y="${yScale(v) + 4}" text-anchor="end" fill="#8a8880" font-size="9" font-family="IBM Plex Mono">${v.toFixed(0)}%</text>
+     <line x1="${svgPad.left}" y1="${yScale(v)}" x2="${svgPad.left + chartW}" y2="${yScale(v)}" stroke="#dddbd4" stroke-width="0.5"/>`
+  ).join('');
+
+  const bars = chartData.map((d, i) => {
+    const x = svgPad.left + i * (barW + barGap);
+    if (d.pct === null) return '';
+    const barH = Math.max(2, (d.pct / maxPct) * chartH);
+    const by = svgPad.top + chartH - barH;
+    const cls = pctClass(d.pct, target, buffer);
+    const col = pctColor(cls);
+    const label = minToTime(d.slot);
+    const showLabel = slots.length <= 30 || i % 2 === 0;
+
+    return `
+      <rect x="${x}" y="${by}" width="${barW}" height="${barH}" fill="${col}" rx="1" opacity="0.85">
+        <title>${minToTime(d.slot)}–${minToTime(d.slot+30)}\nSales: ${fmt$(d.sales)}\nWages: ${fmt$(d.wages)}\nWage %: ${fmtPct(d.pct)}</title>
+      </rect>
+      ${showLabel ? `<text x="${x + barW/2}" y="${svgH - svgPad.bottom + 10}" text-anchor="middle" fill="#8a8880" font-size="8" font-family="IBM Plex Mono">${label}</text>` : ''}`;
+  }).join('');
+
+  return `
+    <div style="margin-bottom:10px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--mid);">Wage % per 30-min slot · all selected venues combined</span>
+      <span style="display:flex;align-items:center;gap:4px;font-size:11px;"><span style="display:inline-block;width:10px;height:10px;background:var(--on);border-radius:1px;"></span> On target</span>
+      <span style="display:flex;align-items:center;gap:4px;font-size:11px;"><span style="display:inline-block;width:10px;height:10px;background:var(--warn);border-radius:1px;"></span> Near limit</span>
+      <span style="display:flex;align-items:center;gap:4px;font-size:11px;"><span style="display:inline-block;width:10px;height:10px;background:var(--over);border-radius:1px;"></span> Over target</span>
+    </div>
+    <div class="chart-outer">
+      <div class="chart-svg-wrap">
+        <svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}" style="display:block;">
+          ${yAxisLabels}
+          ${bars}
+          <!-- target line -->
+          <line x1="${svgPad.left}" y1="${targetY}" x2="${svgPad.left+chartW}" y2="${targetY}"
+                stroke="var(--warn)" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>
+          <text x="${svgPad.left+chartW-2}" y="${targetY - 3}" text-anchor="end"
+                fill="var(--warn)" font-size="9" font-family="IBM Plex Mono">Target ${target}%</text>
+        </svg>
+      </div>
+    </div>`;
+}
+
+/* ── INTERVAL TABLE ── */
+function renderIntervalTable() {
+  const { rows, target, buffer, avgRate } = state.results;
+
+  // Sort
+  const sorted = [...rows].sort((a,b) => {
+    let va = a[state.sortCol], vb = b[state.sortCol];
+    if (va === null) va = -999; if (vb === null) vb = -999;
+    const r = va < vb ? -1 : va > vb ? 1 : 0;
+    return state.sortDir === 'asc' ? r : -r;
+  });
+
+  const th = (col, label) => {
+    const cls = state.sortCol === col ? `sort-${state.sortDir}` : '';
+    return `<th data-sort="${col}" class="${cls}">${label}</th>`;
+  };
+
+  const tableRows = sorted.map(r => {
+    const venue = state.venues[r.vk];
+    const needed = calcStaffNeeded(r.sales, target, avgRate);
+    const delta  = needed - r.staff;
+    const deltaStr = delta === 0
+      ? `<span style="color:var(--mid)">—</span>`
+      : delta > 0
+        ? `<span class="staff-delta delta-up">+${delta} needed</span>`
+        : `<span class="staff-delta delta-down">${delta} excess</span>`;
+
+    const barW = r.wagePct !== null ? Math.min((r.wagePct / (target * 2)) * 100, 100) : 0;
+
+    return `<tr>
+      <td class="text">${r.date}</td>
+      <td class="venue-col">
+        <span style="display:inline-flex;align-items:center;gap:6px;">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:${venue.color};flex-shrink:0;"></span>
+          ${venue.name}
+        </span>
+      </td>
+      <td>${minToTime(r.slot)}–${minToTime(r.slot+30)}</td>
+      <td style="text-align:right;">${fmt$(r.sales)}</td>
+      <td style="text-align:right;">${fmt$(r.wages)}</td>
+      <td>
+        <div class="pct-cell">
+          <div class="mini-bar"><div class="mini-bar-fill" style="width:${barW}%;background:${pctColor(r.cls)};"></div></div>
+          <span class="pct-val">${r.wagePct !== null ? fmtPct(r.wagePct) : '—'}</span>
+        </div>
+      </td>
+      <td style="text-align:center;">${r.staff}</td>
+      <td style="text-align:center;"><span class="staff-suggest">${needed}</span></td>
+      <td>${deltaStr}</td>
+      <td>${pctBadge(r.cls)}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="notice notice-info" style="margin:12px 12px 0;">
+      💡 <strong>Suggested staff</strong> = max headcount to keep wage % ≤ ${target}% at $${avgRate}/hr avg rate (30-min slot). Actual costs come from Deputy.
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          ${th('date','Date')}
+          ${th('vk','Venue')}
+          ${th('slot','Interval')}
+          ${th('sales','Sales')}
+          ${th('wages','Wages')}
+          ${th('wagePct','Wage %')}
+          <th>Staff on</th>
+          <th>Max staff</th>
+          <th>Adjustment</th>
+          <th>Status</th>
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>`;
+}
+
+function refreshIntervalTable() {
+  const tab = $('tab-intervals');
+  if (tab) tab.innerHTML = renderIntervalTable();
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      if (state.sortCol === col) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+      else { state.sortCol = col; state.sortDir = 'asc'; }
+      refreshIntervalTable();
+    });
+  });
+}
+
+function calcStaffNeeded(sales, targetPct, avgRate) {
+  if (!sales || sales <= 0) return 0;
+  const maxWages = sales * (targetPct / 100);
+  const costPerHalfHour = avgRate / 2;
+  return Math.max(0, Math.floor(maxWages / costPerHalfHour));
+}
+
+/* ── OPTIMISER ── */
+function renderOptimiser() {
+  const { rows, venueKeys, target, buffer, avgRate } = state.results;
+
+  const blocks = venueKeys.map(vk => {
+    const venue = state.venues[vk];
+    const vRows = rows.filter(r => r.vk === vk);
+
+    if (!vRows.length) return `<div style="color:var(--mid);font-size:12px;">No data for ${venue.name}.</div>`;
+
+    // Group by date then slot
+    const byDate = {};
+    vRows.forEach(r => {
+      if (!byDate[r.date]) byDate[r.date] = [];
+      byDate[r.date].push(r);
+    });
+
+    const dateBlocks = Object.keys(byDate).sort().map(date => {
+      const dayRows = byDate[date].sort((a,b) => a.slot - b.slot);
+      const tRows = dayRows.map(r => {
+        const needed = calcStaffNeeded(r.sales, target, avgRate);
+        const delta  = needed - r.staff;
+        let adjHtml;
+        if (delta === 0) adjHtml = `<span class="adj-ok">✓ Right-sized</span>`;
+        else if (delta > 0) adjHtml = `<span class="adj-up">▲ Add ${delta}</span>`;
+        else adjHtml = `<span class="adj-down">▼ Remove ${Math.abs(delta)}</span>`;
+
+        return `<tr>
+          <td>${minToTime(r.slot)}–${minToTime(r.slot+30)}</td>
+          <td style="text-align:right;">${fmt$(r.sales)}</td>
+          <td style="text-align:right;">${fmt$(r.wages)}</td>
+          <td style="text-align:right;">${r.wagePct !== null ? fmtPct(r.wagePct) : '—'}</td>
+          <td style="text-align:center;">${r.staff}</td>
+          <td style="text-align:center;" class="staff-suggest">${needed}</td>
+          <td>${adjHtml}</td>
+        </tr>`;
+      }).join('');
+
+      return `
+        <div style="margin-bottom:4px;font-size:11px;font-weight:600;color:var(--mid);padding:8px 12px;background:var(--paper);border-top:1px solid var(--rule);">
+          ${new Date(date+'T12:00:00').toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short',year:'numeric'})}
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th>Interval</th><th>Sales</th><th>Wages</th><th>Wage %</th>
+              <th style="text-align:center;">On roster</th>
+              <th style="text-align:center;">Max to hit ${target}%</th>
+              <th>Recommendation</th>
+            </tr></thead>
+            <tbody>${tRows}</tbody>
+          </table>
+        </div>`;
+    }).join('');
+
+    return `
+      <div style="margin-bottom:24px;">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 0 8px;">
+          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${venue.color};"></span>
+          <strong style="font-size:14px;">${venue.name}</strong>
+        </div>
+        <div class="table-card" style="overflow:hidden;">
+          ${dateBlocks}
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="notice notice-warn" style="margin-bottom:16px;">
+      ⚠️ <strong>Note:</strong> "Max staff to hit ${target}%" is a ceiling, not a schedule — it tells you how many people you can afford at $${avgRate}/hr before you breach your wage target. Use it to sense-check your roster before publishing.
+    </div>
+    ${blocks}`;
+}
+
+/* ── BY VENUE ── */
+function renderByVenue() {
+  const { rows, venueKeys, target, buffer } = state.results;
+
+  const cards = venueKeys.map(vk => {
+    const venue = state.venues[vk];
+    const vRows = rows.filter(r => r.vk === vk);
+    const sales  = vRows.reduce((s,r) => s + r.sales, 0);
+    const wages  = vRows.reduce((s,r) => s + r.wages, 0);
+    const pct    = sales > 0 ? (wages / sales) * 100 : null;
+    const cls    = pctClass(pct, target, buffer);
+    const over   = vRows.filter(r => r.cls === 'over').length;
+    const warn   = vRows.filter(r => r.cls === 'warn').length;
+    const on     = vRows.filter(r => r.cls === 'on').length;
+
+    const barW = pct !== null ? Math.min((pct / (target * 2)) * 100, 100) : 0;
+
+    return `
+      <div style="background:var(--white);border:1px solid var(--rule);border-radius:var(--radius);padding:16px;min-width:200px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${venue.color};"></span>
+          <strong style="font-size:13px;">${venue.name}</strong>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mid);margin-bottom:2px;">Sales</div>
+            <div style="font-family:var(--mono);font-size:18px;font-weight:600;">${fmt$(sales)}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mid);margin-bottom:2px;">Wages</div>
+            <div style="font-family:var(--mono);font-size:18px;font-weight:600;">${fmt$(wages)}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mid);margin-bottom:2px;">Wage %</div>
+            <div style="font-family:var(--mono);font-size:22px;font-weight:600;color:${pctColor(cls)};">${pct !== null ? fmtPct(pct) : '—'}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mid);margin-bottom:2px;">Target</div>
+            <div style="font-family:var(--mono);font-size:22px;font-weight:600;color:var(--mid);">${target}%</div>
+          </div>
+        </div>
+        <div style="height:4px;background:var(--rule);border-radius:2px;overflow:hidden;margin-bottom:10px;">
+          <div style="height:100%;width:${barW}%;background:${pctColor(cls)};border-radius:2px;"></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-on">✓ ${on} slots</span>
+          ${warn > 0 ? `<span class="badge badge-warn">⚠ ${warn} near</span>` : ''}
+          ${over > 0 ? `<span class="badge badge-over">✗ ${over} over</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;">
+      ${cards}
+    </div>`;
+}
+
+/* ═══════════════════════════════════════════
+   SAVE / RESTORE CONFIG
+═══════════════════════════════════════════ */
+window.addEventListener('DOMContentLoaded', () => {
+  // Restore saved install (not the token — security)
+  const saved = localStorage.getItem('dwa_install');
+  if (saved) $('installName').value = saved;
+
+  $('installName').addEventListener('change', () => {
+    localStorage.setItem('dwa_install', $('installName').value.trim());
+  });
+
+  // Restore settings
+  ['targetWage','warnBuffer','avgRate','dataSource'].forEach(id => {
+    const val = localStorage.getItem('dwa_' + id);
+    if (val) $(id).value = val;
+    $(id).addEventListener('change', () => localStorage.setItem('dwa_' + id, $(id).value));
+  });
+
+  setQuick('today');
+});
+</script>
+
+
+</body></html>
