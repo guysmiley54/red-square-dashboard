@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sales Explorer</title>
+<style>
+  :root{
+    --ink:#141414; --paper:#f7f6f3; --card:#fff; --line:#e4e2dc; --dim:#6b6862;
+    --red:#c8102e; --up:#1a7f4b; --down:#c8102e; --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  code,.mono,.num,.v{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+  header{background:var(--ink);color:#fff;padding:14px 20px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:10}
+  header .dot{width:14px;height:14px;background:var(--red);border-radius:3px;flex:none}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .bld{font-size:11px;color:#8d8b86;font-family:ui-monospace,monospace}
+  header .sp{margin-left:auto;display:flex;gap:8px}
+  header button{background:#fff;color:var(--ink);border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer}
+  #filters{background:#fff;border-bottom:1px solid var(--line);padding:10px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:52px;z-index:9}
+  .chip{font-size:12px;font-weight:600;padding:7px 13px;border-radius:99px;border:1.5px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;white-space:nowrap}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+  .wrap{max-width:1080px;margin:0 auto;padding:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+  .label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
+  .statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .stat{border:1px solid var(--line);border-radius:10px;padding:14px}
+  .stat .v{font-size:22px;font-weight:700}
+  .stat .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-top:3px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--line)}
+  td{padding:8px;border-bottom:1px solid var(--line)}
+  tr:last-child td{border-bottom:none}
+  .num{text-align:right}
+  .bar{height:8px;background:var(--red);border-radius:99px;min-width:2px}
+  .barwrap{background:var(--line);border-radius:99px;overflow:hidden}
+  input[type=search]{width:100%;font-size:15px;padding:11px 13px;border:1.5px solid var(--line);border-radius:10px;margin-bottom:10px}
+  input[type=search]:focus{outline:none;border-color:var(--red)}
+  .muted{color:var(--dim);font-size:12px}
+  .note{background:#fff8e5;border:1px solid #f0dca8;border-radius:10px;padding:12px 14px;font-size:13px;margin-bottom:16px}
+  .chart{display:flex;align-items:flex-end;gap:3px;height:170px;padding-top:10px}
+  .chart .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+  .chart .bx{width:100%;background:var(--red);border-radius:3px 3px 0 0;min-height:1px}
+  .chart .lb{font-size:9px;color:var(--dim);white-space:nowrap;font-family:ui-monospace,monospace}
+  .loading{padding:60px 20px;text-align:center;color:var(--dim)}
+  @media(max-width:640px){ .hide-sm{display:none} .wrap{padding:12px} }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot"></div>
+  <h1>Sales Explorer</h1>
+  <span class="bld" id="bld"></span>
+  <div class="sp"><button onclick="load(true)">↻ refresh</button></div>
+</header>
+<div id="filters"></div>
+<div class="wrap"><div id="app"><div class="loading">Loading sales feed…</div></div></div>
+
+<script>
+const SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
+const VENUES = ["Red Square Cambridge","Red Square Glenorchy","Luma Kitchen"];
+
+let ROWS=[];                 // every feed row
+let HAS_TIME=false;          // does the timestamp column carry a clock time?
+let F={venue:"", day:"", q:""};
+
+const money=n=>(n<0?"-$":"$")+Math.abs(+n||0).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const vShort=v=>String(v||"").replace("Red Square ","RS ").replace("Luma Kitchen","Luma");
+
+// gviz hands back a variety of date shapes; parse them all into a Date or null.
+function parseTs(v){
+  if(v==null||v==="") return null;
+  const s=String(v).trim();
+  let m=s.match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)$/);
+  if(m) return new Date(+m[1],+m[2],+m[3],+(m[4]||0),+(m[5]||0),+(m[6]||0));
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if(m) return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6]||0));
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[, ]+(\d{1,2}):(\d{2}))?/); // dd/mm/yyyy
+  if(m) return new Date(+m[3],+m[2]-1,+m[1],+(m[4]||0),+(m[5]||0));
+  const d=new Date(s); return isNaN(d)?null:d;
+}
+const dayOf=d=>d?d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"):"";
+const fmtDay=k=>{const [y,m,d]=k.split("-");return d+"/"+m+"/"+y;};
+
+function parseCsv(text){
+  const rows=[];let row=[],cur="",q=false;
+  for(let i=0;i<text.length;i++){const ch=text[i];
+    if(q){ if(ch==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; }
+    else if(ch==='"') q=true;
+    else if(ch===",") {row.push(cur);cur="";}
+    else if(ch==="\n"||ch==="\r"){ if(ch==="\r"&&text[i+1]==="\n")i++; row.push(cur);rows.push(row);row=[];cur=""; }
+    else cur+=ch;}
+  if(cur!==""||row.length){row.push(cur);rows.push(row);}
+  return rows;
+}
+
+async function load(force){
+  document.getElementById("app").innerHTML='<div class="loading">Loading sales feed…</div>';
+  const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=SalesFeed`+(force?`&_=${Date.now()}`:"");
+  let text;
+  try{ text=await (await fetch(url)).text(); }
+  catch(e){ document.getElementById("app").innerHTML=`<div class="card"><b>Couldn't load the feed.</b><div class="muted" style="margin-top:6px">Check the sheet is shared as "Anyone with the link can view".</div></div>`; return; }
+  const grid=parseCsv(text.trim());
+  const head=(grid.shift()||[]).map(h=>h.trim().toLowerCase());
+  const ix=n=>head.indexOf(n);
+  ROWS=grid.map(r=>{
+    const ts=parseTs(r[ix("timestamp")]);
+    return {
+      ts, day:String(r[ix("date")]||"").trim()||dayOf(ts),
+      venue:String(r[ix("venue")]||"").trim(),
+      category:String(r[ix("category")]||"").trim(),
+      department:String(r[ix("department")]||"").trim(),
+      item:String(r[ix("item")]||"").trim(),
+      qty:+String(r[ix("qty")]||0).replace(/[^0-9.\-]/g,"")||0,
+      sales:+String(r[ix("sales")]||0).replace(/[^0-9.\-]/g,"")||0
+    };
+  }).filter(r=>r.item&&r.day);
+  // Time-of-day views only make sense if timestamps actually carry a clock time.
+  HAS_TIME = ROWS.some(r=>r.ts && (r.ts.getHours()||r.ts.getMinutes()));
+  const days=[...new Set(ROWS.map(r=>r.day))].sort();
+  if(!F.day||days.indexOf(F.day)===-1) F.day=days[days.length-1]||"";
+  document.getElementById("bld").textContent=ROWS.length.toLocaleString()+" rows";
+  renderFilters(days); render();
+}
+
+function renderFilters(days){
+  const f=document.getElementById("filters");
+  f.innerHTML=
+    `<span class="chip ${F.venue===""?"on":""}" onclick="setF('venue','')">All venues</span>`+
+    VENUES.map(v=>`<span class="chip ${F.venue===v?"on":""}" onclick="setF('venue','${v}')">${esc(vShort(v))}</span>`).join("")+
+    `<span class="sep"></span>`+
+    days.slice(-7).map(d=>`<span class="chip ${F.day===d?"on":""}" onclick="setF('day','${d}')">${fmtDay(d)}</span>`).join("")+
+    (days.length>1?`<span class="chip ${F.day==="*"?"on":""}" onclick="setF('day','*')">All days</span>`:"");
+}
+function setF(k,v){ F[k]=v; renderFilters([...new Set(ROWS.map(r=>r.day))].sort()); render(); }
+
+function scoped(){
+  return ROWS.filter(r=>(!F.venue||r.venue===F.venue)&&(F.day==="*"||r.day===F.day));
+}
+
+function render(){
+  const rows=scoped();
+  const app=document.getElementById("app");
+  if(!rows.length){ app.innerHTML=`<div class="card">No sales rows for this selection.</div>`; return; }
+
+  const total=rows.reduce((s,r)=>s+r.sales,0);
+  const units=rows.reduce((s,r)=>s+(r.sales>0?r.qty:0),0);
+  const items=new Set(rows.filter(r=>r.sales>0).map(r=>r.item)).size;
+  const avg=units?total/units:0;
+
+  // ---- by venue
+  const byVenue={};
+  rows.forEach(r=>{byVenue[r.venue]=(byVenue[r.venue]||0)+r.sales;});
+  const venueRows=Object.entries(byVenue).sort((a,b)=>b[1]-a[1]);
+
+  // ---- by category
+  const byCat={};
+  rows.forEach(r=>{if(r.sales)byCat[r.category]=(byCat[r.category]||0)+r.sales;});
+  const catRows=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+
+  // ---- top items
+  const byItem={};
+  rows.forEach(r=>{if(!r.sales&&!r.qty)return;
+    const k=r.item; const o=byItem[k]||(byItem[k]={item:r.item,cat:r.category,qty:0,sales:0});
+    o.qty+=r.qty; o.sales+=r.sales;});
+  const itemRows=Object.values(byItem).filter(i=>i.sales>0).sort((a,b)=>b.sales-a.sales);
+
+  // ---- time of day (only when timestamps carry a clock time)
+  let chart="";
+  if(HAS_TIME){
+    const byHour={};
+    rows.forEach(r=>{ if(!r.ts||!r.sales)return; const h=r.ts.getHours(); byHour[h]=(byHour[h]||0)+r.sales; });
+    const hrs=Object.keys(byHour).map(Number).sort((a,b)=>a-b);
+    if(hrs.length){
+      const lo=Math.min(...hrs), hi=Math.max(...hrs), max=Math.max(...Object.values(byHour));
+      const cols=[];
+      for(let h=lo;h<=hi;h++){
+        const v=byHour[h]||0;
+        cols.push(`<div class="col" title="${h}:00 — ${money(v)}">
+          <div class="bx" style="height:${max?Math.round(v/max*140):1}px"></div>
+          <div class="lb">${h}</div></div>`);
+      }
+      const peak=hrs.reduce((m,h)=>byHour[h]>(byHour[m]||0)?h:m,hrs[0]);
+      chart=`<div class="card"><div class="label">Sales by hour${F.day==="*"?" — all days combined":""}</div>
+        <div class="chart">${cols.join("")}</div>
+        <div class="muted" style="margin-top:8px">Busiest hour: <b>${peak}:00–${peak+1}:00</b> at ${money(byHour[peak])}.</div>
+      </div>`;
+    }
+  }
+
+  const timeNote = HAS_TIME ? "" : `<div class="note"><b>Time-of-day view is waiting on data.</b>
+      The timestamps in the feed currently carry a date but no clock time, so hourly sales can't be charted yet.
+      Once the fixed processor has run for a while, this page will show the hourly curve automatically.</div>`;
+
+  const q=F.q.toLowerCase();
+  const shown=q?itemRows.filter(i=>i.item.toLowerCase().includes(q)||i.cat.toLowerCase().includes(q)):itemRows;
+  const maxItem=itemRows.length?itemRows[0].sales:1;
+
+  app.innerHTML=`
+    ${timeNote}
+    <div class="card">
+      <div class="label">${F.day==="*"?"All days":fmtDay(F.day)}${F.venue?" · "+esc(vShort(F.venue)):" · all venues"}</div>
+      <div class="statgrid">
+        <div class="stat"><div class="v">${money(total)}</div><div class="k">Sales</div></div>
+        <div class="stat"><div class="v">${units.toLocaleString()}</div><div class="k">Items sold</div></div>
+        <div class="stat"><div class="v">${money(avg)}</div><div class="k">Avg item price</div></div>
+        <div class="stat"><div class="v">${items}</div><div class="k">Distinct products</div></div>
+      </div>
+    </div>
+
+    ${chart}
+
+    ${venueRows.length>1?`<div class="card"><div class="label">By venue</div>
+      <table><tbody>${venueRows.map(([v,s])=>`<tr>
+        <td style="width:34%"><b>${esc(vShort(v))}</b></td>
+        <td><div class="barwrap"><div class="bar" style="width:${Math.round(s/venueRows[0][1]*100)}%"></div></div></td>
+        <td class="num" style="width:120px"><b>${money(s)}</b></td>
+        <td class="num muted" style="width:60px">${total?Math.round(s/total*100):0}%</td>
+      </tr>`).join("")}</tbody></table></div>`:""}
+
+    <div class="card"><div class="label">By category</div>
+      <table><tbody>${catRows.map(([c,s])=>`<tr>
+        <td style="width:34%">${esc(c)}</td>
+        <td><div class="barwrap"><div class="bar" style="width:${Math.round(s/catRows[0][1]*100)}%"></div></div></td>
+        <td class="num" style="width:120px"><b>${money(s)}</b></td>
+        <td class="num muted" style="width:60px">${total?Math.round(s/total*100):0}%</td>
+      </tr>`).join("")}</tbody></table></div>
+
+    <div class="card">
+      <div class="label">Products (<span id="pc">${shown.length}</span>) — by revenue</div>
+      <input type="search" id="q" placeholder="Search products…" value="${esc(F.q)}">
+      <table><thead><tr><th>Product</th><th class="hide-sm">Category</th><th class="num">Qty</th><th class="num hide-sm">Avg $</th><th class="num">Revenue</th></tr></thead>
+      <tbody>${shown.slice(0,150).map(i=>`<tr>
+        <td><b>${esc(i.item)}</b></td>
+        <td class="hide-sm muted">${esc(i.cat)}</td>
+        <td class="num">${i.qty.toLocaleString()}</td>
+        <td class="num hide-sm">${money(i.qty?i.sales/i.qty:0)}</td>
+        <td class="num"><b>${money(i.sales)}</b></td>
+      </tr>`).join("")}</tbody></table>
+      ${shown.length>150?`<div class="muted" style="margin-top:8px">Showing the top 150 of ${shown.length}. Search to narrow.</div>`:""}
+    </div>`;
+
+  const qb=document.getElementById("q");
+  qb.addEventListener("input",()=>{ F.q=qb.value; const pos=qb.selectionStart; render();
+    const nb=document.getElementById("q"); nb.focus(); nb.setSelectionRange(pos,pos); });
+}
+
+load();
+</script>
+</body>
+</html>
