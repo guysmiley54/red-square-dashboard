@@ -421,14 +421,19 @@ async function loadAll(){
        there. If the feed failed or is empty the tab stands alone, so a broken feed
        degrades to the old numbers rather than showing zero sales. */
     const feedLive = Array.isArray(feedDaily) && feedDaily.length>0;
+    const weeklyLive = Array.isArray(weeklyRows) && weeklyRows.length>0;
     const cutover = (feedLive && SALES_CUTOVER) ? gvizDate(SALES_CUTOVER) : null;
+    /* The Sales tab holds the SAME weekly wage figures as the form sheets, dated on
+       week ending. Counting both double-counted wages. When the form sheets load they
+       win outright — they're the source the forms write to — and the tab contributes
+       wages only as a fallback if those sheets are unreachable. */
     SALES=salesRows.map(r=>{
       const d=gvizDate(r.date);
       const useTabSales = !cutover || !d || d<cutover;
       return {
         date:d, venue:r.venue||"",
         sales: useTabSales ? (+String(r.sales||"").replace(/[^0-9.\-]/g,"")||0) : 0,
-        wages:+String(r.wages||"").replace(/[^0-9.\-]/g,"")||0
+        wages: weeklyLive ? 0 : (+String(r.wages||"").replace(/[^0-9.\-]/g,"")||0)
       };
     }).filter(r=>r.date);
     /* Weekly form data: wages always, sales only before the cutover so the feed
@@ -1056,7 +1061,7 @@ function renderReports(){
       </div>
       <div style="font-size:11px;color:var(--dim);margin-top:6px">
         COGS = ${money(cogsSpend)} of ${money(tot.spend)} spend; ${money(nonCogsSpend)} excluded as non-COGS (cleaning, equipment, energy, overheads and similar).
-        ${SALES_SOURCE?`<br>Sales from the ImPOS feed from ${fmtD(SALES_SOURCE)}; earlier sales and all wages from the Sales tab.`:""}
+        ${SALES_SOURCE?`<br>Sales from the ImPOS feed from ${fmtD(SALES_SOURCE)}; earlier sales and all wages from the weekly reporting sheets, spread evenly across each week. Wages arrive the Monday after week end, so the current week shows none.`:""}
         ${unmappedList.length?`<br><b style="color:var(--red)">Unmapped:</b> ${unmappedList.map(([g,v])=>esc(g)+" "+money(v)).join(", ")} — counted in COGS; assign a group in supplier settings if that's wrong.`:""}
       </div>
     </div>`:`
