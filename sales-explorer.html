@@ -1,0 +1,1305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sales Explorer</title>
+<style>
+  :root{
+    --ink:#141414; --paper:#f7f6f3; --card:#fff; --line:#e4e2dc; --dim:#6b6862;
+    --red:#c8102e; --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .num,.v,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+  header{background:var(--ink);color:#fff;padding:14px 20px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:10}
+  header .dot{width:14px;height:14px;background:var(--red);border-radius:3px;flex:none}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .bld{font-size:11px;color:#8d8b86;font-family:ui-monospace,monospace}
+  header .sp{margin-left:auto;display:flex;gap:8px}
+  header button{background:#fff;color:var(--ink);border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer}
+  #filters{background:#fff;border-bottom:1px solid var(--line);padding:10px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:52px;z-index:9}
+  .chip{font-size:12px;font-weight:600;padding:7px 13px;border-radius:99px;border:1.5px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;white-space:nowrap;user-select:none}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .chip.nav{padding:7px 11px;font-family:ui-monospace,monospace}
+  .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+  .rangelbl{font-size:12px;color:var(--dim);font-family:ui-monospace,monospace;margin-left:2px}
+  .wrap{max-width:1120px;margin:0 auto;padding:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+  .label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .venuegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+  .vcard{border:1px solid var(--line);border-radius:12px;padding:16px;cursor:pointer}
+  .vcard:hover{border-color:var(--ink)}
+  .vcard.on{border-color:var(--ink);border-width:2px;padding:15px}
+  .vcard .nm{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--dim);font-weight:700}
+  .vcard .v{font-size:25px;font-weight:700;margin-top:6px}
+  .delta{font-size:12px;font-weight:700;margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .delta .vs{font-weight:400;opacity:.7;font-family:inherit}
+  .delta.up{color:#1a7f37}
+  .delta.down{color:var(--red)}
+  .vcard.tot .delta.up{color:#6ee7a0}
+  .vcard.tot .delta.down{color:#ff9aa8}
+  .vcard.tot .delta.muted{color:#9a9891}
+  .vcard .sub{font-size:11px;color:var(--dim);margin-top:3px}
+  .vcard.tot{background:var(--ink);color:#fff;border-color:var(--ink);cursor:default}
+  .vcard.tot .nm,.vcard.tot .sub{color:#b8b6b0}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--line)}
+  td{padding:8px;border-bottom:1px solid var(--line)}
+  tr:last-child td{border-bottom:none}
+  tr.click{cursor:pointer}
+  tr.click:hover td{background:#faf9f7}
+  .num{text-align:right}
+  .bar{height:8px;background:var(--red);border-radius:99px;min-width:2px}
+  .barwrap{background:var(--line);border-radius:99px;overflow:hidden}
+  input[type=search]{width:100%;font-size:15px;padding:11px 13px;border:1.5px solid var(--line);border-radius:10px;margin-bottom:10px}
+  input[type=search]:focus{outline:none;border-color:var(--red)}
+  .muted{color:var(--dim);font-size:12px}
+  .note{background:#fff8e5;border:1px solid #f0dca8;border-radius:10px;padding:12px 14px;font-size:13px;margin-bottom:16px}
+  .chart{display:flex;align-items:flex-end;gap:3px;height:170px;padding-top:10px}
+  .chart .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0;cursor:pointer}
+  .chart .col:hover .pair{opacity:.75}
+  .chart .col.dim{opacity:.28}
+  .chart .col.sel .lb{color:var(--ink);font-weight:700}
+  tfoot tr.tot td{border-top:2px solid var(--ink);border-bottom:0;padding-top:10px}
+  tr.selrow{background:#faf9f7}
+  tr.selrow td{font-weight:700}
+  td.free{color:#b8860b}
+  .slotbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding:10px 12px;background:#faf9f7;border:1px solid var(--line);border-radius:10px;font-size:13px}
+  .slotbar .big{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;font-weight:700;font-size:17px}
+  .slotbar .vs{color:var(--dim);font-size:12px}
+  .chart .pair{display:flex;align-items:flex-end;justify-content:center;gap:2px;width:100%}
+  .chart .bx{flex:1;min-width:1px;background:var(--red);border-radius:3px 3px 0 0;min-height:1px}
+  .chart .bx.prev{background:#d9d6cf}
+  .chart .lb{font-size:9px;color:var(--dim);white-space:nowrap;font-family:ui-monospace,monospace;height:12px}
+  /* Sortable table headers. The arrow only shows on the active column so the header row
+     doesn't turn into a row of noise. */
+  th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+  th.sortable:hover{color:var(--ink)}
+  th.sorted{color:var(--ink)}
+  th .ar{font-size:8px}
+  /* Metrics strip under a chart. */
+  .metrics{display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+  .metric .k{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+  .metric .val{font-size:19px;font-weight:700;margin-top:3px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+  .metric .sub{font-size:11px;color:var(--dim);margin-top:2px}
+  .up{color:#1a7f37}.down{color:var(--red)}
+  .legend{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0;font-weight:400}
+  .legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+  .loading{padding:60px 20px;text-align:center;color:var(--dim)}
+  @media(max-width:700px){ .hide-sm{display:none} .wrap{padding:12px} }
+  @media print{
+    header,#filters,#reportpanel,.chip,#q{display:none !important}
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    /* Never break-inside:avoid a whole card - one taller than a page gets clipped to the
+       first page rather than flowing. Keep small blocks intact and let tables run. */
+    .card{border-color:#ccc;margin-bottom:10px;break-inside:auto}
+    .metrics,.label,.chart,.venuegrid{break-inside:avoid;page-break-inside:avoid}
+    thead{display:table-header-group}
+    tfoot{display:table-footer-group}
+    tr{break-inside:avoid;page-break-inside:avoid}
+    .hide-sm{display:table-cell !important}
+    /* Sections switched off in the report panel */
+    .no-venues [data-sec="venues"],.no-chart [data-sec="chart"],.no-cats [data-sec="cats"],
+    .no-products [data-sec="products"],.no-waste [data-sec="waste"]{display:none !important}
+    @page{margin:14mm}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot"></div>
+  <h1>Sales Explorer</h1>
+  <span class="bld" id="bld"></span>
+  <div class="sp">
+    <button onclick="togglePriv()" id="privbtn">&#128274; private</button>
+    <button onclick="toggleReport()">&#9744; report</button>
+    <button onclick="load(true)">&#8635; refresh</button>
+  </div>
+</header>
+<div id="filters"></div>
+<div class="wrap"><div id="app"><div class="loading">Loading sales feed&hellip;</div></div></div>
+
+<script>
+const SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
+// Display order is deliberate: Cambridge, Luma, Glenorchy.
+const VENUES = ["Red Square Cambridge","Luma Kitchen","Red Square Glenorchy"];
+// Tab in the same spreadsheet holding the item name map. Missing tab = no mapping.
+const ITEM_TAB = "ItemMap";
+// Tab holding the analytics overrides: from / group / type / service. "from" is a
+// DEPARTMENT name or an ITEM name, and item rows beat department rows. Nothing here
+// changes the feed - it only changes how rows are grouped for analysis, so the SalesFeed
+// tab always keeps exactly what ImPOS sent.
+const OVER_TAB = "Overrides";
+// Optional fallback: if matching by tab NAME fails (a stray space, a rename), put the tab's
+// gid here and it will be used instead. Get it by clicking the tab and reading #gid=NNN
+// off the end of the browser URL. Leave as "" to match by name.
+const ITEM_GID = "";
+const OVER_GID = "";
+// Two groups are lanes rather than categories. Modifiers are real sales (an extra shot is
+// revenue) so they stay in. Kitchen requests are NOT sales at all - staff ring them up to
+// send a prep message to the kitchen printer - so they are pulled out of sales AND out of
+// wastage, and reported separately.
+const LANE_MODIFIER = "Modifiers";
+// Perishable groups: a $0 line here is food in the bin. Elsewhere a $0 line usually is not
+// - Coffee & Tea is dominated by the 100% Coffee Loyalty discount, which costs margin but
+// is a deliberate give-away to a paying regular, not waste.
+const PERISHABLE = ["Sandwiches","Cakes & Sweets","Hot Takeaway","Grab & Go"];
+const LOYALTY_GROUP = "Coffee & Tea";
+function isPerishable(g){ return PERISHABLE.indexOf(g)>-1; }
+const LANE_KITCHEN  = "Kitchen requests";
+const VCOLOUR = {"Red Square Cambridge":"#c8102e","Luma Kitchen":"#2d6a6f","Red Square Glenorchy":"#c97a1a"};
+
+// ImPOS category names differ per venue for what is the same thing: Glenorchy encodes
+// product type AND service mode in one field (Food D/H), Cambridge and Luma split food by
+// service but lump every drink into one Beverage bucket. Mapping both onto a shared pair
+// of fields is what makes the venue columns comparable.
+//
+// "Dine In" and "Takeway Food" are read as FOOD because those venues bucket all drinks
+// separately under Beverage. If that ever stops being true, fix it here.
+// Keys are lowercased; anything not listed falls through to the raw name and is listed
+// under the category table so it can be added rather than silently vanishing.
+const CAT_MAP = {
+  "beverage":      {type:"Beverage",  mode:"Not specified"},
+  "beverage d/h":  {type:"Beverage",  mode:"Dine in"},
+  "beverage t/a":  {type:"Beverage",  mode:"Takeaway"},
+  "food d/h":      {type:"Food",      mode:"Dine in"},
+  "dine in":       {type:"Food",      mode:"Dine in"},
+  "food t/a":      {type:"Food",      mode:"Takeaway"},
+  "takeway food":  {type:"Food",      mode:"Takeaway"},
+  "takeaway food": {type:"Food",      mode:"Takeaway"},
+  // Luma runs its own category names for the same things. They roll up to plain Food and
+  // Beverage - the venue column already tells you it's Luma, so carrying LUMA in the
+  // category as well just splits the totals for no gain.
+  "luma food d/h":        {type:"Food",     mode:"Dine in"},
+  "luma beverage dine in":{type:"Beverage", mode:"Dine in"},
+  "sundries":      {type:"Sundries",  mode:"Not applicable"},
+  // Glenorchy emits a handful of rows under a bare "ImPOS" category - system or test
+  // entries rather than real sales. Kept visible rather than hidden.
+  "impos":         {type:"Uncategorised", mode:"Not specified"},
+  "no cat.":       {type:"Uncategorised", mode:"Not specified"}
+};
+
+let ROWS=[], HAS_TIME=false, UNMAPPED=[];
+let ITEM_MAP={}, ITEM_MAP_COUNT=0;
+let OVER_ITEM={}, OVER_DEPT={}, OVER_COUNT=0, KITCHEN_ROWS=0;
+let ITEM_TAB_FOUND=false, OVER_TAB_FOUND=false, OVER_DIAG="";
+// period: day | week | month.  offset: 0 = current, -1 = previous, +1 = next.
+// gran: minutes per bar on the single-day chart (60 or 15).
+// compare: split the chart bars by venue.
+// group: how categories are rolled up - type | mode | raw (raw = exactly as ImPOS sends).
+// sort: which product column is driving the table, and which direction (1 asc, -1 desc).
+// slot: the chart bar tapped, as {kind:"time"|"day", key}. Filters the tables below the
+// chart but never the chart itself, so you keep the shape of the day while drilling in.
+// venues: [] means all. Multiple can be selected - Cambridge and Luma share a building,
+// so their combined trade is a real number Adrian needs, not two numbers to add up.
+// item: the product drilled into from the table.
+// wasteOpen: the wastage card is collapsed by default - it matters weekly, not every time
+// you open the page, and it was pushing the product search below the fold.
+// pars: optional suggested-par columns on the products table.
+// show: which sections go into a printed report.
+let F={period:"day", offset:0, venues:[], cat:"", q:"", gran:60, compare:false, wsort:{k:"value",d:-1},
+       wasteOpen:false, report:false,
+       // Which optional product columns are on. Default is the short view Adrian asked
+       // for: Product, Sold, per day, Revenue. Everything else is opt-in.
+       cols:{perDay:true, par:false, free:false, avg:false},
+       // Sections collapsed on screen. Wastage starts collapsed; the rest start open.
+       hide:{venues:false, chart:false, cats:false, products:false},
+       // Private mode: only the venues you have selected show their money. For handing a
+       // screen or a printout to one venue's manager without exposing the others.
+       priv:false,
+       show:{venues:true, chart:true, cats:true, products:true, waste:true},
+       group:"type", grp:"", slot:null, item:"", sort:{k:"sales", d:-1}};
+// What the last render actually put on screen, so the CSV exports match it exactly
+// rather than recomputing the filters and risking drift.
+let LAST={drill:[], items:[]};
+
+const money=n=>(n<0?"-$":"$")+Math.abs(+n||0).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+const money0=n=>(n<0?"-$":"$")+Math.round(Math.abs(+n||0)).toLocaleString("en-AU");
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const vShort=v=>String(v||"").replace("Red Square ","RS ").replace("Luma Kitchen","Luma");
+
+function parseTs(v){
+  if(v==null||v==="") return null;
+  const s=String(v).trim();
+  let m=s.match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)$/);
+  if(m) return new Date(+m[1],+m[2],+m[3],+(m[4]||0),+(m[5]||0),+(m[6]||0));
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if(m) return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6]||0));
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[, ]+(\d{1,2}):(\d{2}))?/);
+  if(m) return new Date(+m[3],+m[2]-1,+m[1],+(m[4]||0),+(m[5]||0));
+  const d=new Date(s); return isNaN(d)?null:d;
+}
+const dkey=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const fmtDay=k=>{const p=String(k).split("-");return p[2]+"/"+p[1]+"/"+p[0];};
+const fmtShort=k=>{const p=String(k).split("-");return p[2]+"/"+p[1];};
+
+// The visible window. Always anchored on TODAY and shifted by offset, so the app opens
+// on the current day and the arrows step back through history. `back` shifts a further
+// whole period earlier - back=1 is the equivalent previous day/week/month, which is what
+// the comparison toggle draws against.
+function windowFor(back){
+  const off=F.offset-(back||0);
+  const now=new Date(); now.setHours(0,0,0,0);
+  if(F.period==="day"){
+    const d=new Date(now); d.setDate(d.getDate()+off);
+    return {from:dkey(d), to:dkey(d), label:fmtDay(dkey(d)), unit:"day"};
+  }
+  if(F.period==="week"){
+    const a=new Date(now); a.setDate(a.getDate()-((a.getDay()+6)%7)+off*7); // Monday
+    const b=new Date(a); b.setDate(b.getDate()+6);
+    return {from:dkey(a), to:dkey(b),
+      label:fmtShort(dkey(a))+" \u2013 "+fmtShort(dkey(b)), unit:"week"};
+  }
+  const a=new Date(now.getFullYear(), now.getMonth()+off, 1);
+  const b=new Date(a.getFullYear(), a.getMonth()+1, 0);
+  return {from:dkey(a), to:dkey(b),
+    label:a.toLocaleDateString("en-AU",{month:"long",year:"numeric"}), unit:"month"};
+}
+
+function parseCsv(text){
+  const rows=[];let row=[],cur="",q=false;
+  for(let i=0;i<text.length;i++){const ch=text[i];
+    if(q){ if(ch==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; }
+    else if(ch==='"') q=true;
+    else if(ch===","){row.push(cur);cur="";}
+    else if(ch==="\n"||ch==="\r"){ if(ch==="\r"&&text[i+1]==="\n")i++; row.push(cur);rows.push(row);row=[];cur=""; }
+    else cur+=ch;}
+  if(cur!==""||row.length){row.push(cur);rows.push(row);}
+  return rows;
+}
+
+async function load(force){
+  document.getElementById("app").innerHTML='<div class="loading">Loading sales feed&hellip;</div>';
+  const bust=force?("&_="+Date.now()):"";
+  const url="https://docs.google.com/spreadsheets/d/"+SHEET_ID+"/gviz/tq?tqx=out:csv&headers=1&sheet=SalesFeed"+bust;
+  let text;
+  try{ text=await (await fetch(url)).text(); }
+  catch(e){
+    document.getElementById("app").innerHTML='<div class="card"><b>Couldn\'t load the feed.</b><div class="muted" style="margin-top:6px">Check BG Sales Data is shared as "Anyone with the link can view".</div></div>';
+    return;
+  }
+
+  // Item name map, from the ItemMap tab of the same spreadsheet: two columns, the POS name
+  // and the name it should roll up to. Edited in Sheets, no code change needed. If the tab
+  // is missing or unreadable the dashboard carries on with raw POS names - a missing map is
+  // a tidiness problem, not a reason to show nothing.
+  // Built into a local object and assigned at the end, so two overlapping loads (a refresh
+  // mid-fetch) can't interleave into a half-built map or double-count.
+  // Fetch a lookup tab by name, falling back to its gid. ALWAYS cache-busted: these tabs
+  // get created and edited while the page is open, and a cached 404 from before the tab
+  // existed is otherwise indistinguishable from a missing tab.
+  async function fetchTab(name,gid){
+    // headers=1 is essential: gviz otherwise GUESSES how many leading rows are headers,
+    // and a tab whose first rows are all text (the department rows) gets dozens of them
+    // folded into one mangled header row, silently losing the data.
+    const base="https://docs.google.com/spreadsheets/d/"+SHEET_ID+"/gviz/tq?tqx=out:csv&headers=1&_="+Date.now();
+    const tries=[base+"&sheet="+encodeURIComponent(name)];
+    if(gid) tries.push(base+"&gid="+encodeURIComponent(gid));
+    for(const u of tries){
+      try{
+        const res=await fetch(u);
+        if(!res.ok) continue;
+        const t=await res.text();
+        // gviz answers a bad sheet name with an HTML error page, or a JS error callback.
+        if(!t || t.trim().charAt(0)==="<" || t.indexOf("google.visualization.Query.setResponse")>-1) continue;
+        return t;
+      }catch(e){ /* try the next form */ }
+    }
+    return null;
+  }
+
+  const im={}; let imN=0; let imFound=false;
+  try{
+    const mTxt=await fetchTab(ITEM_TAB,ITEM_GID);
+    if(mTxt){
+      imFound=true;
+      const mg=parseCsv(mTxt.trim());
+      const mh=(mg.shift()||[]).map(h=>h.trim().toLowerCase());
+      // Accept either the review file's column names or a plain two-column sheet.
+      let fi=mh.indexOf("item_from"); if(fi<0) fi=mh.indexOf("from"); if(fi<0) fi=0;
+      let ti=mh.indexOf("maps_to");   if(ti<0) ti=mh.indexOf("to");   if(ti<0) ti=1;
+      mg.forEach(function(r){
+        const a=String(r[fi]||"").trim(), b=String(r[ti]||"").trim();
+        if(a&&b&&a!==b){ im[a.toLowerCase()]=b; imN++; }
+      });
+    }
+  }catch(e){ /* no map tab - carry on with raw names */ }
+  ITEM_MAP=im; ITEM_MAP_COUNT=imN; ITEM_TAB_FOUND=imFound;
+
+  // Overrides tab. Same forgiving approach as ItemMap: missing or unreadable means the
+  // dashboard falls back to what ImPOS sent rather than showing nothing.
+  const oi={}, od={}; let oN=0; let oFound=false, oRows=0, oHead="";
+  try{
+    const oTxt=await fetchTab(OVER_TAB,OVER_GID);
+    if(oTxt){
+      oFound=true;
+      const og=parseCsv(oTxt.trim());
+      const oh=(og.shift()||[]).map(h=>h.trim().toLowerCase());
+      // If a header still arrives mangled ("from beer & cider bread modifier ..."), the
+      // real column name is its first word - so fall back to matching on that.
+      const firstWord=oh.map(h=>h.split(/\s+/)[0]);
+      const col=(...names)=>{
+        for(const n of names){ const i=oh.indexOf(n); if(i>-1) return i; }
+        for(const n of names){ const i=firstWord.indexOf(n); if(i>-1) return i; }
+        return -1;
+      };
+      oHead=oh.join(", "); oRows=og.length;
+      const ki=col("kind"), fi=col("from","item_from","name"), gi=col("group"),
+            ti=col("type"), si=col("service");
+      og.forEach(function(r){
+        const from=String(r[fi]||"").trim();
+        if(!from) return;
+        const rule={};
+        if(gi>-1 && String(r[gi]||"").trim()) rule.group=String(r[gi]).trim();
+        if(ti>-1 && String(r[ti]||"").trim()) rule.type=String(r[ti]).trim();
+        if(si>-1 && String(r[si]||"").trim()) rule.service=String(r[si]).trim();
+        if(!Object.keys(rule).length) return;
+        // The kind column is a convenience, not a requirement: if it's absent we can still
+        // tell them apart because a department row's name matches a department in the feed.
+        const kind=ki>-1?String(r[ki]||"").trim().toLowerCase():"";
+        if(kind.indexOf("dep")===0) od[from.toLowerCase()]=rule;
+        else if(kind.indexOf("item")===0) oi[from.toLowerCase()]=rule;
+        else { od[from.toLowerCase()]=rule; oi[from.toLowerCase()]=rule; }
+        oN++;
+      });
+    }
+  }catch(e){ /* no overrides tab - use what ImPOS sent */ }
+  OVER_ITEM=oi; OVER_DEPT=od; OVER_COUNT=oN; OVER_TAB_FOUND=oFound;
+  OVER_DIAG=oFound?(oN?"":"tab found, "+oRows+" row(s) read but no usable from/group columns. Headers seen: "+oHead)
+                  :"tab not reachable by name"+(OVER_GID?" or gid":"");
+  if(OVER_DIAG) console.log("Overrides: "+OVER_DIAG);
+
+  const grid=parseCsv(text.trim());
+  const head=(grid.shift()||[]).map(h=>h.trim().toLowerCase());
+  const ix=n=>head.indexOf(n);
+  ROWS=grid.map(r=>{
+    const ts=parseTs(r[ix("timestamp")]);
+    let day=String(r[ix("date")]||"").trim();
+    if(/^\d{1,2}\/\d{1,2}\/\d{4}/.test(day)){ const p=day.split("/"); day=p[2]+"-"+p[1].padStart(2,"0")+"-"+p[0].padStart(2,"0"); }
+    if(!day&&ts) day=dkey(ts);
+    const cat=String(r[ix("category")]||"").trim();
+    const m=CAT_MAP[cat.toLowerCase()];
+    const rawItem=String(r[ix("item")]||"").trim();
+    return { ts:ts, day:day,
+      venue:String(r[ix("venue")]||"").trim(),
+      category:cat,
+      type:m?m.type:cat,          // unmapped falls back to the raw name, never dropped
+      mode:m?m.mode:"Not specified",
+      mapped:!!m,
+      department:String(r[ix("department")]||"").trim(),
+      itemRaw:rawItem,                                  // exactly what the POS sent
+      item:ITEM_MAP[rawItem.toLowerCase()]||rawItem,    // what it rolls up to
+      group:"", lane:"sales",
+      qty:+String(r[ix("qty")]||0).replace(/[^0-9.\-]/g,"")||0,
+      sales:+String(r[ix("sales")]||0).replace(/[^0-9.\-]/g,"")||0 };
+  }).filter(r=>r.item&&r.day);
+
+  // Apply the overrides. Department first, then item on top - so a department sets the
+  // broad default and an item row corrects the ones staff filed wrong, which is the whole
+  // point: ~1 in 3 POS assignments is wrong and nobody wants to fix it on site.
+  KITCHEN_ROWS=0;
+  ROWS.forEach(function(r){
+    const d=OVER_DEPT[String(r.department).toLowerCase()];
+    const i=OVER_ITEM[String(r.item).toLowerCase()];
+    let over=false;
+    [d,i].forEach(function(rule){
+      if(!rule) return;
+      if(rule.group){ r.group=rule.group; over=true; }
+      if(rule.type){ r.type=rule.type; over=true; }
+      if(rule.service){ r.mode=rule.service; over=true; }
+    });
+    r.over=over;
+    r.lane = r.group===LANE_KITCHEN ? "kitchen" : (r.group===LANE_MODIFIER ? "modifier" : "sales");
+    if(r.lane==="kitchen") KITCHEN_ROWS++;
+  });
+  UNMAPPED=Array.from(new Set(ROWS.filter(r=>!r.mapped&&r.category).map(r=>r.category))).sort();
+  HAS_TIME = ROWS.some(r=>r.ts && (r.ts.getHours()||r.ts.getMinutes()));
+  document.getElementById("bld").textContent=ROWS.length.toLocaleString()+" rows";
+  renderFilters(); render();
+}
+
+function renderFilters(){
+  const w=windowFor();
+  document.getElementById("filters").innerHTML=
+    '<span class="chip nav" onclick="shift(-1)">&lsaquo;</span>'+
+    ["day","week","month"].map(function(p){
+      return '<span class="chip '+(F.period===p?"on":"")+'" onclick="setPeriod(\''+p+'\')">'+p[0].toUpperCase()+p.slice(1)+'</span>';
+    }).join("")+
+    '<span class="chip nav" onclick="shift(1)">&rsaquo;</span>'+
+    '<span class="rangelbl">'+esc(w.label)+'</span>'+
+    (F.offset!==0?'<span class="chip" onclick="setOffset(0)">Today</span>':"")+
+    '<span class="sep"></span>'+
+    '<span class="chip '+(F.venues.length===0?"on":"")+'" onclick="setVenue(\'\')">All venues</span>'+
+    VENUES.map(function(v){
+      return '<span class="chip '+(venueOn(v)?"on":"")+'" onclick="setVenue(\''+v+'\')">'+esc(vShort(v))+'</span>';
+    }).join("")+
+    '<span class="sep"></span>'+
+    '<span class="chip" onclick="exportRows()" title="Every feed row in the current view">\u2193 Rows CSV</span>'+
+    '<span class="chip" onclick="exportItems()" title="One row per product, totalled">\u2193 Items CSV</span>';
+}
+
+/* ---- CSV export ---------------------------------------------------------------
+ * Both exports honour everything currently on screen: date window, venue, category
+ * grouping and drill-down, the tapped chart slot, and the product search box. What you
+ * see is what you get - if the numbers on screen are filtered, so is the file.
+ */
+/**
+ * Report builder. Defaults to whatever is on screen: a collapsed wastage card is off, an
+ * expanded one is on, and the par columns follow the products table. Print goes through
+ * the browser's own dialog, so "Save as PDF" is the destination.
+ */
+function reportPanel(){
+  if(!F.report) return "";
+  const secs=[["venues","Takings by venue"],["chart","Sales chart"],["cats","Categories"],
+              ["products","Products"],["waste","Wastage"]];
+  return '<div class="card" id="reportpanel" style="border-color:var(--ink);border-width:2px">'+
+    '<div class="label">Build a report'+
+      '<span class="chip" style="padding:4px 10px;margin-left:auto" onclick="toggleReport()">close</span>'+
+    '</div>'+
+    '<div class="muted" style="margin-bottom:10px">Tick the sections to include, then print. '+
+    'It starts from what is on screen now.</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+
+      secs.map(function(x){
+        return '<span class="chip '+(F.show[x[0]]?"on":"")+'" onclick="toggleSec(\''+x[0]+'\')">'+
+          (F.show[x[0]]?"\u2713 ":"")+esc(x[1])+'</span>';
+      }).join("")+
+    '</div>'+
+    '<div class="muted" style="margin-bottom:12px">Covering <b>'+esc(windowFor().label)+'</b>'+
+      (F.venues.length?' \u00b7 <b>'+esc(F.venues.map(vShort).join(" + "))+'</b>':' \u00b7 all venues')+
+      (F.cat?' \u00b7 <b>'+esc(F.cat)+'</b>':'')+
+      (F.grp?' \u203a <b>'+esc(F.grp)+'</b>':'')+
+      (F.cols.par?' \u00b7 with suggested par':'')+
+      (F.show.waste&&!F.wasteOpen?' \u00b7 <b style="color:var(--red)">wastage is collapsed \u2014 expand it first to include the detail</b>':'')+
+    '</div>'+
+    '<button onclick="doPrint()" style="background:var(--ink);color:#fff;border:none;border-radius:8px;'+
+      'padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer">Print / Save as PDF</button>'+
+    '</div>';
+}
+
+function csvCell(v){
+  const s=String(v==null?"":v);
+  return /[",\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function csvText(rows){
+  return rows.map(function(r){ return r.map(csvCell).join(","); }).join("\r\n");
+}
+function download(name,text){
+  // The BOM makes Excel open UTF-8 correctly instead of mangling accented item names.
+  const blob=new Blob(["\ufeff"+text],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); },1000);
+}
+// Filename carries the filters so exports don't pile up indistinguishably in Downloads.
+function exportName(kind){
+  const w=windowFor();
+  let n="sales-"+kind+"-"+w.from+(w.from===w.to?"":"-to-"+w.to);
+  if(F.venues.length) n+="-"+F.venues.map(vShort).join("-").toLowerCase().replace(/[^a-z0-9]+/g,"-");
+  if(F.cat)   n+="-"+String(F.cat).toLowerCase().replace(/[^a-z0-9]+/g,"-");
+  if(F.slot)  n+="-"+slotLabel().replace(/[^0-9a-zA-Z]+/g,"");
+  return n+".csv";
+}
+function exportRows(){
+  const rs=LAST.drill;
+  if(!rs.length){ alert("Nothing to export in this view."); return; }
+  const out=[["timestamp","date","venue","category","type","service","group","department","item","item_as_rung_up","qty","sales"]];
+  rs.slice().sort(function(a,b){
+    return (a.ts&&b.ts?a.ts-b.ts:0) || a.venue.localeCompare(b.venue) || a.item.localeCompare(b.item);
+  }).forEach(function(r){
+    out.push([
+      r.ts?fmtStamp(r.ts):"", r.day, r.venue, r.category, r.type, r.mode,
+      grpVal(r), r.department, r.item, r.itemRaw, r.qty, r.sales.toFixed(2)
+    ]);
+  });
+  download(exportName("rows"),csvText(out));
+}
+// One row per product. This is the one to use for tidying up item names - it collapses
+// every till entry into a single line per name, so near-duplicates sit next to each other.
+function exportItems(){
+  const items=LAST.items;
+  if(!items.length){ alert("Nothing to export in this view."); return; }
+  const head=["item","category","qty","revenue","avg_price","merged_from"].concat(VENUES.map(function(v){return vShort(v)+" revenue";}));
+  const out=[head];
+  items.slice().sort(function(a,b){ return a.item.toLowerCase()<b.item.toLowerCase()?-1:1; })
+    .forEach(function(i){
+      out.push([i.item, i.cat, i.qty, i.sales.toFixed(2),
+        (i.qty?i.sales/i.qty:0).toFixed(2), Object.keys(i.src||{}).sort().join(" | ")]
+        .concat(VENUES.map(function(v){ return (i.v[v]||0).toFixed(2); })));
+    });
+  download(exportName("items"),csvText(out));
+}
+function fmtStamp(d){
+  const p=n=>String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+
+         p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
+}
+function setPeriod(p){ F.period=p; F.offset=0; F.slot=null; renderFilters(); render(); }
+function shift(d){ F.offset+=d; F.slot=null; renderFilters(); render(); }
+function setOffset(o){ F.offset=o; F.slot=null; renderFilters(); render(); }
+// Toggles membership. Empty selection means every venue.
+function setVenue(v){
+  if(!v){ F.venues=[]; }
+  else if(F.venues.indexOf(v)>-1){ F.venues=F.venues.filter(function(x){return x!==v;}); }
+  else { F.venues=F.venues.concat([v]); }
+  F.item=""; renderFilters(); render();
+}
+function venueOn(v){ return F.venues.indexOf(v)>-1; }
+// The venues actually in play, in the fixed display order.
+function activeVenues(){ return F.venues.length?VENUES.filter(venueOn):VENUES; }
+function venueLabel(){
+  return !F.venues.length?"all venues":F.venues.map(vShort).join(" + ");
+}
+function setItem(n){ F.item=(F.item===n?"":n); render(); }
+function setCat(c){ F.cat=c; F.grp=""; F.item=""; F.q=""; render(); }
+function clearSel(){ F.venues=[]; F.cat=""; F.grp=""; F.slot=null; F.item=""; renderFilters(); render(); }
+// Changing granularity moves the bucket boundaries, so an old selection would point at
+// a slot that no longer exists.
+function setGran(g){ F.gran=g; F.slot=null; render(); }
+function toggleWaste(){ F.wasteOpen=!F.wasteOpen; render(); }
+function toggleCol(k){ F.cols[k]=!F.cols[k]; render(); }
+function toggleHide(k){ F.hide[k]=!F.hide[k]; render(); }
+function togglePriv(){ F.priv=!F.priv; render(); }
+function toggleReport(){ F.report=!F.report; render(); }
+function toggleSec(k){ F.show[k]=!F.show[k]; render(); }
+function doPrint(){ F.report=false; render(); setTimeout(function(){ window.print(); },50); }
+function setWSort(k){
+  if(F.wsort.k===k) F.wsort.d=-F.wsort.d;
+  else F.wsort={k:k,d:(k==="item"||k==="venue")?1:-1};
+  render();
+}
+// Tap a bar to drill into that slot, tap it again to come back out.
+function setSlot(kind,key){
+  F.slot=(F.slot&&F.slot.kind===kind&&String(F.slot.key)===String(key))?null:{kind:kind,key:key};
+  render();
+}
+function clearSlot(){ F.slot=null; render(); }
+// Comparing venues only means something with every venue in view, so turning it on
+// clears any single-venue filter rather than showing one lonely bar.
+function toggleCompare(){ F.compare=!F.compare; renderFilters(); render(); }
+function setGroup(g){ F.group=g; F.cat=""; F.grp=""; F.item=""; render(); }
+// Second drill level: the group inside a product type.
+function setGrp(g){ F.grp=(F.grp===g?"":g); F.item=""; render(); }
+// Same column twice flips direction. A new column starts descending for numbers and
+// ascending for text, which is what you almost always want on first click.
+function setSort(k){
+  if(F.sort.k===k) F.sort.d=-F.sort.d;
+  else F.sort={k:k, d:(k==="item"||k==="cat")?1:-1};
+  render();
+}
+
+// Raw mode shows exactly what ImPOS sent - categories, departments and item names all
+// untouched. It is the reconciliation view, and reuses the existing chip rather than
+// adding another control.
+function isRaw(){ return F.group==="raw"; }
+function itemOf(r){ return isRaw()?r.itemRaw:r.item; }
+// The category label a row rolls up to, under the current grouping.
+function catVal(r){ return isRaw()?r.category : F.group==="mode"?r.mode : r.type; }
+// Second level. Falls back to the raw department when no override supplies a group, so a
+// new department shows under its own name instead of vanishing.
+function grpVal(r){ return isRaw()?r.department : (r.group||r.department||"Ungrouped"); }
+const GROUP_LABEL={type:"Product type", mode:"Dine in / takeaway", raw:"As ImPOS sends it"};
+
+// Does a row fall inside the selected chart bar? No selection means everything does.
+function inSlot(r){
+  if(!F.slot) return true;
+  if(F.slot.kind==="day") return r.day===F.slot.key;
+  if(!r.ts) return false;
+  const m=r.ts.getHours()*60+r.ts.getMinutes();
+  return Math.floor(m/F.gran)*F.gran===F.slot.key;
+}
+function slotLabel(){
+  if(!F.slot) return "";
+  return F.slot.kind==="day"?fmtDay(F.slot.key)
+    :clock(F.slot.key)+"\u2013"+clock(F.slot.key+F.gran);
+}
+
+function inWin(r,w){ return r.day>=w.from && r.day<=w.to; }
+// Kitchen requests are prep messages to the kitchen printer, not sales - they carry qty
+// but never money. Left in, they would show up as wastage and inflate unit counts, which
+// would then feed into par levels. Excluded everywhere except their own note.
+function isSale(r){ return r.lane!=="kitchen"; }
+function scopedIn(w){
+  return ROWS.filter(function(r){
+    return inWin(r,w)&&isSale(r)&&(!F.venues.length||venueOn(r.venue))&&
+           (!F.cat||catVal(r)===F.cat)&&(!F.grp||grpVal(r)===F.grp);
+  });
+}
+function inWindow(r){ return inWin(r,windowFor())&&isSale(r); }
+function scoped(){ return scopedIn(windowFor()); }
+
+// Bucket revenue for the charts. gran is minutes-of-day (60, 15) or the string "day".
+// Pass a venue to bucket only that venue's rows.
+function bucket(rs,gran,venue){
+  const m={};
+  rs.forEach(function(r){
+    if(!r.sales) return;
+    if(venue&&r.venue!==venue) return;
+    if(gran==="day"){ m[r.day]=(m[r.day]||0)+r.sales; return; }
+    if(!r.ts) return;
+    const mins=r.ts.getHours()*60+r.ts.getMinutes();
+    const b=Math.floor(mins/gran)*gran;
+    m[b]=(m[b]||0)+r.sales;
+  });
+  return m;
+}
+const clock=m=>String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");
+const sum=o=>Object.keys(o).reduce(function(s,k){return s+o[k];},0);
+
+// One metric tile. `sub` carries the secondary line.
+/** Show/hide chip for a section. Collapsed sections keep their heading so the page still
+ *  reads as a whole and nothing silently disappears. */
+function hideChip(k){
+  return '<span class="chip" style="padding:4px 10px" onclick="toggleHide(&quot;'+k+'&quot;)">'+
+    (F.hide[k]?"show":"hide")+'</span>';
+}
+function metric(k,val,sub,colour){
+  return '<div class="metric"><div class="k">'+k+'</div>'+
+    '<div class="val"'+(colour?' style="color:'+colour+'"':'')+'>'+val+'</div>'+
+    (sub?'<div class="sub">'+sub+'</div>':'')+'</div>';
+}
+
+function render(){
+  const w=windowFor();
+  const app=document.getElementById("app");
+  const all=ROWS.filter(inWindow);   // window only - drives the venue cards
+  const rows=scoped();               // window + venue + category - drives the chart
+  const drill=rows.filter(inSlot);   // + the selected chart bar - drives the tables
+  LAST.drill=drill;
+
+  if(!all.length){
+    app.innerHTML='<div class="card"><div class="label">'+esc(w.label)+'</div>'+
+      '<p style="margin:6px 0 0">No sales recorded in this '+w.unit+'.</p>'+
+      '<div class="muted" style="margin-top:8px">Use &lsaquo; &rsaquo; to move between '+w.unit+'s, or pick a wider period.</div></div>';
+    return;
+  }
+
+  // ---- headline: one card per venue, in the fixed Cambridge / Luma / Glenorchy order
+  const vTot={}; let grand=0;
+  all.forEach(function(r){ vTot[r.venue]=(vTot[r.venue]||0)+r.sales; grand+=r.sales; });
+
+  /* ---- same point last week.
+     Comparing a part-finished day against a whole one is the classic way to make a good
+     morning look like a disaster, so today is only ever compared with last week UP TO THE
+     SAME CLOCK TIME. Completed days compare in full. The card shows the DIFFERENCE only -
+     the previous total is not the interesting number. */
+  const cmpAgo=7;
+  const todayKey=dkey(new Date());
+  const nowMins=(function(){ const d=new Date(); return d.getHours()*60+d.getMinutes(); })();
+  function minsOf(r){ return r.ts?r.ts.getHours()*60+r.ts.getMinutes():0; }
+  function shiftKey(k,n){ const d=new Date(k+"T00:00:00"); d.setDate(d.getDate()+n); return dkey(d); }
+  // Sum a window per venue, cutting the live day off at the current clock time.
+  function sumWindow(from,to,liveDay){
+    const out={}; let tot=0;
+    ROWS.forEach(function(r){
+      if(!isSale(r)||r.day<from||r.day>to) return;
+      if(liveDay&&r.day===liveDay&&minsOf(r)>nowMins) return;
+      out[r.venue]=(out[r.venue]||0)+r.sales; tot+=r.sales;
+    });
+    out.__total=tot;
+    return out;
+  }
+  const liveNow=(w.from<=todayKey&&todayKey<=w.to)?todayKey:"";
+  const nowTot=sumWindow(w.from,w.to,liveNow);
+  const prevTot=sumWindow(shiftKey(w.from,-cmpAgo),shiftKey(w.to,-cmpAgo),
+                          liveNow?shiftKey(liveNow,-cmpAgo):"");
+  const cmpReady=prevTot.__total>0;
+  function deltaLine(v){
+    if(!cmpReady) return "";
+    const now=(v==="__total"?nowTot.__total:(nowTot[v]||0));
+    const was=(v==="__total"?prevTot.__total:(prevTot[v]||0));
+    if(!was) return '<div class="delta muted">no data last week</div>';
+    const d=now-was;
+    const cls=d>=0?"up":"down";
+    return '<div class="delta '+cls+'" title="vs the same point '+cmpAgo+' days ago'+
+      (liveNow?", up to "+("0"+Math.floor(nowMins/60)).slice(-2)+":"+("0"+(nowMins%60)).slice(-2):"")+
+      '">'+(d>=0?"+":"\u2212")+money0(Math.abs(d))+' <span class="vs">vs last week</span></div>';
+  }
+  // Private mode: when venues are selected, the others show nothing. For handing a screen
+  // or a printout to one venue's manager without exposing the rest of the business.
+  const privOn=F.priv&&F.venues.length>0;
+  const shownTotal=privOn?VENUES.filter(venueOn).reduce(function(a,v){return a+(vTot[v]||0);},0):grand;
+  const venueCards=VENUES.map(function(v){
+    const s=vTot[v]||0;
+    const hideIt=privOn&&!venueOn(v);
+    return '<div class="vcard '+(venueOn(v)?"on":"")+'" onclick="setVenue(\''+v+'\')">'+
+      '<div class="nm">'+esc(vShort(v))+'</div>'+
+      '<div class="v">'+(hideIt?'<span class="muted">\u2013</span>':money0(s))+'</div>'+
+      '<div class="sub">'+(hideIt?'hidden'
+        :(grand?Math.round(s/(privOn?shownTotal:grand)*100):0)+'% of takings')+'</div>'+
+      (hideIt?'':deltaLine(v))+'</div>';
+  }).join("");
+
+  const sel=drill.reduce(function(s,r){return s+r.sales;},0);
+  const units=drill.reduce(function(s,r){return s+(r.sales>0?r.qty:0);},0);
+
+  // ---- trend: time-of-day on a single day, day-by-day across a week or month.
+  // With comparison on, each time slot gets one bar per venue in the fixed venue order,
+  // so you can read who is busy when rather than just the combined shape.
+  let chart="";
+  const liveVenues=VENUES.filter(function(v){ return rows.some(function(r){return r.venue===v&&r.sales;}); });
+  const series=F.compare?liveVenues:[null];        // null = one combined bar
+  const colour=v=>v?VCOLOUR[v]:"var(--red)";
+  const cmpChip='<span class="chip" style="padding:4px 10px;'+(F.compare?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" '+
+    'onclick="toggleCompare()">'+(F.compare?"\u2713 ":"")+'Compare venues</span>';
+  const cmpLegend=F.compare
+    ? '<span class="legend">'+liveVenues.map(function(v){
+        return '<i style="background:'+VCOLOUR[v]+'"></i>'+esc(vShort(v));
+      }).join(" ")+'</span>'
+    : "";
+
+  if(HAS_TIME && F.period==="day"){
+    const g=F.gran;
+    const bySeries=series.map(function(v){ return bucket(rows,g,v); });
+    const keys=[].concat.apply([],bySeries.map(function(b){return Object.keys(b).map(Number);}));
+    if(keys.length){
+      const lo=Math.min.apply(null,keys), hi=Math.max.apply(null,keys);
+      const max=Math.max.apply(null,[1].concat([].concat.apply([],bySeries.map(function(b){
+        return Object.keys(b).map(function(k){return b[k];}); }))));
+      let cols="";
+      for(let b=lo;b<=hi;b+=g){
+        // At 15 minutes there are too many bars to label every one, so only the top of
+        // each hour gets a tick. The full range stays in the hover title either way.
+        const lbl=(g===60)?String(b/60):(b%60===0?String(b/60):"");
+        const tip=series.map(function(v,i){
+          return (v?vShort(v)+" ":"")+money(bySeries[i][b]||0);
+        }).join("  \u00b7  ");
+        const on=F.slot&&F.slot.kind==="time"&&F.slot.key===b;
+        const cls="col"+(F.slot&&F.slot.kind==="time"?(on?" sel":" dim"):"");
+        cols+='<div class="'+cls+'" onclick="setSlot(\'time\','+b+')" title="'+clock(b)+'\u2013'+clock(b+g)+' \u2014 '+tip+'"><div class="pair">'+
+          series.map(function(v,i){
+            return '<div class="bx" style="height:'+Math.round((bySeries[i][b]||0)/max*140)+
+                   'px;background:'+colour(v)+'"></div>';
+          }).join("")+
+          '</div><div class="lb">'+lbl+'</div></div>';
+      }
+      // Revenue per hour is measured across the trading span actually observed, not a
+      // notional opening time - first slot with a sale to last, inclusive.
+      const span=(hi-lo+g)/60;
+      let mets;
+      if(F.compare){
+        mets=series.map(function(v,i){
+          const t=sum(bySeries[i]);
+          return metric(vShort(v),money0(t),money0(span?t/span:0)+"/hr",VCOLOUR[v]);
+        }).join("")+metric("All venues",money0(sum(bucket(rows,g))),span.toFixed(1)+" hours trading");
+      }else{
+        const cur=bySeries[0], total=sum(cur);
+        const bKeys=Object.keys(cur).map(Number);
+        const peak=bKeys.length?bKeys.reduce(function(m,k){return cur[k]>cur[m]?k:m;},bKeys[0]):null;
+        mets=metric("Revenue",money0(total),esc(w.label))+
+          metric("Per hour",money0(span?total/span:0),span.toFixed(1)+" hours trading")+
+          (peak!==null?metric("Busiest "+(g===60?"hour":"15 min"),clock(peak),money(cur[peak])):"")+
+          metric("Per "+(g===60?"hour":"15 min")+" avg",money0(bKeys.length?total/((hi-lo)/g+1):0),
+                 ((hi-lo)/g+1)+" slots");
+      }
+      chart='<div class="card" data-sec="chart"><div class="label">Sales by time of day'+hideChip("chart")+
+        '<span class="chip" style="padding:4px 10px;'+(g===60?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" onclick="setGran(60)">Hourly</span>'+
+        '<span class="chip" style="padding:4px 10px;'+(g===15?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" onclick="setGran(15)">15 min</span>'+
+        cmpChip+cmpLegend+'</div>'+
+        '<div class="chart">'+cols+'</div>'+
+        '<div class="metrics">'+mets+'</div></div>';
+    }
+  } else if(F.period!=="day"){
+    const bySeries=series.map(function(v){ return bucket(rows,"day",v); });
+    const days=Object.keys(bucket(rows,"day")).sort();
+    if(days.length>1){
+      const max=Math.max.apply(null,[1].concat([].concat.apply([],bySeries.map(function(b){
+        return Object.keys(b).map(function(k){return b[k];}); }))));
+      const cols=days.map(function(d){
+        const tip=series.map(function(v,i){
+          return (v?vShort(v)+" ":"")+money(bySeries[i][d]||0);
+        }).join("  \u00b7  ");
+        const on=F.slot&&F.slot.kind==="day"&&F.slot.key===d;
+        const cls="col"+(F.slot&&F.slot.kind==="day"?(on?" sel":" dim"):"");
+        return '<div class="'+cls+'" onclick="setSlot(\'day\',\''+d+'\')" title="'+fmtDay(d)+' \u2014 '+tip+'"><div class="pair">'+
+          series.map(function(v,i){
+            return '<div class="bx" style="height:'+Math.round((bySeries[i][d]||0)/max*140)+
+                   'px;background:'+colour(v)+'"></div>';
+          }).join("")+
+          '</div><div class="lb">'+fmtShort(d)+'</div></div>';
+      }).join("");
+      let mets;
+      if(F.compare){
+        mets=series.map(function(v,i){
+          const t=sum(bySeries[i]);
+          return metric(vShort(v),money0(t),money0(t/days.length)+"/day",VCOLOUR[v]);
+        }).join("")+metric("All venues",money0(sum(bucket(rows,"day"))),days.length+" trading days");
+      }else{
+        const cur=bySeries[0], total=sum(cur);
+        const best=days.reduce(function(m,d){return cur[d]>cur[m]?d:m;},days[0]);
+        mets=metric("Revenue",money0(total),esc(w.label))+
+          metric("Per day",money0(total/days.length),days.length+" trading days")+
+          metric("Best day",fmtShort(best),money(cur[best]));
+      }
+      chart='<div class="card" data-sec="chart"><div class="label">Sales by day'+hideChip("chart")+cmpChip+cmpLegend+'</div>'+
+        '<div class="chart">'+cols+'</div>'+
+        '<div class="metrics">'+mets+'</div></div>';
+    }
+  }
+
+  /* ---- wastage: $0 lines in perishable groups, which is food in the bin.
+     Built from `drill` so it follows the same window, venue, category and slot filters as
+     everything else on the page. */
+  const wmap={};
+  drill.forEach(function(r){
+    if(!isPerishable(r.group)) return;
+    const k=r.venue+"|"+itemOf(r);
+    const o=wmap[k]||(wmap[k]={item:itemOf(r),venue:r.venue,group:r.group,sold:0,free:0,rev:0});
+    if(r.sales>0){ o.sold+=r.qty; o.rev+=r.sales; } else { o.free+=r.qty; }
+  });
+  let wlist=Object.keys(wmap).map(function(k){
+    const o=wmap[k];
+    o.price=o.sold?o.rev/o.sold:0;
+    o.value=o.free*o.price;            // what it would have sold for
+    o.pct=(o.sold+o.free)?o.free/(o.sold+o.free)*100:0;
+    return o;
+  }).filter(function(o){return o.free>0;});
+  const wNever=wlist.filter(function(o){return o.sold===0;});
+  wlist=wlist.filter(function(o){return o.sold>0;});
+  const wUnits=wlist.reduce(function(a,o){return a+o.free;},0);
+  const wValue=wlist.reduce(function(a,o){return a+o.value;},0);
+  const wSold=wlist.reduce(function(a,o){return a+o.sold;},0);
+  // Coffee loyalty sits alongside, never inside - it is a cost, but it is not waste.
+  let loyU=0, loyV=0;
+  drill.forEach(function(r){
+    if(r.group!==LOYALTY_GROUP||r.sales>0||r.lane!=="sales") return;
+    loyU+=r.qty;
+  });
+  const coffeePrice=(function(){
+    let q=0,v=0;
+    drill.forEach(function(r){ if(r.group===LOYALTY_GROUP&&r.sales>0){ q+=r.qty; v+=r.sales; } });
+    return q?v/q:0;
+  })();
+  loyV=loyU*coffeePrice;
+
+  let wasteCard="";
+  if(wlist.length){
+    const wsorted=wlist.slice().sort(function(a,b){
+      const k=F.wsort.k; let x=a[k],y=b[k];
+      if(typeof x==="string"){x=x.toLowerCase();y=String(y).toLowerCase();}
+      return x<y?-F.wsort.d:x>y?F.wsort.d:0;
+    });
+    const wth=function(k,lbl,cls){
+      const on=F.wsort.k===k;
+      return '<th class="'+(cls||"")+' sortable'+(on?" sorted":"")+'" onclick="setWSort('+
+        JSON.stringify(k).replace(/"/g,"&quot;")+')">'+esc(lbl)+
+        (on?' <span class="ar">'+(F.wsort.d<0?"\u25bc":"\u25b2")+'</span>':"")+'</th>';
+    };
+    // Collapsed by default: it matters weekly, not on every page load, and expanded it was
+    // pushing the product search below the fold.
+    const wRate=(wSold+wUnits)?Math.round(wUnits/(wSold+wUnits)*100):0;
+    const wHead='<div class="label">Wastage'+
+      '<span class="chip" style="padding:4px 10px" onclick="toggleWaste()">'+
+        (F.wasteOpen?"hide":"show")+'</span>'+
+      '<span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">'+
+      (F.wasteOpen?'perishable groups only \u00b7 tap a column to sort'
+        :wUnits.toLocaleString()+' units \u00b7 '+money0(wValue)+' \u00b7 '+wRate+'% of what was made')+
+      '</span></div>';
+    if(!F.wasteOpen){ wasteCard='<div class="card" data-sec="waste">'+wHead+'</div>'; }
+    else{
+    wasteCard='<div class="card" data-sec="waste">'+wHead+
+      '<div class="metrics" style="border-top:0;padding-top:0;margin-top:0;margin-bottom:14px">'+
+        metric("Thrown away",wUnits.toLocaleString()+" units",money0(wValue)+" at menu price","var(--amber)")+
+        metric("Waste rate",((wSold+wUnits)?Math.round(wUnits/(wSold+wUnits)*100):0)+"%",
+               "of everything made in these groups")+
+        (loyU?metric("Coffee loyalty",loyU.toLocaleString()+" cups",money0(loyV)+" \u2014 given, not wasted"):"")+
+      '</div>'+
+      '<table><thead><tr>'+
+        wth("item","Product")+wth("venue","Venue","hide-sm")+
+        wth("sold","Sold","num")+wth("free","Wasted","num")+
+        wth("pct","Waste %","num")+wth("value","Value","num")+
+      '</tr></thead><tbody>'+
+      wsorted.slice(0,80).map(function(o){
+        return '<tr><td><b>'+esc(o.item)+'</b></td>'+
+          '<td class="hide-sm muted">'+esc(vShort(o.venue))+'</td>'+
+          '<td class="num">'+o.sold+'</td>'+
+          '<td class="num free">'+o.free+'</td>'+
+          '<td class="num'+(o.pct>=30?' free':'')+'">'+Math.round(o.pct)+'%</td>'+
+          '<td class="num"><b>'+money(o.value)+'</b></td></tr>';
+      }).join("")+
+      '</tbody><tfoot><tr class="tot"><td>'+wsorted.length+' products</td><td class="hide-sm"></td>'+
+      '<td class="num">'+wSold+'</td><td class="num">'+wUnits+'</td>'+
+      '<td class="num">'+((wSold+wUnits)?Math.round(wUnits/(wSold+wUnits)*100):0)+'%</td>'+
+      '<td class="num">'+money(wValue)+'</td></tr></tfoot></table>'+
+      (wNever.length?'<div class="note"><b>'+wNever.length+' item(s) excluded \u2014 never sold at any '+
+        'price in this window,</b> so there is no rate or value to compute: '+
+        wNever.slice(0,10).map(function(o){return esc(o.item)+' ('+o.free+')';}).join(", ")+
+        (wNever.length>10?' and '+(wNever.length-10)+' more':'')+'.<br>'+
+        'These are nearly always sandwich-builder options or components sitting in a product group '+
+        'by mistake \u2014 give them an item row in the Overrides tab pointing at Modifiers and they '+
+        'will stop appearing here.</div>':'')+
+      '<div class="note">A $0 line in Sandwiches, Cakes &amp; Sweets, Hot Takeaway or Grab &amp; Go is '+
+      'food that went in the bin. Coffee &amp; Tea is kept out because its $0 lines are mostly the 100% '+
+      'loyalty discount \u2014 a cost, but a deliberate one. Value is what the wasted units would have '+
+      'sold for at their own average price.<br>'+
+      '<b>Waste % is the number to sort on, not units.</b> Three croissants binned from seven made is a '+
+      'bigger problem than twenty potato cakes from four hundred.</div></div>';
+    }
+  }
+
+  // Tapped-bar readout. Sits between the chart and its metrics so the number you asked
+  // for by tapping is right under the bar you tapped.
+  let slotBar="";
+  if(F.slot){
+    const st=drill.reduce(function(s,r){return s+r.sales;},0);
+    const su=drill.reduce(function(s,r){return s+(r.sales>0?r.qty:0);},0);
+    const byV=VENUES.map(function(v){
+      const t=drill.reduce(function(s,r){return s+(r.venue===v?r.sales:0);},0);
+      return t?'<span class="vs"><b style="color:'+VCOLOUR[v]+'">\u25a0</b> '+esc(vShort(v))+' '+money0(t)+'</span>':"";
+    }).filter(Boolean).join("");
+    const share=sum(bucket(rows,F.slot.kind==="day"?"day":F.gran));
+    slotBar='<div class="slotbar"><b>'+esc(slotLabel())+'</b>'+
+      '<span class="big">'+money(st)+'</span>'+
+      '<span class="vs">'+su.toLocaleString()+' items \u00b7 '+
+        (share?Math.round(st/share*100):0)+'% of the '+(F.slot.kind==="day"?"period":"day")+'</span>'+
+      byV+
+      '<span class="chip" style="padding:4px 10px;margin-left:auto" onclick="clearSlot()">clear</span></div>';
+    chart=chart.replace('<div class="metrics">',slotBar+'<div class="metrics">');
+  }
+
+  // ---- categories, rolled up onto the shared mapping so the venue columns line up.
+  // Venue columns appear when no single venue is selected, so the table doubles as a
+  // side-by-side comparison. Rows drill into the products below.
+  // Columns are worth showing whenever more than one venue is in play - with Cambridge and
+  // Luma both selected you want to see the split as well as the combined total.
+  const COLS = activeVenues();
+  const showCols = COLS.length>1;
+  // Level 2 kicks in once you have drilled into a product type: the same table, but now
+  // showing the groups inside it. Only for the "type" grouping - mode and raw are flat.
+  const lvl2 = (F.group==="type" && F.cat);
+  const keyOf = lvl2 ? grpVal : catVal;
+  const catMap={};
+  ROWS.filter(function(r){
+    return inWindow(r)&&(!F.venues.length||venueOn(r.venue))&&inSlot(r)&&
+           (!lvl2||catVal(r)===F.cat);
+  }).forEach(function(r){
+    if(!r.sales)return;
+    const k=keyOf(r);
+    const c=catMap[k]||(catMap[k]={total:0,v:{}});
+    c.total+=r.sales; c.v[r.venue]=(c.v[r.venue]||0)+r.sales;
+  });
+  const catRows=Object.keys(catMap).map(function(k){return [k,catMap[k]];}).sort(function(a,b){return b[1].total-a[1].total;});
+  const catMax=catRows.length?catRows[0][1].total:1;
+  const catTotal=catRows.reduce(function(s,e){return s+e[1].total;},0);
+
+  const drillOn = lvl2 ? F.grp : F.cat;
+  const groupChips=["type","mode","raw"].map(function(g){
+    return '<span class="chip" style="padding:4px 10px;'+(F.group===g?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+
+      '" onclick="setGroup(\''+g+'\')">'+GROUP_LABEL[g]+'</span>';
+  }).join("");
+  // If ImPOS starts sending a category the map doesn't know, say so rather than quietly
+  // filing it under its own raw name and letting the venue columns drift apart again.
+  const unmappedNote=(F.group!=="raw"&&UNMAPPED.length)
+    ? '<div class="muted" style="margin-top:10px">Not in the category map, shown under their own names: <b>'+
+      UNMAPPED.map(esc).join("</b>, <b>")+'</b>.</div>'
+    : "";
+
+  let catTable="";
+  if(catRows.length){
+    const head='<tr><th>'+esc(lvl2?"Group in "+F.cat:GROUP_LABEL[F.group])+'</th>'+
+      (showCols?COLS.map(function(v){return '<th class="num hide-sm">'+esc(vShort(v))+'</th>';}).join(""):'<th class="hide-sm"></th>')+
+      '<th class="num">Total</th><th class="num" style="width:52px">%</th></tr>';
+    const body=catRows.map(function(e){
+      const c=e[0], o=e[1];
+      const cells=showCols
+        ? COLS.map(function(v){return '<td class="num hide-sm">'+(o.v[v]?money0(o.v[v]):'<span style="color:var(--line)">\u2013</span>')+'</td>';}).join("")
+        : '<td class="hide-sm"><div class="barwrap"><div class="bar" style="width:'+Math.round(o.total/catMax*100)+'%"></div></div></td>';
+      const fn=lvl2?"setGrp":"setCat";
+      return '<tr class="click" onclick="'+fn+'('+JSON.stringify(drillOn===c?"":c).replace(/"/g,"&quot;")+')">'+
+        '<td><b>'+esc(c)+'</b>'+(drillOn===c?' <span class="muted">(showing)</span>':'')+'</td>'+
+        cells+'<td class="num"><b>'+money(o.total)+'</b></td>'+
+        '<td class="num muted">'+(catTotal?Math.round(o.total/catTotal*100):0)+'%</td></tr>';
+    }).join("");
+    // Breadcrumb, so two levels deep never leaves you unsure where you are.
+    const crumb = (F.cat||F.grp)
+      ? '<span style="text-transform:none;letter-spacing:0;font-weight:400">'+
+        '<a href="#" onclick="setCat(\'\');return false" style="color:var(--dim);text-decoration:none">All</a>'+
+        (F.cat?' \u203a <a href="#" onclick="setGrp(\'\');return false" style="color:'+(F.grp?"var(--dim)":"var(--ink)")+';text-decoration:none"><b>'+esc(F.cat)+'</b></a>':'')+
+        (F.grp?' \u203a <b style="color:var(--ink)">'+esc(F.grp)+'</b>':'')+'</span>'
+      : '<span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">tap a row to drill in</span>';
+    catTable='<div class="card" data-sec="cats"><div class="label">By category'+hideChip("cats")+groupChips+crumb+
+      '</div><table><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'+unmappedNote+'</div>';
+  }
+
+  // ---- products, with the same per-venue comparison columns
+  const itemMap={};
+  drill.forEach(function(r){
+    if(!r.sales&&!r.qty)return;
+    const nm=itemOf(r);
+    const o=itemMap[nm]||(itemMap[nm]={item:nm,cat:grpVal(r),grp:r.group,qty:0,sales:0,free:0,v:{},src:{}});
+    if(!isRaw()&&r.itemRaw&&r.itemRaw!==r.item) o.src[r.itemRaw]=1;
+    // A $0 line is wastage or a loyalty-card freebie, not a sale. It must not count
+    // towards units sold or the average price: these numbers are headed for a par-level
+    // generator, and inflating sold counts with wastage would raise par levels and cause
+    // more wastage. Tracked separately so it stays visible.
+    if(r.sales>0){ o.qty+=r.qty; o.sales+=r.sales; o.v[r.venue]=(o.v[r.venue]||0)+r.sales; }
+    else { o.free+=r.qty; }
+  });
+  let items=Object.keys(itemMap).map(function(k){return itemMap[k];})
+    .filter(function(i){return i.sales>0;});
+  const q=F.q.toLowerCase();
+  if(q) items=items.filter(function(i){return i.item.toLowerCase().indexOf(q)!==-1||i.cat.toLowerCase().indexOf(q)!==-1;});
+
+  // Waste rate must exist BEFORE the sort - computing it afterwards meant sorting on the
+  // column compared undefined against undefined and nothing moved.
+  items.forEach(function(i){ i.wastePct=(i.qty+i.free)?i.free/(i.qty+i.free)*100:0; });
+  // Suggested par: average sold per day plus 1.65 x sqrt(average), which covers the normal
+  // day-to-day swing about 95% of the time. Trading days are the days that actually had
+  // sales in this window, so a quiet Monday does not drag every average down.
+  const tradingDays=(function(){
+    const d={}; rows.forEach(function(r){ if(r.sales>0) d[r.day]=1; });
+    return Math.max(Object.keys(d).length,1);
+  })();
+  items.forEach(function(i){
+    i.perDay=i.qty/tradingDays;
+    i.par=i.perDay>0?Math.ceil(i.perDay+1.65*Math.sqrt(i.perDay)):0;
+  });
+
+  // Sort by whichever header was last clicked. Venue columns use a "v:<venue>" key so
+  // they sort on that venue's revenue for the product.
+  function val(i,k){
+    if(k==="item") return i.item.toLowerCase();
+    if(k==="cat")  return i.cat.toLowerCase();
+    if(k==="qty")  return i.qty;
+    if(k==="free") return i.free;
+    if(k==="wastePct") return i.wastePct;
+    if(k==="perDay") return i.perDay;
+    if(k==="par")    return i.par;
+    if(k==="avg")  return i.qty?i.sales/i.qty:0;
+    if(k.indexOf("v:")===0) return i.v[k.slice(2)]||0;
+    return i.sales;
+  }
+  items.sort(function(a,b){
+    const x=val(a,F.sort.k), y=val(b,F.sort.k);
+    return x<y?-F.sort.d : x>y?F.sort.d : 0;
+  });
+  LAST.items=items;
+  // Only show the column when there is something in it, so a clean day stays clean.
+  const anyFree=items.some(function(i){return i.free>0;});
+  // A $0 line means different things in different groups, so the column names itself from
+  // what is actually on screen. Calling loyalty coffees "wasted" would be wrong, and
+  // calling binned sandwiches "free" buries the point.
+  const freeGroups={};
+  items.forEach(function(i){ if(i.free>0) freeGroups[i.grp||""]=1; });
+  const gk=Object.keys(freeGroups);
+  const allPerish=gk.length>0&&gk.every(isPerishable);
+  const allLoyal=gk.length>0&&gk.every(function(g){return g===LOYALTY_GROUP;});
+  const FREE_LBL=allPerish?"Wasted":allLoyal?"Given":"Free";
+  const PCT_LBL=allPerish?"Waste %":allLoyal?"Given %":"Free %";
+  const FREE_TIP=allPerish?"$0 lines in perishable groups - food that went in the bin"
+    :allLoyal?"$0 lines in Coffee & Tea - almost all the 100% loyalty discount, given away rather than wasted"
+    :"$0 lines. Mixed groups here: perishables are wastage, Coffee & Tea is mostly loyalty. "+
+     "Drill into one group to see it named.";
+
+  const selNote=(F.venues.length||F.cat)
+    ? '<div class="muted" style="margin-top:12px">Showing <b>'+esc(venueLabel())+'</b>'+
+      (F.cat?' \u00b7 <b>'+esc(F.cat)+'</b>':'')+' \u2014 '+money(sel)+' from '+units.toLocaleString()+' items.'+
+      '<span class="chip" style="margin-left:8px;padding:4px 10px" onclick="clearSel()">clear</span></div>'
+    : "";
+
+  function sortTh(k,lbl,cls,tip){
+    const on=F.sort.k===k;
+    return '<th class="'+(cls||"")+' sortable'+(on?" sorted":"")+'"'+
+      (tip?' title="'+esc(tip)+'"':'')+' onclick="setSort('+
+      JSON.stringify(k).replace(/"/g,"&quot;")+')">'+esc(lbl)+
+      (on?' <span class="ar">'+(F.sort.d<0?"\u25bc":"\u25b2")+'</span>':"")+'</th>';
+  }
+  // Optional columns, declared once so the chips and the table can never disagree.
+  // Free and its rate share a switch: a count without its rate is the misleading half.
+  const COLOPT=[
+    ["perDay","Per day","Units sold per day, across the days that actually had sales."],
+    ["par","Suggested par","Average sold per day + 1.65 x sqrt(average) - covers the usual "+
+      "swing about 95% of the time. A starting point, not an instruction: an item that regularly "+
+      "sells out has understated sales and will come out too low."],
+    ["free",FREE_LBL+" + rate",FREE_TIP],
+    ["avg","Avg $","Revenue divided by units sold. Excludes $0 lines, so it is a real average price."]
+  ];
+  const colOn=function(k){ return !!F.cols[k] && (k!=="free"||anyFree); };
+  const colChips=COLOPT.map(function(c){
+    return '<span class="chip" style="padding:4px 10px;'+
+      (colOn(c[0])?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+
+      '" title="'+esc(c[2])+'" onclick="toggleCol(&quot;'+c[0]+'&quot;)">'+
+      (colOn(c[0])?"\u2713 ":"")+esc(c[1])+'</span>';
+  }).join("");
+
+  const itemHead='<tr>'+sortTh("item","Product")+
+    (F.cat?"":sortTh("cat","Category","hide-sm"))+
+    (showCols?COLS.map(function(v){return sortTh("v:"+v,vShort(v),"num hide-sm");}).join(""):"")+
+    sortTh("qty","Sold","num")+
+    (colOn("perDay")?sortTh("perDay","Per day","num"):"")+
+    (colOn("par")?sortTh("par","Par","num",COLOPT[1][2]):"")+
+    (colOn("free")?sortTh("free",FREE_LBL,"num hide-sm",FREE_TIP)+
+                   sortTh("wastePct",PCT_LBL,"num hide-sm",FREE_TIP):"")+
+    (colOn("avg")?sortTh("avg","Avg $","num hide-sm"):"")+
+    sortTh("sales","Revenue","num")+'</tr>';
+  const itemBody=items.slice(0,200).map(function(i){
+    return '<tr class="click'+(F.item===i.item?" selrow":"")+'" onclick="setItem('+
+      JSON.stringify(i.item).replace(/"/g,"&quot;")+')"><td><b>'+esc(i.item)+'</b></td>'+
+      (F.cat?"":'<td class="hide-sm muted">'+esc(i.cat)+'</td>')+
+      (showCols?COLS.map(function(v){return '<td class="num hide-sm">'+(i.v[v]?money0(i.v[v]):'<span style="color:var(--line)">\u2013</span>')+'</td>';}).join(""):"")+
+      '<td class="num">'+i.qty.toLocaleString()+'</td>'+
+      (colOn("perDay")?'<td class="num muted">'+i.perDay.toFixed(1)+'</td>':"")+
+      (colOn("par")?'<td class="num"><b>'+(i.par||"\u2013")+'</b></td>':"")+
+      (colOn("free")?'<td class="num hide-sm'+(i.free?(isPerishable(i.grp)?' free':' muted'):' muted')+'"'+
+          (i.free?' title="'+esc(isPerishable(i.grp)?"binned":
+            (i.grp===LOYALTY_GROUP?"given away (loyalty)":"$0 line"))+'"':'')+'>'+
+          (i.free||"\u2013")+'</td>'+
+        '<td class="num hide-sm'+(i.free&&isPerishable(i.grp)&&i.wastePct>=30?' free':' muted')+'">'+
+        (i.free?Math.round(i.wastePct)+"%":"\u2013")+'</td>':"")+
+      (colOn("avg")?'<td class="num hide-sm">'+money(i.qty?i.sales/i.qty:0)+'</td>':"")+
+      '<td class="num"><b>'+money(i.sales)+'</b></td></tr>';
+  }).join("");
+
+  // Totals row. Covers EVERY filtered product, not just the 200 rendered, and the average
+  // is revenue over units - a weighted average, not the mean of the per-item averages,
+  // which would let a single $22 salad outweigh 600 coffees.
+  const tSold=items.reduce(function(a,i){return a+i.qty;},0);
+  const tRev =items.reduce(function(a,i){return a+i.sales;},0);
+  const tFree=items.reduce(function(a,i){return a+i.free;},0);
+  const itemFoot=items.length?'<tr class="tot">'+
+    '<td><b>'+items.length.toLocaleString()+' product'+(items.length===1?'':'s')+'</b>'+
+      (items.length>200?' <span class="muted">(top 200 listed)</span>':'')+'</td>'+
+    (F.cat?"":'<td class="hide-sm"></td>')+
+    (showCols?COLS.map(function(v){
+      const t=items.reduce(function(a,i){return a+(i.v[v]||0);},0);
+      return '<td class="num hide-sm"><b>'+(t?money0(t):'<span style="color:var(--line)">\u2013</span>')+'</b></td>';
+    }).join(""):"")+
+    '<td class="num"><b>'+tSold.toLocaleString()+'</b></td>'+
+    (colOn("perDay")?'<td class="num"></td>':"")+
+    (colOn("par")?'<td class="num"></td>':"")+
+    (colOn("free")?'<td class="num hide-sm'+(tFree&&allPerish?' free':'')+'"><b>'+(tFree||"\u2013")+'</b></td>'+
+      '<td class="num hide-sm"><b>'+(tFree?Math.round(tFree/(tSold+tFree)*100)+"%":"\u2013")+'</b></td>':"")+
+    (colOn("avg")?'<td class="num hide-sm"><b>'+money(tSold?tRev/tSold:0)+'</b></td>':"")+
+    '<td class="num"><b>'+money(tRev)+'</b></td></tr>':"";
+
+  // ---- product drill-down. Ignores the tapped chart slot deliberately: you clicked the
+  // product to see its whole shape across the window, not the slot you were already in.
+  let itemCard="";
+  if(F.item){
+    const ir=rows.filter(function(r){return itemOf(r)===F.item;});
+    const paid=ir.filter(function(r){return r.sales>0;});
+    const sold=paid.reduce(function(a,r){return a+r.qty;},0);
+    const revd=paid.reduce(function(a,r){return a+r.sales;},0);
+    const freed=ir.reduce(function(a,r){return a+(r.sales>0?0:r.qty);},0);
+
+    // Units per day, not dollars - this is the number that will drive par levels.
+    const byDay={};
+    paid.forEach(function(r){ byDay[r.day]=(byDay[r.day]||0)+r.qty; });
+    const days=Object.keys(byDay).sort();
+    let dayChart="";
+    if(days.length>1){
+      const mx=Math.max.apply(null,days.map(function(d){return byDay[d];}));
+      dayChart='<div class="label" style="margin-top:16px">Units per day</div><div class="chart" style="height:120px">'+
+        days.map(function(d){
+          return '<div class="col" title="'+fmtDay(d)+' \u2014 '+byDay[d]+' sold"><div class="pair">'+
+            '<div class="bx" style="height:'+Math.round(byDay[d]/mx*95)+'px"></div></div>'+
+            '<div class="lb">'+fmtShort(d)+'</div></div>';
+        }).join("")+'</div>'+
+        '<div class="muted" style="margin-top:6px">Busiest '+fmtDay(days.reduce(function(m,d){return byDay[d]>byDay[m]?d:m;},days[0]))+
+        ' \u00b7 average '+(sold/days.length).toFixed(1)+' a day across '+days.length+' days</div>';
+    }
+
+    // Time of day, pooled across every day in the window - answers "when does this sell",
+    // which is the useful question for prep timing even over a month.
+    let timeChart="";
+    if(HAS_TIME){
+      const g=F.gran, byB={};
+      paid.forEach(function(r){
+        if(!r.ts) return;
+        const b=Math.floor((r.ts.getHours()*60+r.ts.getMinutes())/g)*g;
+        byB[b]=(byB[b]||0)+r.qty;
+      });
+      const bk=Object.keys(byB).map(Number);
+      if(bk.length){
+        const lo=Math.min.apply(null,bk), hi=Math.max.apply(null,bk);
+        const mx=Math.max.apply(null,bk.map(function(k){return byB[k];}));
+        let cols="";
+        for(let b=lo;b<=hi;b+=g){
+          const v=byB[b]||0;
+          cols+='<div class="col" title="'+clock(b)+'\u2013'+clock(b+g)+' \u2014 '+v+' sold"><div class="pair">'+
+            '<div class="bx" style="height:'+Math.round(v/mx*95)+'px"></div></div>'+
+            '<div class="lb">'+((g===60||b%60===0)?String(b/60):"")+'</div></div>';
+        }
+        const pk=bk.reduce(function(m,k){return byB[k]>byB[m]?k:m;},bk[0]);
+        timeChart='<div class="label" style="margin-top:16px">Units by time of day'+
+          (days.length>1?' <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">pooled across '+days.length+' days</span>':"")+
+          '</div><div class="chart" style="height:120px">'+cols+'</div>'+
+          '<div class="muted" style="margin-top:6px">Peak '+clock(pk)+'\u2013'+clock(pk+g)+' with '+byB[pk]+' sold</div>';
+      }
+    }
+
+    const vSplit=activeVenues().map(function(v){
+      const q=paid.reduce(function(a,r){return a+(r.venue===v?r.qty:0);},0);
+      return q?metric(vShort(v),q.toLocaleString(),"sold",VCOLOUR[v]):"";
+    }).filter(Boolean).join("");
+
+    itemCard='<div class="card"><div class="label">'+esc(F.item)+
+      '<span class="chip" style="padding:4px 10px" onclick="setItem(\'\')">close</span></div>'+
+      '<div class="metrics" style="border-top:0;padding-top:0;margin-top:4px">'+
+        metric("Sold",sold.toLocaleString(),esc(w.label))+
+        metric("Revenue",money0(revd),money(sold?revd/sold:0)+" average")+
+        (freed?metric("Free",freed.toLocaleString(),"wastage or comped, excluded above"):"")+
+        vSplit+
+      '</div>'+dayChart+timeChart+'</div>';
+  }
+
+  // Kitchen requests are excluded from every number above. Said out loud rather than
+  // silently dropped, because "why is that item missing" is a worse question than a note.
+  const kitchenNote = KITCHEN_ROWS
+    ? '<div class="muted" style="margin-top:-4px;margin-bottom:14px">'+KITCHEN_ROWS+
+      ' kitchen prep request'+(KITCHEN_ROWS===1?'':'s')+' excluded from sales and wastage'+
+      ' <span style="opacity:.7">(rung up to message the kitchen, never a sale)</span></div>'
+    : "";
+
+  // Classes drive which sections print; the screen is unaffected.
+  app.className=Object.keys(F.show).filter(function(k){return !F.show[k];})
+    .map(function(k){return "no-"+k;}).join(" ");
+  app.innerHTML= reportPanel()+
+    (HAS_TIME?"":'<div class="note"><b>Hourly view is waiting on data.</b> Timestamps currently carry a date but no clock time, so sales can\'t be split by hour yet. It will appear automatically once the fixed processor has run.</div>')+
+    '<div class="card" data-sec="venues"><div class="label">'+esc(w.label)+' \u2014 takings by venue'+
+      hideChip("venues")+
+      (privOn?'<span class="legend" style="color:var(--red)">private \u00b7 other venues hidden</span>':'')+
+      '</div>'+
+      (F.hide.venues?'':
+      '<div class="venuegrid">'+venueCards+
+        '<div class="vcard tot"><div class="nm">'+(privOn?esc(F.venues.map(vShort).join(" + ")):"All venues")+'</div>'+
+        '<div class="v">'+money0(shownTotal)+'</div>'+
+        '<div class="sub">'+(F.period==="day"?"this day":"this "+w.unit)+'</div>'+
+        (privOn?"":deltaLine("__total"))+'</div>'+
+      '</div>'+selNote)+'</div>'+
+    (F.hide.chart?'<div class="card" data-sec="chart"><div class="label">Sales chart'+hideChip("chart")+'</div></div>':chart)+
+    (F.hide.cats?'<div class="card" data-sec="cats"><div class="label">By category'+hideChip("cats")+'</div></div>':catTable)+
+    itemCard+kitchenNote+
+    '<div class="card" data-sec="products"><div class="label">Products ('+items.length+')'+(F.cat?' in '+esc(F.cat):'')+
+      '<span class="chip" style="padding:4px 10px;'+(F.cols.par?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+
+      hideChip("products")+colChips+
+      ' <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">tap a column to sort, a row to drill in'+
+        (isRaw()?' \u00b7 showing raw POS names and departments'
+          :(ITEM_MAP_COUNT?' \u00b7 '+ITEM_MAP_COUNT+' name'+(ITEM_MAP_COUNT===1?'':'s')+' merged'
+                          :' \u00b7 no '+ITEM_TAB+' tab found')+
+           (OVER_COUNT?' \u00b7 '+OVER_COUNT+' override'+(OVER_COUNT===1?'':'s')+' applied'
+                      :' \u00b7 <b style="color:var(--red)">overrides not applied</b> \u2014 '+esc(OVER_DIAG)))+'</span></div>'+
+      (F.hide.products?'':'<input type="search" id="q" placeholder="Search products\u2026" value="'+esc(F.q)+'">')+
+      (F.hide.products?'':
+        (items.length?'<table><thead>'+itemHead+'</thead><tbody>'+itemBody+'</tbody>'+
+        '<tfoot>'+itemFoot+'</tfoot></table>':'<div class="muted">No products match.</div>'))+
+      (!F.hide.products&&items.length>200?'<div class="muted" style="margin-top:8px">Showing the top 200 of '+items.length+'. Search to narrow.</div>':'')+
+    '</div>'+
+    wasteCard;
+
+  const qb=document.getElementById("q");
+  if(qb) qb.addEventListener("input",function(){
+    F.q=qb.value; const p=qb.selectionStart; render();
+    const nb=document.getElementById("q"); if(nb){ nb.focus(); nb.setSelectionRange(p,p); }
+  });
+}
+
+load();
+</script>
+</body>
+</html>
