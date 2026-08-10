@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff &amp; Wastage Explorer</title>
+<style>
+  :root{
+    --ink:#141414; --paper:#f7f6f3; --card:#fff; --line:#e4e2dc; --dim:#6b6862;
+    --red:#c8102e; --amber:#c97a1a; --teal:#2d6a6f; --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .num,.v,.val,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+  header{background:var(--ink);color:#fff;padding:14px 20px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:10}
+  header .dot{width:14px;height:14px;background:var(--amber);border-radius:3px;flex:none}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .bld{font-size:11px;color:#8d8b86;font-family:ui-monospace,monospace}
+  header .sp{margin-left:auto;display:flex;gap:8px}
+  header button{background:#fff;color:var(--ink);border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer}
+  #filters{background:#fff;border-bottom:1px solid var(--line);padding:10px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:52px;z-index:9}
+  .chip{font-size:12px;font-weight:600;padding:7px 13px;border-radius:99px;border:1.5px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;white-space:nowrap;user-select:none}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .chip.nav{padding:7px 11px;font-family:ui-monospace,monospace}
+  .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+  .rangelbl{font-size:12px;color:var(--dim);font-family:ui-monospace,monospace;margin-left:2px}
+  .wrap{max-width:1120px;margin:0 auto;padding:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+  .label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .metrics{display:flex;gap:22px;flex-wrap:wrap}
+  .metric .k{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+  .metric .val{font-size:24px;font-weight:700;margin-top:3px}
+  .metric .sub{font-size:11px;color:var(--dim);margin-top:2px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th.sortable{cursor:pointer;user-select:none}
+  th.sorted{color:var(--ink)}
+  td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  tfoot td{border-top:2px solid var(--ink);border-bottom:none;font-weight:700;padding-top:10px}
+  .num{text-align:right}
+  .bar{height:8px;background:var(--amber);border-radius:99px;min-width:2px}
+  .barwrap{background:var(--line);border-radius:99px;overflow:hidden}
+  .chart{display:flex;align-items:flex-end;gap:3px;height:150px;padding-top:10px}
+  .chart .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+  .chart .pair{display:flex;align-items:flex-end;justify-content:center;gap:2px;width:100%}
+  .chart .bx{flex:1;min-width:1px;background:var(--amber);border-radius:3px 3px 0 0;min-height:1px}
+  .chart .lb{font-size:9px;color:var(--dim);white-space:nowrap;font-family:ui-monospace,monospace}
+  .muted{color:var(--dim);font-size:12px}
+  .note{font-size:12px;color:var(--dim);margin-top:10px;line-height:1.5}
+  .pill{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    padding:3px 8px;border-radius:99px;background:#f0eeea;color:var(--dim)}
+  .pill.waste{background:#fbf0e2;color:var(--amber)}
+  .pill.void{background:#fbe9ec;color:var(--red)}
+  .legend{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0;font-weight:400}
+  .legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+  .loading{padding:60px 20px;text-align:center;color:var(--dim)}
+  @media(max-width:700px){ .hide-sm{display:none} .wrap{padding:12px} }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot"></div><h1>Staff &amp; Wastage Explorer</h1>
+  <span class="bld" id="bld"></span>
+  <div class="sp"><button onclick="load(true)">&#8635; refresh</button></div>
+</header>
+<div id="filters"></div>
+<div class="wrap"><div id="app"><div class="loading">Loading staff reports&hellip;</div></div></div>
+<script>
+const SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
+
+// The staff reports use ImPOS's own store names, which differ from the sales feed's.
+const VENUE = {"Red Square Cafe":"RS Cambridge","Luma":"Luma","Red Square Cafe Glenorchy":"RS Glenorchy"};
+const VENUES = ["RS Cambridge","Luma","RS Glenorchy"];
+const VCOLOUR = {"RS Cambridge":"#c8102e","Luma":"#2d6a6f","RS Glenorchy":"#c97a1a"};
+// Wastage is authorised end-of-day clearance, not a give-away. It dwarfs everything else,
+// so it is always reported separately - mixing it in makes every other number invisible.
+const WASTE = "Wastage";
+
+const TABS = {
+  item:  {tab:"StaffItemDiscounts",  cols:["date","store","employee","station","item_no","discount_name","rate","amount"]},
+  check: {tab:"StaffCheckDiscounts", cols:["date","store","employee","station","check_no","discount_name","rate","amount"]},
+  voids: {tab:"StaffVoids",          cols:["date","store","void_reason","item","void_time","employee","check_no","qty","price_inc","notes"]},
+  txn:   {tab:"Transactions",        cols:["date","store","check_no","time","item","refund","discount_item","discount_check","reversal","void"]}
+};
+let D = {item:[],check:[],voids:[],txn:[]}, MISSING = [];
+let F = {week:0, venues:[], view:"overview", sort:{k:"amount",d:-1}};
+
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const money=n=>"$"+(+n||0).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+const money0=n=>"$"+Math.round(+n||0).toLocaleString("en-AU");
+const vShort=s=>VENUE[s]||s;
+function parseCsv(t){
+  const out=[[]];let cur="",q=false;
+  for(let i=0;i<t.length;i++){const ch=t[i];
+    if(q){ if(ch==='"'&&t[i+1]==='"'){cur+='"';i++;} else if(ch==='"'){q=false;} else cur+=ch; }
+    else if(ch==='"')q=true;
+    else if(ch===","){out[out.length-1].push(cur);cur="";}
+    else if(ch==="\r"&&t[i+1]==="\n"){out[out.length-1].push(cur);cur="";out.push([]);i++;}
+    else if(ch==="\n"){out[out.length-1].push(cur);cur="";out.push([]);}
+    else cur+=ch;}
+  out[out.length-1].push(cur);
+  return out.filter(r=>r.length>1||r[0]!=="");
+}
+const num=v=>{const n=Number(String(v==null?"":v).replace(/[$,\s]/g,""));return isNaN(n)?0:n;};
+function dkey(v){
+  const s=String(v||"").trim();
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return m[0];
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) return m[3]+"-"+("0"+m[2]).slice(-2)+"-"+("0"+m[1]).slice(-2);
+  const d=new Date(s);
+  if(!isNaN(d)) return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2);
+  return "";
+}
+const fmtDay=k=>{const [y,m,d]=k.split("-");return d+"/"+m;};
+const dayName=k=>["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(k+"T00:00:00").getDay()];
+
+/* ---------- loading ---------- */
+async function fetchTab(name){
+  // headers=1 is essential - gviz otherwise guesses how many leading rows are headers and
+  // folds text rows into one mangled header, silently losing data.
+  const url="https://docs.google.com/spreadsheets/d/"+SHEET_ID+
+    "/gviz/tq?tqx=out:csv&headers=1&_="+Date.now()+"&sheet="+encodeURIComponent(name);
+  try{
+    const res=await fetch(url);
+    if(!res.ok) return null;
+    const t=await res.text();
+    if(!t || t.trim().charAt(0)==="<" || t.indexOf("google.visualization.Query.setResponse")>-1) return null;
+    return t;
+  }catch(e){ return null; }
+}
+async function load(){
+  document.getElementById("app").innerHTML='<div class="loading">Loading staff reports&hellip;</div>';
+  MISSING=[];
+  for(const key of Object.keys(TABS)){
+    const spec=TABS[key];
+    const txt=await fetchTab(spec.tab);
+    if(!txt){ D[key]=[]; MISSING.push(spec.tab); continue; }
+    const g=parseCsv(txt.trim());
+    const head=(g.shift()||[]).map(h=>String(h).trim().toLowerCase());
+    const ix=n=>head.indexOf(n);
+    D[key]=g.map(r=>{
+      const o={};
+      spec.cols.forEach(c=>{ const i=ix(c); o[c]=i>-1?r[i]:""; });
+      o.date=dkey(o.date);
+      o.venue=vShort(String(o.store||"").trim());
+      ["amount","qty","price_inc","refund","discount_item","discount_check","reversal","void"]
+        .forEach(k=>{ if(k in o) o[k]=num(o[k]); });
+      return o;
+    }).filter(r=>r.date);
+  }
+  const n=Object.keys(D).reduce((a,k)=>a+D[k].length,0);
+  document.getElementById("bld").textContent=n.toLocaleString()+" rows";
+  renderFilters(); render();
+}
+
+/* ---------- period ---------- */
+// Reports arrive weekly (Mon-Sun), so the natural unit is a week. week 0 = the most recent
+// week present in the data, not the current calendar week - the data can lag by days.
+function allDates(){
+  const s=new Set();
+  Object.keys(D).forEach(k=>D[k].forEach(r=>s.add(r.date)));
+  return Array.from(s).sort();
+}
+const iso=d=>d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2);
+const shift=(k,n)=>{const d=new Date(k+"T00:00:00"); d.setDate(d.getDate()+n); return iso(d);};
+/**
+ * 7-day blocks counted BACK from the latest date in the data - not calendar Mon-Sun.
+ * The broadcast covers "the past 7 days" from whenever it runs, so it does not align to
+ * ISO weeks: the first import ran Sunday and covered Sun-to-Sun. Bucketing by calendar
+ * week split that one report across two windows and halved every total.
+ */
+function weekCount(){
+  const all=allDates();
+  if(!all.length) return 0;
+  const first=new Date(all[0]+"T00:00:00"), last=new Date(all[all.length-1]+"T00:00:00");
+  return Math.max(1, Math.ceil(((last-first)/86400000+1)/7));
+}
+function window_(){
+  const all=allDates();
+  if(!all.length) return null;
+  const i=Math.min(Math.max(F.week,0),weekCount()-1);
+  const to=shift(all[all.length-1], -7*i);
+  const from=shift(to,-6);
+  return {from:from,to:to,label:fmtDay(from)+" \u2013 "+fmtDay(to),index:i,count:weekCount()};
+}
+function venueOn(v){ return F.venues.indexOf(v)>-1; }
+function activeVenues(){ return F.venues.length?VENUES.filter(venueOn):VENUES; }
+function rows(key){
+  const w=window_(); if(!w) return [];
+  return D[key].filter(r=>r.date>=w.from&&r.date<=w.to&&(!F.venues.length||venueOn(r.venue)));
+}
+function setWeek(d){ F.week=Math.min(Math.max(F.week+d,0),Math.max(weekCount()-1,0)); renderFilters(); render(); }
+function setVenue(v){
+  if(!v) F.venues=[];
+  else if(venueOn(v)) F.venues=F.venues.filter(x=>x!==v);
+  else F.venues=F.venues.concat([v]);
+  renderFilters(); render();
+}
+function setView(v){ F.view=v; render(); }
+function setSort(k){
+  if(F.sort.k===k) F.sort.d=-F.sort.d;
+  else F.sort={k:k,d:(k==="name"||k==="employee")?1:-1};
+  render();
+}
+
+function renderFilters(){
+  const w=window_();
+  const el=document.getElementById("filters");
+  el.innerHTML=
+    '<span class="chip nav" onclick="setWeek(1)">&#8249;</span>'+
+    '<span class="chip on">Week</span>'+
+    '<span class="chip nav" onclick="setWeek(-1)">&#8250;</span>'+
+    '<span class="rangelbl">'+(w?esc(w.label)+(w.index?"":" \u00b7 latest"):"no data")+'</span>'+
+    '<span class="sep"></span>'+
+    '<span class="chip '+(F.venues.length===0?"on":"")+'" onclick="setVenue(\'\')">All venues</span>'+
+    VENUES.map(v=>'<span class="chip '+(venueOn(v)?"on":"")+'" onclick="setVenue(\''+v+'\')">'+esc(v)+'</span>').join("")+
+    '<span class="sep"></span>'+
+    ["overview","wastage","discounts","voids","people"].map(v=>
+      '<span class="chip '+(F.view===v?"on":"")+'" onclick="setView(\''+v+'\')">'+
+      v.charAt(0).toUpperCase()+v.slice(1)+'</span>').join("");
+}
+
+/* ---------- shared bits ---------- */
+function metric(k,v,sub,colour){
+  return '<div class="metric"><div class="k">'+esc(k)+'</div>'+
+    '<div class="val"'+(colour?' style="color:'+colour+'"':'')+'>'+v+'</div>'+
+    (sub?'<div class="sub">'+sub+'</div>':'')+'</div>';
+}
+function barChart(keys,vals,labels,titles){
+  const mx=Math.max.apply(null,[1].concat(vals));
+  return '<div class="chart">'+keys.map((k,i)=>
+    '<div class="col" title="'+esc(titles[i])+'"><div class="pair">'+
+    '<div class="bx" style="height:'+Math.round(vals[i]/mx*120)+'px"></div></div>'+
+    '<div class="lb">'+esc(labels[i])+'</div></div>').join("")+'</div>';
+}
+function sortRows(list,key){
+  const d=F.sort.d;
+  return list.slice().sort((a,b)=>{
+    let x=a[F.sort.k], y=b[F.sort.k];
+    if(x===undefined){x=a[key];y=b[key];}
+    if(typeof x==="string"){x=x.toLowerCase();y=String(y).toLowerCase();}
+    return x<y?-d:x>y?d:0;
+  });
+}
+function th(k,lbl,cls){
+  const on=F.sort.k===k;
+  return '<th class="'+(cls||"")+' sortable'+(on?" sorted":"")+'" onclick="setSort('+
+    JSON.stringify(k).replace(/"/g,"&quot;")+')">'+esc(lbl)+(on?(F.sort.d<0?" \u25bc":" \u25b2"):"")+'</th>';
+}
+/** Split check discounts into wastage and everything else - they are different animals. */
+function splitChecks(){
+  const cs=rows("check");
+  return {waste:cs.filter(r=>r.discount_name===WASTE), other:cs.filter(r=>r.discount_name!==WASTE)};
+}
+/** Items inside a discounted check, from the transaction log. Check numbers REPEAT across
+ *  days, so the key must be store + date + check - never the check number alone. */
+function checkItems(){
+  const m={};
+  D.txn.forEach(r=>{ (m[r.venue+"|"+r.date+"|"+r.check_no]=m[r.venue+"|"+r.date+"|"+r.check_no]||[]).push(r); });
+  return m;
+}
+
+/* ---------- views ---------- */
+function viewOverview(){
+  const {waste,other}=splitChecks();
+  const items=rows("item"), vs=rows("voids");
+  const wTot=waste.reduce((a,r)=>a+r.amount,0);
+  const oTot=other.reduce((a,r)=>a+r.amount,0)+items.reduce((a,r)=>a+r.amount,0);
+  const vTot=vs.reduce((a,r)=>a+r.price_inc,0);
+  const rTot=rows("txn").reduce((a,r)=>a+r.refund,0);
+  const days=Array.from(new Set(rows("check").concat(items,vs).map(r=>r.date))).sort();
+
+  let html='<div class="card"><div class="label">This week at a glance</div><div class="metrics">'+
+    metric("Wastage",money0(wTot),waste.length+" clearance check"+(waste.length===1?"":"s"),"var(--amber)")+
+    metric("Other discounts",money0(oTot),(other.length+items.length)+" discounts")+
+    metric("Voids",money0(vTot),vs.length+" line"+(vs.length===1?"":"s"),"var(--red)")+
+    metric("Refunds",money0(Math.abs(rTot)),"from the transaction log")+
+    '</div>'+
+    '<div class="note">Wastage is shown on its own because it is authorised end-of-day clearance and '+
+    'dwarfs everything else. Rolled together, the numbers that need your attention disappear inside it.</div></div>';
+
+  // wastage by venue
+  const byV=VENUES.map(v=>waste.filter(r=>r.venue===v).reduce((a,r)=>a+r.amount,0));
+  if(wTot>0){
+    html+='<div class="card"><div class="label">Wastage by venue</div><table><tbody>'+
+      VENUES.map((v,i)=>byV[i]?('<tr><td><b>'+esc(v)+'</b></td>'+
+        '<td class="hide-sm"><div class="barwrap"><div class="bar" style="width:'+
+          Math.round(byV[i]/Math.max.apply(null,byV)*100)+'%"></div></div></td>'+
+        '<td class="num"><b>'+money(byV[i])+'</b></td>'+
+        '<td class="num muted">'+Math.round(byV[i]/wTot*100)+'%</td></tr>'):"").join("")+
+      '</tbody></table></div>';
+  }
+  // per day
+  if(days.length){
+    const wByDay=days.map(d=>waste.filter(r=>r.date===d).reduce((a,r)=>a+r.amount,0));
+    html+='<div class="card"><div class="label">Wastage by day</div>'+
+      barChart(days,wByDay,days.map(d=>dayName(d)),
+        days.map((d,i)=>fmtDay(d)+" "+dayName(d)+" \u2014 "+money(wByDay[i])))+'</div>';
+  }
+  return html;
+}
+
+function viewWastage(){
+  const {waste}=splitChecks();
+  if(!waste.length) return '<div class="card">No wastage recorded in this week.</div>';
+  const items=checkItems();
+  // What is actually being binned. The transaction log gives the lines on each clearance
+  // check; counting them is what turns "$1,468 wasted" into something a kitchen can act on.
+  const tally={}; let matched=0, unmatched=0;
+  waste.forEach(r=>{
+    const list=items[r.venue+"|"+r.date+"|"+r.check_no];
+    if(!list){ unmatched++; return; }
+    matched++;
+    list.forEach(x=>{
+      const k=x.venue+"|"+x.item;
+      (tally[k]=tally[k]||{venue:x.venue,name:x.item,n:0,days:new Set()});
+      tally[k].n++; tally[k].days.add(x.date);
+    });
+  });
+  const list=Object.keys(tally).map(k=>tally[k]);
+  list.forEach(t=>t.dayCount=t.days.size);
+  const sorted=sortRows(list.map(t=>({venue:t.venue,name:t.name,n:t.n,dayCount:t.dayCount})),"n");
+
+  let html='<div class="card"><div class="label">Clearance checks'+
+    '<span class="legend">'+waste.length+' this week</span></div><table><thead><tr>'+
+    '<th>When</th><th>Venue</th><th>Who</th><th class="num">Items</th><th class="num">Value</th>'+
+    '</tr></thead><tbody>'+
+    waste.slice().sort((a,b)=>b.amount-a.amount).map(r=>{
+      const l=items[r.venue+"|"+r.date+"|"+r.check_no];
+      return '<tr><td>'+fmtDay(r.date)+' <span class="muted">'+dayName(r.date)+'</span></td>'+
+        '<td>'+esc(r.venue)+'</td><td>'+esc(r.employee)+'</td>'+
+        '<td class="num">'+(l?l.length:'<span class="muted">?</span>')+'</td>'+
+        '<td class="num"><b>'+money(r.amount)+'</b></td></tr>';
+    }).join("")+'</tbody></table>'+
+    (unmatched?'<div class="note">'+unmatched+' check(s) could not be matched to the transaction log, '+
+      'so their contents are unknown. Usually means RR008 did not cover that date.</div>':'')+
+    '</div>';
+
+  if(sorted.length){
+    html+='<div class="card"><div class="label">What is being binned'+
+      '<span class="legend">from '+matched+' matched check(s)</span></div><table><thead><tr>'+
+      th("name","Item")+th("venue","Venue","hide-sm")+th("n","Times binned","num")+
+      th("dayCount","On how many days","num hide-sm")+
+      '</tr></thead><tbody>'+
+      sorted.slice(0,60).map(t=>'<tr><td><b>'+esc(t.name)+'</b></td>'+
+        '<td class="hide-sm">'+esc(t.venue)+'</td>'+
+        '<td class="num">'+t.n+'</td>'+
+        '<td class="num hide-sm">'+t.dayCount+'</td></tr>').join("")+
+      '</tbody></table>'+
+      '<div class="note">An item binned on most days of the week is a par level set too high \u2014 '+
+      'that is the list worth taking to the kitchen.</div></div>';
+  }
+  return html;
+}
+
+function viewDiscounts(){
+  const {other}=splitChecks();
+  const items=rows("item");
+  const all=items.map(r=>({...r,level:"item"})).concat(other.map(r=>({...r,level:"check"})));
+  if(!all.length) return '<div class="card">No discounts (other than wastage) in this week.</div>';
+  const byType={};
+  all.forEach(r=>{
+    const k=r.discount_name||"(unnamed)";
+    (byType[k]=byType[k]||{name:k,n:0,amount:0,level:new Set()});
+    byType[k].n++; byType[k].amount+=r.amount; byType[k].level.add(r.level);
+  });
+  const types=sortRows(Object.keys(byType).map(k=>({name:k,n:byType[k].n,amount:byType[k].amount,
+    level:Array.from(byType[k].level).join(" + ")})),"amount");
+  const tot=all.reduce((a,r)=>a+r.amount,0);
+  return '<div class="card"><div class="label">Discounts by type'+
+    '<span class="legend">wastage excluded</span></div><table><thead><tr>'+
+    th("name","Discount")+th("level","Level","hide-sm")+th("n","Uses","num")+th("amount","Value","num")+
+    '</tr></thead><tbody>'+
+    types.map(t=>'<tr><td><b>'+esc(t.name)+'</b></td><td class="hide-sm muted">'+esc(t.level)+'</td>'+
+      '<td class="num">'+t.n+'</td><td class="num"><b>'+money(t.amount)+'</b></td></tr>').join("")+
+    '</tbody><tfoot><tr><td>'+types.length+' type(s)</td><td class="hide-sm"></td>'+
+    '<td class="num">'+all.length+'</td><td class="num">'+money(tot)+'</td></tr></tfoot></table>'+
+    '<div class="note">Near-identical names here usually mean the same discount configured more than '+
+    'once in ImPOS \u2014 worth consolidating at the source.</div></div>';
+}
+
+function viewVoids(){
+  const vs=rows("voids");
+  if(!vs.length) return '<div class="card">No voids in this week.</div>';
+  const byR={};
+  vs.forEach(r=>{ const k=r.void_reason||"(none)";
+    (byR[k]=byR[k]||{name:k,n:0,amount:0}); byR[k].n++; byR[k].amount+=r.price_inc; });
+  const reasons=sortRows(Object.keys(byR).map(k=>byR[k]),"amount");
+  let html='<div class="card"><div class="label">Voids by reason</div><table><thead><tr>'+
+    th("name","Reason")+th("n","Lines","num")+th("amount","Value","num")+
+    '</tr></thead><tbody>'+
+    reasons.map(t=>'<tr><td><b>'+esc(t.name)+'</b></td><td class="num">'+t.n+'</td>'+
+      '<td class="num"><b>'+money(t.amount)+'</b></td></tr>').join("")+
+    '</tbody></table>'+
+    '<div class="note">Voids are attributed to whoever placed the ORIGINAL order, not whoever '+
+    'performed the void \u2014 so a manager fixing someone else\u2019s mistake shows against that person.</div></div>';
+  const withNotes=vs.filter(r=>r.notes);
+  html+='<div class="card"><div class="label">Every void'+
+    (withNotes.length?'<span class="legend">'+withNotes.length+' with a note</span>':'')+
+    '</div><table><thead><tr><th>When</th><th>Venue</th><th>Who</th><th>Item</th>'+
+    '<th class="hide-sm">Reason</th><th class="num">Value</th><th class="hide-sm">Note</th></tr></thead><tbody>'+
+    vs.slice().sort((a,b)=>b.price_inc-a.price_inc).slice(0,120).map(r=>
+      '<tr><td>'+fmtDay(r.date)+' <span class="muted">'+esc(r.void_time)+'</span></td>'+
+      '<td>'+esc(r.venue)+'</td><td>'+esc(r.employee)+'</td><td>'+esc(r.item)+'</td>'+
+      '<td class="hide-sm muted">'+esc(r.void_reason)+'</td>'+
+      '<td class="num">'+money(r.price_inc)+'</td>'+
+      '<td class="hide-sm muted">'+esc(r.notes)+'</td></tr>').join("")+
+    '</tbody></table></div>';
+  return html;
+}
+
+function viewPeople(){
+  const {waste,other}=splitChecks();
+  const items=rows("item"), vs=rows("voids");
+  const p={};
+  const get=(v,e)=>{const k=v+"|"+e; return p[k]=p[k]||{venue:v,employee:e||"(unknown)",
+    wastage:0,wasteN:0,discounts:0,discN:0,voids:0,voidN:0};};
+  waste.forEach(r=>{const o=get(r.venue,r.employee); o.wastage+=r.amount; o.wasteN++;});
+  other.forEach(r=>{const o=get(r.venue,r.employee); o.discounts+=r.amount; o.discN++;});
+  items.forEach(r=>{const o=get(r.venue,r.employee); o.discounts+=r.amount; o.discN++;});
+  vs.forEach(r=>{const o=get(r.venue,r.employee); o.voids+=r.price_inc; o.voidN++;});
+  const list=Object.keys(p).map(k=>p[k]);
+  if(!list.length) return '<div class="card">Nothing recorded against anyone this week.</div>';
+  const sorted=sortRows(list,"discounts");
+  const T=k=>list.reduce((a,r)=>a+r[k],0);
+  return '<div class="card"><div class="label">By person</div><table><thead><tr>'+
+    th("employee","Person")+th("venue","Venue","hide-sm")+
+    th("discounts","Discounts","num")+th("discN","#","num hide-sm")+
+    th("voids","Voids","num")+th("voidN","#","num hide-sm")+
+    th("wastage","Wastage","num")+th("wasteN","#","num hide-sm")+
+    '</tr></thead><tbody>'+
+    sorted.map(r=>'<tr><td><b>'+esc(r.employee)+'</b></td>'+
+      '<td class="hide-sm muted">'+esc(r.venue)+'</td>'+
+      '<td class="num">'+(r.discounts?money(r.discounts):'<span class="muted">\u2013</span>')+'</td>'+
+      '<td class="num hide-sm muted">'+(r.discN||"")+'</td>'+
+      '<td class="num">'+(r.voids?money(r.voids):'<span class="muted">\u2013</span>')+'</td>'+
+      '<td class="num hide-sm muted">'+(r.voidN||"")+'</td>'+
+      '<td class="num" style="color:var(--amber)">'+(r.wastage?money(r.wastage):'<span class="muted">\u2013</span>')+'</td>'+
+      '<td class="num hide-sm muted">'+(r.wasteN||"")+'</td></tr>').join("")+
+    '</tbody><tfoot><tr><td>'+sorted.length+' people</td><td class="hide-sm"></td>'+
+    '<td class="num">'+money(T("discounts"))+'</td><td class="num hide-sm"></td>'+
+    '<td class="num">'+money(T("voids"))+'</td><td class="num hide-sm"></td>'+
+    '<td class="num">'+money(T("wastage"))+'</td><td class="num hide-sm"></td></tr></tfoot></table>'+
+    '<div class="note"><b>Read this by column, not by row total.</b> Wastage lands on whoever closes, '+
+    'so the person at the top of that column is the one who shuts the venue \u2014 every day, at every site. '+
+    'The useful comparison is a person against others who work the same shift, and against their own '+
+    'previous weeks. A single week\u2019s ranking says almost nothing.</div></div>';
+}
+
+/* ---------- render ---------- */
+function render(){
+  const app=document.getElementById("app");
+  const w=window_();
+  if(!w){
+    app.innerHTML='<div class="card"><b>No staff report data yet.</b>'+
+      '<div class="note">The reports broadcast at 9pm each Sunday and are imported by '+
+      'processStaffReports on the Monday trigger.'+
+      (MISSING.length?' Tabs not found: <b>'+MISSING.map(esc).join(", ")+'</b>.':'')+'</div></div>';
+    return;
+  }
+  const body = F.view==="wastage" ? viewWastage()
+             : F.view==="discounts" ? viewDiscounts()
+             : F.view==="voids" ? viewVoids()
+             : F.view==="people" ? viewPeople()
+             : viewOverview();
+  app.innerHTML =
+    '<div class="card"><div class="label">'+esc(w.label)+
+      (F.venues.length?' \u00b7 '+esc(F.venues.join(" + ")):'')+
+      '<span class="legend">week '+(w.index+1)+' of '+w.count+'</span></div>'+
+      '<div class="muted">Discount, void and transaction reports from ImPOS, imported weekly.</div></div>'+
+    body +
+    (MISSING.length?'<div class="card"><b>Some tabs are missing:</b> '+MISSING.map(esc).join(", ")+
+      '<div class="note">They are created the first time processStaffReports runs with data.</div></div>':'');
+}
+load();
+</script>
+</body>
+</html>
