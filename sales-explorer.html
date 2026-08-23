@@ -427,12 +427,13 @@ async function load(force){
           from:hhmm(r[si("start")]), to:hhmm(r[si("end")]),
           hours:num(r[si("hours")]), cost:num(r[si("cost")]),
           // Three states now, not two. "final" is what Deputy actually paid; "salary" is
-          // a figure derived from an annual salary; "pending" is an hourly shift not yet
-          // exported to payroll. The first two are both real money and belong in Labour %;
-          // only "pending" is a genuine hole. Keeping the basis alongside means a derived
-          // number never gets presented as payroll truth.
+          // derived from an annual salary; "pending" is an hourly shift not yet exported to
+          // payroll. The first two are both real money and belong in Labour %; only
+          // "pending" is a genuine hole. "rate" carries the contractual hourly rate for
+          // salaried staff - the figure on the payslip, not cost/hours.
           costed:["final","salary"].indexOf(String(r[si("costed")]||"").trim())>-1,
-          basis:String(r[si("costed")]||"").trim()
+          basis:String(r[si("costed")]||"").trim(),
+          rate:num(r[si("rate")])
         });
       });
       shOk_=sh_.length>0;
@@ -748,11 +749,11 @@ function labourFor(from,to,gran,slotKey){
     if(F.venues.length&&!venueOn(sh.venue)) return;
     if(F.day&&sh.day!==F.day) return;
     if(sh.kind==="training"||sh.kind==="leave"){
-      // Paid, but off the floor - never in the curve, and only counted when looking at a
-      // whole period rather than a single slot. Training is apprentice school time; leave
-      // is a holiday. Deputy costs most leave lines, so this is real wage cost that has to
-      // stay in the period total - but putting it in the curve would show someone working
-      // a shift they were on holiday for.
+      // Paid, but off the floor - never in the curve, and only counted over a whole period
+      // rather than a single slot. Training is apprentice school time; leave is a holiday.
+      // Deputy costs most leave lines, so it is real wage cost that has to stay in the
+      // period total - but in the curve it would show someone working a shift they were
+      // on holiday for.
       if(slotKey==null){
         if(sh.kind==="training") meta.training+=sh.cost; else meta.leave+=sh.cost;
       }
@@ -772,12 +773,13 @@ function labourFor(from,to,gran,slotKey){
     meta.hours+=hrs; meta.cost+=cst;
     if(sh.costed){
       meta.costedCost+=cst; meta.costedHours+=hrs;
-      if(sh.basis==="salary") meta.salaryCost+=cst;   // for the "of which" line
+      if(sh.basis==="salary") meta.salaryCost+=cst;
     }
     else meta.pendingHours+=hrs;
     staff.push({who:sh.who, area:sh.area, venue:sh.venue, day:sh.day,
                 from:sh.from, to:sh.to, hours:hrs, cost:cst,
-                fullHours:sh.hours, fullCost:sh.cost, costed:sh.costed, basis:sh.basis});
+                fullHours:sh.hours, fullCost:sh.cost, costed:sh.costed,
+                basis:sh.basis, rate:sh.rate});
 
     if(!span) return;
     for(let m=Math.floor(sh.from/gran)*gran;m<sh.to;m+=gran){
@@ -813,9 +815,12 @@ function labourTable(L){
           (sel?' <span class="muted">of '+x.fullHours.toFixed(1)+'h</span>':'')+'</td>'+
         '<td class="num">'+x.hours.toFixed(2)+'</td>'+
         '<td class="num">'+(x.costed?money(x.cost):'<span class="muted">pending</span>')+'</td>'+
-        '<td class="num">'+(x.costed&&rate?money(rate)+
-          (x.basis==="salary"?' <span class="muted">eff.</span>':'')
-          :'<span class="muted">\u2013</span>')+'</td></tr>';
+        '<td class="num">'+(x.basis==="salary"&&x.rate
+            // Salaried: show the contractual rate from the payslip, not cost/hours. Salary
+            // is allocated per DAY, so cost/hours would read $38.46 on a 7.5h day and
+            // $33.94 on an 8.5h day for someone paid a flat $37.955466.
+            ? money(x.rate)+' <span class="muted">salary</span>'
+            : (x.costed&&rate?money(rate):'<span class="muted">\u2013</span>'))+'</td></tr>';
     }).join("")+
     '</tbody></table>'+
     (pend.length?'<div class="note"><b>'+pend.length+' shift(s) with no cost yet:</b> '+
