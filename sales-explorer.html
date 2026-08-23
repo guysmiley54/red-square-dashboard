@@ -426,7 +426,13 @@ async function load(force){
           who:String(r[si("employee")]||"").trim(),
           from:hhmm(r[si("start")]), to:hhmm(r[si("end")]),
           hours:num(r[si("hours")]), cost:num(r[si("cost")]),
-          costed:String(r[si("costed")]||"").trim()==="final"
+          // Three states now, not two. "final" is what Deputy actually paid; "salary" is
+          // a figure derived from an annual salary; "pending" is an hourly shift not yet
+          // exported to payroll. The first two are both real money and belong in Labour %;
+          // only "pending" is a genuine hole. Keeping the basis alongside means a derived
+          // number never gets presented as payroll truth.
+          costed:["final","salary"].indexOf(String(r[si("costed")]||"").trim())>-1,
+          basis:String(r[si("costed")]||"").trim()
         });
       });
       shOk_=sh_.length>0;
@@ -734,16 +740,22 @@ function labourFor(from,to,gran,slotKey){
      question nobody asked. */
   const slots={}, staff=[];
   const meta={hours:0,cost:0,costedCost:0,costedHours:0,pendingHours:0,training:0,staff:0,
+              leave:0,salaryCost:0,
               slot:(slotKey==null?null:slotKey)};
   if(!SHIFTS_OK) return {slots:slots,meta:meta,staff:staff,ok:false};
   SHIFTS.forEach(function(sh){
     if(sh.day<from||sh.day>to) return;
     if(F.venues.length&&!venueOn(sh.venue)) return;
     if(F.day&&sh.day!==F.day) return;
-    if(sh.kind==="training"){
+    if(sh.kind==="training"||sh.kind==="leave"){
       // Paid, but off the floor - never in the curve, and only counted when looking at a
-      // whole period rather than a single slot.
-      if(slotKey==null) meta.training+=sh.cost;
+      // whole period rather than a single slot. Training is apprentice school time; leave
+      // is a holiday. Deputy costs most leave lines, so this is real wage cost that has to
+      // stay in the period total - but putting it in the curve would show someone working
+      // a shift they were on holiday for.
+      if(slotKey==null){
+        if(sh.kind==="training") meta.training+=sh.cost; else meta.leave+=sh.cost;
+      }
       return;
     }
     const span=(sh.from!=null&&sh.to!=null&&sh.to>sh.from)?sh.to-sh.from:0;
@@ -758,11 +770,14 @@ function labourFor(from,to,gran,slotKey){
     }
     const hrs=sh.hours*share, cst=sh.cost*share;
     meta.hours+=hrs; meta.cost+=cst;
-    if(sh.costed){ meta.costedCost+=cst; meta.costedHours+=hrs; }
+    if(sh.costed){
+      meta.costedCost+=cst; meta.costedHours+=hrs;
+      if(sh.basis==="salary") meta.salaryCost+=cst;   // for the "of which" line
+    }
     else meta.pendingHours+=hrs;
     staff.push({who:sh.who, area:sh.area, venue:sh.venue, day:sh.day,
                 from:sh.from, to:sh.to, hours:hrs, cost:cst,
-                fullHours:sh.hours, fullCost:sh.cost, costed:sh.costed});
+                fullHours:sh.hours, fullCost:sh.cost, costed:sh.costed, basis:sh.basis});
 
     if(!span) return;
     for(let m=Math.floor(sh.from/gran)*gran;m<sh.to;m+=gran){
@@ -798,15 +813,16 @@ function labourTable(L){
           (sel?' <span class="muted">of '+x.fullHours.toFixed(1)+'h</span>':'')+'</td>'+
         '<td class="num">'+x.hours.toFixed(2)+'</td>'+
         '<td class="num">'+(x.costed?money(x.cost):'<span class="muted">pending</span>')+'</td>'+
-        '<td class="num">'+(x.costed&&rate?money(rate):'<span class="muted">\u2013</span>')+'</td></tr>';
+        '<td class="num">'+(x.costed&&rate?money(rate)+
+          (x.basis==="salary"?' <span class="muted">eff.</span>':'')
+          :'<span class="muted">\u2013</span>')+'</td></tr>';
     }).join("")+
     '</tbody></table>'+
     (pend.length?'<div class="note"><b>'+pend.length+' shift(s) with no cost yet:</b> '+
       pend.map(function(x){return esc(x.who)+" ("+x.fullHours.toFixed(1)+"h)";}).join(", ")+
-      '.<br>Deputy fills cost in on payroll export. If these stay uncosted after a pay run, '+
-      'the usual cause is a <b>salaried</b> employee \u2014 salary is not allocated per '+
-      'timesheet, so Deputy has no hourly figure to attribute. Their hours are still right; '+
-      'only the dollars are missing.</div>':'');
+      '.<br>Deputy fills cost in on payroll export, so these are hourly staff waiting on a '+
+      'pay run. Salaried staff are costed separately from their annual salary and no longer '+
+      'appear here. Their hours are right; only the dollars are pending.</div>':'');
 }
 
 function metric(k,val,sub,colour){
@@ -986,11 +1002,13 @@ function render(){
           metric("Labour hours",m.hours.toFixed(m.hours<10?2:1),
                  m.staff+" "+(m.staff===1?"person":"people")+" on"+(scope?" "+scope:""))+
           (m.cost?metric("Wage cost",money(m.cost),
-            m.pendingHours?m.pendingHours.toFixed(1)+"h not costed yet":"all costed"):"")+
+            (m.salaryCost?"incl. "+money0(m.salaryCost)+" salaried \u00b7 ":"")+
+            (m.pendingHours?m.pendingHours.toFixed(1)+"h not costed yet":"all costed")):"")+
           (pct!==null?metric("Labour %",pct.toFixed(1)+"%",
             (m.pendingHours?"of costed shifts only":"of takings")+(scope?" \u00b7 "+scope:"")):"")+
           metric("Revenue per hour",money0(m.hours?rev/m.hours:0),"per labour hour")+
           (m.training?metric("Training",money0(m.training),"paid, off the floor"):"")+
+          (m.leave?metric("Leave",money0(m.leave),"paid, off the floor"):"")+
           '</div>'+labourTable(L)
         ) : '<div class="note">Nobody rostered'+(scope?" during "+scope:" in this window")+'.</div>';
       } else if(F.labour){
