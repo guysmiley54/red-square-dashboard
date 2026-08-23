@@ -728,31 +728,85 @@ function hideChip(k){
  * TRAINING (apprentice school time) is a real wage cost but the person is not on the
  * floor, so it never enters the time-of-day curve. It is reported separately.
  */
-function labourFor(from,to,gran){
-  const slots={}, meta={hours:0,cost:0,costedCost:0,pendingHours:0,training:0,people:{},staff:0};
-  if(!SHIFTS_OK) return {slots:slots,meta:meta,ok:false};
+function labourFor(from,to,gran,slotKey){
+  /* slotKey (minutes since midnight) narrows everything to that one bar. Without it the
+     figures were the whole day even with a slot selected, so "3 people on" answered a
+     question nobody asked. */
+  const slots={}, staff=[];
+  const meta={hours:0,cost:0,costedCost:0,costedHours:0,pendingHours:0,training:0,staff:0,
+              slot:(slotKey==null?null:slotKey)};
+  if(!SHIFTS_OK) return {slots:slots,meta:meta,staff:staff,ok:false};
   SHIFTS.forEach(function(sh){
     if(sh.day<from||sh.day>to) return;
     if(F.venues.length&&!venueOn(sh.venue)) return;
     if(F.day&&sh.day!==F.day) return;
-    if(sh.kind==="training"){ meta.training+=sh.cost; return; }
-    meta.hours+=sh.hours; meta.cost+=sh.cost;
-    if(sh.costed) meta.costedCost+=sh.cost; else meta.pendingHours+=sh.hours;
-    meta.people[sh.who]=1;
-    if(sh.from==null||sh.to==null||sh.to<=sh.from) return;
-    const span=sh.to-sh.from;
+    if(sh.kind==="training"){
+      // Paid, but off the floor - never in the curve, and only counted when looking at a
+      // whole period rather than a single slot.
+      if(slotKey==null) meta.training+=sh.cost;
+      return;
+    }
+    const span=(sh.from!=null&&sh.to!=null&&sh.to>sh.from)?sh.to-sh.from:0;
+
+    // How much of this shift falls inside the selection?
+    let share=1;
+    if(slotKey!=null){
+      if(!span) return;
+      const mins=Math.min(slotKey+gran,sh.to)-Math.max(slotKey,sh.from);
+      if(mins<=0) return;                       // not on during this slot
+      share=mins/span;
+    }
+    const hrs=sh.hours*share, cst=sh.cost*share;
+    meta.hours+=hrs; meta.cost+=cst;
+    if(sh.costed){ meta.costedCost+=cst; meta.costedHours+=hrs; }
+    else meta.pendingHours+=hrs;
+    staff.push({who:sh.who, area:sh.area, venue:sh.venue, day:sh.day,
+                from:sh.from, to:sh.to, hours:hrs, cost:cst,
+                fullHours:sh.hours, fullCost:sh.cost, costed:sh.costed});
+
+    if(!span) return;
     for(let m=Math.floor(sh.from/gran)*gran;m<sh.to;m+=gran){
       // Only overlapping minutes count, so a shift starting 07:10 does not take a full
       // slot's worth of the 07:00 bucket.
       const mins=Math.min(m+gran,sh.to)-Math.max(m,sh.from);
       if(mins<=0) continue;
-      const share=mins/span;
       const o=slots[m]||(slots[m]={hours:0,cost:0});
-      o.hours+=sh.hours*share; o.cost+=sh.cost*share;
+      o.hours+=sh.hours*(mins/span); o.cost+=sh.cost*(mins/span);
     }
   });
-  meta.staff=Object.keys(meta.people).length;
-  return {slots:slots,meta:meta,ok:true};
+  meta.staff=Object.keys(staff.reduce(function(a,x){a[x.who]=1;return a;},{})).length;
+  staff.sort(function(a,b){ return b.hours-a.hours; });
+  return {slots:slots,meta:meta,staff:staff,ok:true};
+}
+
+/** Who was on, with their derived rate. Uncosted shifts are named, because "55 hours not
+ *  costed" on a fully-approved day is a question, not a footnote. */
+function labourTable(L){
+  if(!L.staff.length) return "";
+  const sel=L.meta.slot!=null;
+  const pend=L.staff.filter(function(x){return !x.costed;});
+  return '<table style="margin-top:12px"><thead><tr>'+
+    '<th>Who</th><th class="hide-sm">Area</th><th>Shift</th>'+
+    '<th class="num">Hours'+(sel?" here":"")+'</th>'+
+    '<th class="num">Cost</th><th class="num">$/hr</th></tr></thead><tbody>'+
+    L.staff.map(function(x){
+      const rate=x.fullHours?x.fullCost/x.fullHours:0;
+      return '<tr'+(x.costed?"":' style="background:#fdf8ec"')+'>'+
+        '<td><b>'+esc(x.who||"(unnamed)")+'</b></td>'+
+        '<td class="hide-sm muted">'+esc(x.area||"")+'</td>'+
+        '<td class="muted">'+(x.from!=null?clock(x.from)+"\u2013"+clock(x.to):"?")+
+          (sel?' <span class="muted">of '+x.fullHours.toFixed(1)+'h</span>':'')+'</td>'+
+        '<td class="num">'+x.hours.toFixed(2)+'</td>'+
+        '<td class="num">'+(x.costed?money(x.cost):'<span class="muted">pending</span>')+'</td>'+
+        '<td class="num">'+(x.costed&&rate?money(rate):'<span class="muted">\u2013</span>')+'</td></tr>';
+    }).join("")+
+    '</tbody></table>'+
+    (pend.length?'<div class="note"><b>'+pend.length+' shift(s) with no cost yet:</b> '+
+      pend.map(function(x){return esc(x.who)+" ("+x.fullHours.toFixed(1)+"h)";}).join(", ")+
+      '.<br>Deputy fills cost in on payroll export. If these stay uncosted after a pay run, '+
+      'the usual cause is a <b>salaried</b> employee \u2014 salary is not allocated per '+
+      'timesheet, so Deputy has no hourly figure to attribute. Their hours are still right; '+
+      'only the dollars are missing.</div>':'');
 }
 
 function metric(k,val,sub,colour){
@@ -918,21 +972,27 @@ function render(){
       }
       // Labour figures live under the chart, not mixed into the revenue metrics.
       let labMets="";
-      if(lab&&lab.ok&&lab.meta.hours>0){
-        const m=lab.meta, rev=sum(bucket(rows,g));
+      if(lab&&lab.ok){
+        // With a bar selected, every labour figure is for THAT bar - hours, cost, who was
+        // on. Reporting the whole day next to one hour's takings was the bug.
+        const selKey=(F.slot&&F.slot.kind==="time")?F.slot.key:null;
+        const L=(selKey==null)?lab:labourFor(w.from,w.to,g,selKey);
+        const m=L.meta;
+        const rev=(selKey==null)?sum(bucket(rows,g)):(bucket(rows,g)[selKey]||0);
         const pct=(m.costedCost&&rev)?(m.costedCost/rev*100):null;
-        labMets='<div class="metrics" style="margin-top:2px">'+
-          metric("Labour hours",m.hours.toFixed(1),m.staff+" people on")+
-          (m.cost?metric("Wage cost",money0(m.cost),
+        const scope=(selKey==null)?"":clock(selKey)+"\u2013"+clock(selKey+g);
+        labMets = m.hours>0 ? (
+          '<div class="metrics" style="margin-top:2px">'+
+          metric("Labour hours",m.hours.toFixed(m.hours<10?2:1),
+                 m.staff+" "+(m.staff===1?"person":"people")+" on"+(scope?" "+scope:""))+
+          (m.cost?metric("Wage cost",money(m.cost),
             m.pendingHours?m.pendingHours.toFixed(1)+"h not costed yet":"all costed"):"")+
           (pct!==null?metric("Labour %",pct.toFixed(1)+"%",
-            m.pendingHours?"of costed shifts only":"of takings"):"")+
+            (m.pendingHours?"of costed shifts only":"of takings")+(scope?" \u00b7 "+scope:"")):"")+
           metric("Revenue per hour",money0(m.hours?rev/m.hours:0),"per labour hour")+
           (m.training?metric("Training",money0(m.training),"paid, off the floor"):"")+
-          '</div>'+
-          (m.pendingHours?'<div class="note">'+m.pendingHours.toFixed(1)+' hours are not costed yet \u2014 '+
-            'Deputy fills the cost in when the timesheet is exported to payroll. Hours are complete; '+
-            'dollars will rise as the week is processed.</div>':'');
+          '</div>'+labourTable(L)
+        ) : '<div class="note">Nobody rostered'+(scope?" during "+scope:" in this window")+'.</div>';
       } else if(F.labour){
         labMets='<div class="note">'+(SHIFTS_OK?'No shifts in this window.'
           :'No <b>DeputyShifts</b> tab found \u2014 run processDeputy in the script.')+'</div>';
