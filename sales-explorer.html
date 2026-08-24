@@ -222,11 +222,7 @@ let F={period:"day", offset:0, venues:[], cat:"", q:"", gran:60, compare:false, 
        // Which optional product columns are on. Default is the short view Adrian asked
        // for: Product, Sold, per day, Revenue. Everything else is opt-in.
        cols:{perDay:true, par:false, free:false, avg:false},
-       // On by default. Labour % against target is what this dashboard is for, and leaving
-       // it behind a toggle meant the headline number was one click away from every view.
-       labour:true,
-       // Last date looked at, so a view change can return to it. Session-only.
-       anchor:null,
+       labour:false,
        // Sections collapsed on screen. Wastage starts collapsed; the rest start open.
        hide:{venues:false, chart:false, cats:false, products:false},
        // Private mode: only the venues you have selected show their money. For handing a
@@ -430,14 +426,22 @@ async function load(force){
           who:String(r[si("employee")]||"").trim(),
           from:hhmm(r[si("start")]), to:hhmm(r[si("end")]),
           hours:num(r[si("hours")]), cost:num(r[si("cost")]),
-          // Three states now, not two. "final" is what Deputy actually paid; "salary" is
-          // derived from an annual salary; "pending" is an hourly shift not yet exported.
-          // The first two are both real money and belong in Labour %; only "pending" is a
-          // hole. "rate" is the contractual hourly rate for salaried staff - the payslip
-          // figure, not cost/hours, which would wobble with the length of the day.
+          /* "costed" is now THREE states, not two:
+               final   - Deputy exported it to payroll, the dollars are Deputy's
+               salary  - allocated by the script at annual/260 per working day, because
+                         Deputy never costs a salaried shift. Just as real as "final" for
+                         anything that divides by takings.
+               pending - hourly, awaiting payroll export. Genuinely unknown.
+             Reading only "final" left every salaried manager counted as pending, which put
+             their wage outside Labour % - the exact understatement the salary work in
+             Code.gs exists to remove. */
           costed:["final","salary"].indexOf(String(r[si("costed")]||"").trim())>-1,
           basis:String(r[si("costed")]||"").trim(),
-          rate:num(r[si("rate")])
+          /* Contractual hourly rate, annual/52/38 - the figure on the payslip. Present for
+             salaried staff only. Deriving cost/hours instead makes a salaried person's
+             rate wobble with the length of the shift, which is wrong: they are paid the
+             same whatever the day looked like. */
+          rate:si("rate")>-1?num(r[si("rate")]):0
         });
       });
       shOk_=sh_.length>0;
@@ -504,7 +508,6 @@ function renderFilters(){
     '<span class="chip nav" onclick="shift(1)">&rsaquo;</span>'+
     '<span class="rangelbl">'+esc(w.label)+'</span>'+
     (F.offset!==0?'<span class="chip" onclick="setOffset(0)">Today</span>':"")+
-    '<span class="chip" id="aibtn" onclick="analyseScreen()" style="cursor:pointer">\u2728 Analyse</span>'+
     '<span class="sep"></span>'+
     '<span class="chip '+(F.venues.length===0?"on":"")+'" onclick="setVenue(\'\')">All venues</span>'+
     VENUES.map(function(v){
@@ -612,50 +615,7 @@ function fmtStamp(d){
   return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+
          p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
 }
-/* Offsets from today for a yyyy-MM-dd, so a view change can land on the date you were
-   already looking at. Local midnight both sides, so a DST boundary cannot drift the count. */
-function dayOffsetOf(ymd){
-  const now=new Date(); now.setHours(0,0,0,0);
-  const t=new Date(ymd+"T00:00:00"); t.setHours(0,0,0,0);
-  return Math.round((t-now)/864e5);
-}
-function weekOffsetOf(ymd){
-  const mon=function(d){ const x=new Date(d); x.setHours(0,0,0,0);
-    x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; };            // Monday of that week
-  return Math.round((mon(new Date(ymd+"T00:00:00"))-mon(new Date()))/(7*864e5));
-}
-function monthOffsetOf(ymd){
-  const now=new Date(), t=new Date(ymd+"T00:00:00");
-  return (t.getFullYear()-now.getFullYear())*12+(t.getMonth()-now.getMonth());
-}
-
-/* Switching view keeps the date you are on rather than snapping back to today. Drilling
-   into Wednesday from the week chart and then wanting hourly detail is one thought, not
-   two, and losing the date halfway through meant navigating back every time.
-
-   Anchor order: the day bar selected; the day already being viewed; the last day looked at
-   if still inside the window; today if IT is inside the window; else the window's last day
-   - so stepping back six weeks and switching to Day lands in that week, not this one.
-   F.anchor is what makes a round trip stable: day 21 Aug -> Week -> Day returns to the 21st.
-
-   Session-only. F is rebuilt on load, so a refresh always opens on today in day view. */
-function setPeriod(p){
-  const w=windowFor(0);
-  if(F.period==="day") F.anchor=w.from;                 // remember where you were
-
-  let anchor;
-  if(F.slot&&F.slot.kind==="day") anchor=F.slot.key;
-  else if(F.period==="day")       anchor=w.from;
-  else if(F.anchor&&F.anchor>=w.from&&F.anchor<=w.to) anchor=F.anchor;
-  else{ const today=dkey(new Date()); anchor=(today>=w.from&&today<=w.to)?today:w.to; }
-  F.anchor=anchor;
-
-  F.period=p; F.slot=null;
-  F.offset = (p==="day")  ? dayOffsetOf(anchor)
-           : (p==="week") ? weekOffsetOf(anchor)
-                          : monthOffsetOf(anchor);
-  renderFilters(); render();
-}
+function setPeriod(p){ F.period=p; F.offset=0; F.slot=null; renderFilters(); render(); }
 function shift(d){ F.offset+=d; F.slot=null; renderFilters(); render(); }
 function setOffset(o){ F.offset=o; F.slot=null; renderFilters(); render(); }
 // Toggles membership. Empty selection means every venue.
@@ -693,7 +653,6 @@ function setWSort(k){
 // Tap a bar to drill into that slot, tap it again to come back out.
 function setSlot(kind,key){
   F.slot=(F.slot&&F.slot.kind===kind&&String(F.slot.key)===String(key))?null:{kind:kind,key:key};
-  if(kind==="day"&&F.slot) F.anchor=key;                // so switching to Day lands here
   render();
 }
 function clearSlot(){ F.slot=null; render(); }
@@ -785,35 +744,31 @@ function hideChip(k){
  * floor, so it never enters the time-of-day curve. It is reported separately.
  */
 function labourFor(from,to,gran,slotKey){
-  /* slotKey narrows everything to one bar. Without it the figures were the whole day even
-     with a slot selected, so "3 people on" answered a question nobody asked.
-
-     gran is minutes for the time-of-day chart, or the string "day" for the week/month
-     chart - in which case buckets are dates and slotKey is a yyyy-MM-dd string. Labour was
-     day-view only, which meant the one number this dashboard exists to produce was missing
-     from exactly the views used to judge a week against target. */
-  const byDay=(gran==="day");
+  /* slotKey (minutes since midnight) narrows everything to that one bar. Without it the
+     figures were the whole day even with a slot selected, so "3 people on" answered a
+     question nobody asked. */
   const slots={}, staff=[];
-  const meta={hours:0,cost:0,costedCost:0,costedHours:0,pendingHours:0,training:0,staff:0,
-              leave:0,salaryCost:0,byDay:byDay,
+  const meta={hours:0,cost:0,costedCost:0,costedHours:0,pendingHours:0,training:0,
+              leave:0,salaryCost:0,staff:0,
               slot:(slotKey==null?null:slotKey)};
   if(!SHIFTS_OK) return {slots:slots,meta:meta,staff:staff,ok:false};
   SHIFTS.forEach(function(sh){
     if(sh.day<from||sh.day>to) return;
     if(F.venues.length&&!venueOn(sh.venue)) return;
     if(F.day&&sh.day!==F.day) return;
-    if(sh.kind==="training"||sh.kind==="leave"){
-      /* Paid, but off the floor - never in the curve or the head count. Training is
-         apprentice school time; leave is a holiday. Deputy prices most leave lines, so it
-         is real wage cost that must stay in a period total. In day-bucket mode it can be
-         attributed to its date; in time-of-day mode there is no honest slot for it. */
-      if(byDay){
-        if(slotKey==null||slotKey===sh.day){
-          if(sh.kind==="training") meta.training+=sh.cost; else meta.leave+=sh.cost;
-        }
-      }else if(slotKey==null){
-        if(sh.kind==="training") meta.training+=sh.cost; else meta.leave+=sh.cost;
-      }
+    if(sh.kind==="training"){
+      // Paid, but off the floor - never in the curve, and only counted when looking at a
+      // whole period rather than a single slot.
+      if(slotKey==null) meta.training+=sh.cost;
+      return;
+    }
+    /* LEAVE is the same shape of thing as training: paid, real, and not on the floor.
+       Deputy books it against no operational unit, so Code.gs attaches it to the venue the
+       person mostly works at - which means it arrives here looking like an ordinary shift
+       at that venue. Left untreated its hours inflate "Labour hours" and drag "Revenue per
+       hour" down, making a week with two people on annual leave look badly overstaffed. */
+    if(sh.kind==="leave"){
+      if(slotKey==null) meta.leave+=sh.cost;
       return;
     }
     const span=(sh.from!=null&&sh.to!=null&&sh.to>sh.from)?sh.to-sh.from:0;
@@ -821,33 +776,21 @@ function labourFor(from,to,gran,slotKey){
     // How much of this shift falls inside the selection?
     let share=1;
     if(slotKey!=null){
-      if(byDay){
-        // A day bucket takes the whole shift or none of it - no proportioning needed.
-        if(sh.day!==slotKey) return;
-      }else{
-        if(!span) return;
-        const mins=Math.min(slotKey+gran,sh.to)-Math.max(slotKey,sh.from);
-        if(mins<=0) return;                     // not on during this slot
-        share=mins/span;
-      }
+      if(!span) return;
+      const mins=Math.min(slotKey+gran,sh.to)-Math.max(slotKey,sh.from);
+      if(mins<=0) return;                       // not on during this slot
+      share=mins/span;
     }
     const hrs=sh.hours*share, cst=sh.cost*share;
     meta.hours+=hrs; meta.cost+=cst;
-    if(sh.costed){
-      meta.costedCost+=cst; meta.costedHours+=hrs;
-      if(sh.basis==="salary") meta.salaryCost+=cst;
-    }
+    if(sh.costed){ meta.costedCost+=cst; meta.costedHours+=hrs; }
     else meta.pendingHours+=hrs;
+    if(sh.basis==="salary") meta.salaryCost+=cst;
     staff.push({who:sh.who, area:sh.area, venue:sh.venue, day:sh.day,
                 from:sh.from, to:sh.to, hours:hrs, cost:cst,
                 fullHours:sh.hours, fullCost:sh.cost, costed:sh.costed,
-                basis:sh.basis, rate:sh.rate, kind:sh.kind});
+                basis:sh.basis, rate:sh.rate});
 
-    if(byDay){
-      const o=slots[sh.day]||(slots[sh.day]={hours:0,cost:0});
-      o.hours+=sh.hours; o.cost+=sh.cost;
-      return;
-    }
     if(!span) return;
     for(let m=Math.floor(sh.from/gran)*gran;m<sh.to;m+=gran){
       // Only overlapping minutes count, so a shift starting 07:10 does not take a full
@@ -874,242 +817,35 @@ function labourTable(L){
     '<th class="num">Hours'+(sel?" here":"")+'</th>'+
     '<th class="num">Cost</th><th class="num">$/hr</th></tr></thead><tbody>'+
     L.staff.map(function(x){
-      const rate=x.fullHours?x.fullCost/x.fullHours:0;
+      /* Salaried staff carry their contractual rate from the sheet. Deriving cost/hours
+         gives $38.46 on a 7.5h day and $33.94 on an 8.5h day for someone paid a flat
+         $37.955466 - a number that moves for no reason anyone can explain. */
+      const salaried=x.basis==="salary";
+      const rate=salaried?(x.rate||0):(x.fullHours?x.fullCost/x.fullHours:0);
       return '<tr'+(x.costed?"":' style="background:#fdf8ec"')+'>'+
-        '<td><b>'+esc(x.who||"(unnamed)")+'</b></td>'+
+        '<td><b>'+esc(x.who||"(unnamed)")+'</b>'+
+          (salaried?' <span class="muted" style="font-size:11px">salaried</span>':'')+'</td>'+
         '<td class="hide-sm muted">'+esc(x.area||"")+'</td>'+
         '<td class="muted">'+(x.from!=null?clock(x.from)+"\u2013"+clock(x.to):"?")+
           (sel?' <span class="muted">of '+x.fullHours.toFixed(1)+'h</span>':'')+'</td>'+
         '<td class="num">'+x.hours.toFixed(2)+'</td>'+
         '<td class="num">'+(x.costed?money(x.cost):'<span class="muted">pending</span>')+'</td>'+
-        '<td class="num">'+(x.basis==="salary"&&x.rate
-            // Salaried: the contractual rate from the payslip. Salary is allocated per DAY,
-            // so cost/hours would read $38.46 on a 7.5h day and $33.94 on an 8.5h day for
-            // someone paid a flat $37.955466.
-            ? money(x.rate)+' <span class="muted">salary</span>'
-            : (x.costed&&rate?money(rate):'<span class="muted">\u2013</span>'))+'</td></tr>';
+        '<td class="num">'+(x.costed&&rate?money(rate):'<span class="muted">\u2013</span>')+'</td></tr>';
     }).join("")+
     '</tbody></table>'+
     (pend.length?'<div class="note"><b>'+pend.length+' shift(s) with no cost yet:</b> '+
       pend.map(function(x){return esc(x.who)+" ("+x.fullHours.toFixed(1)+"h)";}).join(", ")+
-      '.<br>Deputy fills cost in on payroll export, so these are hourly staff waiting on a '+
-      'pay run. Salaried staff are costed from their annual salary and no longer appear '+
-      'here. Their hours are right; only the dollars are pending.</div>':'');
+      '.<br>These are <b>hourly</b> staff awaiting payroll export \u2014 Deputy fills the '+
+      'cost in when the timesheet is exported, and the next nightly run picks it up. '+
+      'Salaried staff no longer appear here: their pay is allocated by the script and shows '+
+      'as a real figure. If someone salaried is still listed above, they have not resolved '+
+      'to a salary \u2014 add them to the <b>SalaryStaff</b> tab.</div>':'');
 }
 
 function metric(k,val,sub,colour){
   return '<div class="metric"><div class="k">'+k+'</div>'+
     '<div class="val"'+(colour?' style="color:'+colour+'"':'')+'>'+val+'</div>'+
     (sub?'<div class="sub">'+sub+'</div>':'')+'</div>';
-}
-
-/* ================= ANALYSIS =================
-   Same shape as the supplier explorer's: key in localStorage, one card prepended to the
-   app, Haiku by default. What differs is the context builder - purchasing is about prices
-   over time; this is about labour against revenue, hour by hour.
-
-   ONE HONEST LIMIT, stated up front so the output cannot mislead: the SalesFeed has NO
-   operator column. Yellowfin's "Basic Item Sales Breakdown" is item-level, so there is no
-   way to know who rang a sale up. What we CAN do is cross the sale's timestamp against
-   DeputyShifts and say who was ROSTERED at that venue at that minute. That is a shortlist
-   worth a conversation, not evidence, and the prompt is told to say so. */
-const AI_MODEL = "claude-haiku-4-5";   // "claude-sonnet-4-6" for deeper takes, ~3x cost
-
-function aiKey(){
-  let k = localStorage.getItem("anthropic_key") || "";
-  if(!k){
-    k = prompt("Paste your Anthropic API key (sk-ant-...).\nStored only in this browser, never in the page or the sheet.") || "";
-    k = k.trim();
-    if(k) localStorage.setItem("anthropic_key", k);
-  }
-  return k;
-}
-function aiForgetKey(){ localStorage.removeItem("anthropic_key"); alert("API key removed from this browser."); }
-
-/** Who was rostered at this venue at this moment. Not who served - that is unknowable here. */
-function onAt(venue, day, mins){
-  return SHIFTS.filter(function(sh){
-    return sh.day===day && sh.venue===venue && sh.kind==="shift" &&
-           sh.from!=null && sh.to!=null && mins>=sh.from && mins<sh.to;
-  }).map(function(sh){ return sh.who; });
-}
-
-/** An "open" line: an item whose unit price moves around, which is what a $-open key or a
- *  manual override looks like in the feed. Detected from the data rather than a list of
- *  item names, so a new open key on a new till is caught without anyone maintaining a map. */
-function openPriceItems(rows){
-  const by={};
-  rows.forEach(function(r){
-    if(!(r.qty>0)||!(r.sales>0)) return;
-    const k=itemOf(r);
-    const o=by[k]||(by[k]={item:k,n:0,rev:0,prices:{},lines:[]});
-    const unit=Math.round(r.sales/r.qty*100)/100;
-    o.n++; o.rev+=r.sales; o.prices[unit]=(o.prices[unit]||0)+1;
-    o.lines.push({venue:r.venue,day:r.day,ts:r.ts,unit:unit,qty:r.qty,sales:r.sales});
-  });
-  return Object.keys(by).map(function(k){ return by[k]; })
-    .filter(function(o){
-      const ps=Object.keys(o.prices).map(Number);
-      if(o.n<3||ps.length<3) return false;             // a habit, not a one-off
-      const lo=Math.min.apply(null,ps), hi=Math.max.apply(null,ps);
-      return lo>0 && hi/lo>=1.5;                       // genuinely variable, not rounding
-    })
-    .sort(function(a,b){ return b.rev-a.rev; });
-}
-
-function salesContext(){
-  const w=windowFor();
-  const rows=scoped();
-  const byDay=(F.period!=="day");
-  const lab=labourFor(w.from,w.to,byDay?"day":F.gran);
-  const revTot=rows.reduce(function(s,r){return s+r.sales;},0);
-  const m=lab.ok?lab.meta:null;
-
-  // --- labour against revenue, bucket by bucket. The wage-efficiency question itself.
-  const revB=bucket(rows,byDay?"day":F.gran);
-  const keys=Object.keys(lab.slots||{}).concat(Object.keys(revB))
-    .filter(function(v,i,a){return a.indexOf(v)===i;})
-    .sort(function(a,b){ return byDay?(a<b?-1:1):(+a)-(+b); });
-  const slotRows=keys.map(function(k){
-    const L=(lab.slots||{})[k]||{hours:0,cost:0}, rev=revB[k]||0;
-    return {when:(byDay?k:clock(+k)),
-            revenue:Math.round(rev),
-            labourHours:Math.round(L.hours*10)/10,
-            labourCost:Math.round(L.cost),
-            labourPct:rev>0?Math.round(L.cost/rev*1000)/10:null,
-            revPerLabourHour:L.hours>0?Math.round(rev/L.hours):null};
-  });
-
-  // --- wastage: $0 lines in perishable groups, which is food in the bin
-  const wmap={};
-  rows.forEach(function(r){
-    if(!isPerishable(r.group)) return;
-    const k=r.venue+"|"+itemOf(r);
-    const o=wmap[k]||(wmap[k]={item:itemOf(r),venue:r.venue,group:r.group,sold:0,free:0,rev:0});
-    if(r.sales>0){ o.sold+=r.qty; o.rev+=r.sales; } else { o.free+=r.qty; }
-  });
-  const waste=Object.keys(wmap).map(function(k){return wmap[k];})
-    .filter(function(o){ return o.free>0; })
-    .map(function(o){
-      const tot=o.sold+o.free, unit=o.sold>0?o.rev/o.sold:0;
-      return {item:o.item,venue:vShort(o.venue),group:o.group,
-              sold:Math.round(o.sold),binned:Math.round(o.free),
-              wastePct:tot?Math.round(o.free/tot*1000)/10:null,
-              revenueForgone:Math.round(o.free*unit)};
-    })
-    .sort(function(a,b){ return b.revenueForgone-a.revenueForgone; }).slice(0,20);
-
-  // --- items this period against the same window one period back
-  function tally(rs){
-    const t={};
-    rs.forEach(function(r){
-      if(!(r.sales>0)) return;
-      const k=itemOf(r);
-      const o=t[k]||(t[k]={item:k,qty:0,rev:0,group:r.group});
-      o.qty+=r.qty; o.rev+=r.sales;
-    });
-    return t;
-  }
-  const now=tally(rows), prev=tally(scopedIn(windowFor(1)));
-  const items=Object.keys(now).map(function(k){
-    const a=now[k], b=prev[k];
-    return {item:a.item,group:a.group,qty:Math.round(a.qty),revenue:Math.round(a.rev),
-            avgPrice:a.qty?Math.round(a.rev/a.qty*100)/100:null,
-            prevRevenue:b?Math.round(b.rev):0,
-            changePct:(b&&b.rev>0)?Math.round((a.rev-b.rev)/b.rev*1000)/10:null};
-  });
-  const topSellers=items.slice().sort(function(a,b){return b.revenue-a.revenue;}).slice(0,15);
-  const sliding=items.filter(function(i){ return i.changePct!=null&&i.changePct<=-25&&i.prevRevenue>=100; })
-                     .sort(function(a,b){return a.changePct-b.changePct;}).slice(0,12);
-  const tail=items.filter(function(i){ return i.revenue<Math.max(40,revTot*0.0015); })
-                  .sort(function(a,b){return a.revenue-b.revenue;}).slice(0,12);
-
-  // --- open-price lines, with who was on at the time
-  const opens=openPriceItems(rows).slice(0,8).map(function(o){
-    const ps=Object.keys(o.prices).map(Number).sort(function(a,b){return a-b;});
-    const eg=o.lines.sort(function(a,b){return b.sales-a.sales;}).slice(0,6).map(function(l){
-      const mins=l.ts?l.ts.getHours()*60+l.ts.getMinutes():null;
-      return {day:l.day,venue:vShort(l.venue),time:mins!=null?clock(mins):null,
-              unitPrice:l.unit,qty:l.qty,total:Math.round(l.sales*100)/100,
-              rosteredAtThatMoment:mins!=null?onAt(l.venue,l.day,mins):[]};
-    });
-    return {item:o.item,lines:o.n,revenue:Math.round(o.rev),
-            distinctPrices:ps.length,priceRange:[ps[0],ps[ps.length-1]],examples:eg};
-  });
-
-  return {title:(F.period==="day"?"Day":F.period==="week"?"Week":"Month")+" \u2014 "+w.label,
-    data:{
-      scope:"Venues: "+(F.venues.length?F.venues.join(", "):"all")+
-            ". Period: "+w.label+" ("+w.from+" to "+w.to+")."+
-            (F.cat?" Category filter: "+F.cat+".":"")+
-            " Target is COGS + wages at 30% of revenue; labourPct here is wages/revenue only,"+
-            " so food cost sits on top of it."+
-            " IMPORTANT: the sales feed has NO operator field. rosteredAtThatMoment lists who"+
-            " was ON SHIFT at that venue at that minute - a shortlist of who COULD have rung it"+
-            " up, never proof of who did. Say so plainly if you name anyone.",
-      headline:{revenue:Math.round(revTot),
-        wageCost:m?Math.round(m.cost):null,
-        ofWhichSalaried:m?Math.round(m.salaryCost):null,
-        labourPct:(m&&revTot)?Math.round(m.costedCost/revTot*1000)/10:null,
-        labourHours:m?Math.round(m.hours*10)/10:null,
-        revenuePerLabourHour:(m&&m.hours)?Math.round(revTot/m.hours):null,
-        hoursNotYetCosted:m?Math.round(m.pendingHours*10)/10:null,
-        trainingCost:m?Math.round(m.training):null,
-        leaveCost:m?Math.round(m.leave):null},
-      labourVsRevenue:slotRows,
-      wastage:waste,
-      topSellers:topSellers,
-      slidingItems:sliding,
-      longTail:tail,
-      openPriceLines:opens
-    }};
-}
-
-async function analyseScreen(){
-  const key=aiKey();
-  if(!key) return;
-  const btn=document.getElementById("aibtn");
-  if(btn) btn.textContent="\u2728 Thinking\u2026";
-  let card=document.getElementById("aicard");
-  if(!card){
-    card=document.createElement("div");
-    card.id="aicard"; card.className="card";
-    card.style.borderColor="var(--ink)";
-    document.getElementById("app").prepend(card);
-  }
-  card.innerHTML='<div class="label">Analysis</div><div class="muted" style="font-size:13px">Reading the screen\u2026</div>';
-  try{
-    const ctx=salesContext();
-    let payload=JSON.stringify(ctx.data);
-    if(payload.length>90000) payload=payload.slice(0,90000);
-    const resp=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","x-api-key":key,
-               "anthropic-version":"2023-06-01",
-               "anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:AI_MODEL,max_tokens:1800,messages:[{role:"user",content:
-"You are analysing trading data for a Tasmanian hospitality group (Red Square Cafe Glenorchy & Cambridge, Luma Kitchen). The reader is the owner: direct, practical, Australian English, no fluff and no flattery.\n\nView: "+ctx.title+"\nData (JSON): "+payload+"\n\nCover these, in this order, and only where the data supports something worth saying:\n\n1. LABOUR EFFICIENCY. Work through labourVsRevenue bucket by bucket. Name the specific hours or days where wage cost is heavy against takings, and where it is lean. Say what to change - a start pushed later, a finish brought forward, an overlap trimmed - with the hours named. Quantify the weekly saving where you can.\n2. WASTAGE. Which items are being binned in volume and what it costs. Separate a real over-prep problem from a small number on a cheap item.\n3. TOP SELLERS and what to do with them: hold, promote, or reprice.\n4. POOR PERFORMERS. slidingItems are falling against last period; longTail is barely selling. Say which to cut, which to reprice, which to leave alone.\n5. OPEN PRICE LINES. openPriceLines are items rung up at inconsistent prices, usually an open key or a manual override. Flag anything that looks like a discounting habit or a control weakness. rosteredAtThatMoment is who was ON SHIFT, not who served - if you name people, say explicitly that it is only who was rostered and worth a conversation, not evidence.\n6. PROFITABILITY. Two or three concrete moves against the 30% COGS-plus-wages target.\n\nLead with the single most valuable finding. Short paragraphs and dash bullets, specific numbers throughout. Where the data is too thin to judge, say so rather than padding. No preamble, no closing summary. Under 600 words."}]})
-    });
-    const data=await resp.json();
-    if(data.error) throw new Error(data.error.message||("API error "+resp.status));
-    const text=(data.content||[]).filter(function(b){return b.type==="text";})
-      .map(function(b){return b.text;}).join("\n");
-    const htmlOut=esc(text)
-      .replace(/\*\*(.+?)\*\*/g,"<b>$1</b>")
-      .replace(/^#+ *(.*)$/gm,"<b>$1</b>")
-      .replace(/^[-*] (.*)$/gm,"&bull; $1")
-      .replace(/\n/g,"<br>");
-    card.innerHTML='<div class="label" style="display:flex;justify-content:space-between">'+
-      '<span>Analysis \u2014 '+esc(ctx.title)+'</span>'+
-      '<a style="cursor:pointer;text-transform:none;letter-spacing:0" '+
-      "onclick=\"document.getElementById('aicard').remove()\">\u2715</a></div>"+
-      '<div style="font-size:14px;line-height:1.6">'+htmlOut+'</div>';
-  }catch(e){
-    const bad=/401|auth|invalid|credit/i.test(String(e.message));
-    card.innerHTML='<div class="label">Analysis</div><div class="err" style="font-size:13px">'+esc(e.message)+
-      (bad?' \u2014 <a style="cursor:pointer;text-decoration:underline" onclick="aiForgetKey();analyseScreen()">re-enter API key</a>':"")+'</div>';
-  }
-  if(btn) btn.textContent="\u2728 Analyse";
 }
 
 function render(){
@@ -1283,10 +1019,10 @@ function render(){
           metric("Labour hours",m.hours.toFixed(m.hours<10?2:1),
                  m.staff+" "+(m.staff===1?"person":"people")+" on"+(scope?" "+scope:""))+
           (m.cost?metric("Wage cost",money(m.cost),
-            (m.salaryCost?"incl. "+money0(m.salaryCost)+" salaried \u00b7 ":"")+
-            (m.pendingHours?m.pendingHours.toFixed(1)+"h not costed yet":"all costed")):"")+
+            m.pendingHours?m.pendingHours.toFixed(1)+"h not costed yet"
+              :(m.salaryCost?"incl. "+money0(m.salaryCost)+" salary":"all costed")):"")+
           (pct!==null?metric("Labour %",pct.toFixed(1)+"%",
-            (m.pendingHours?"of costed shifts only":"of takings")+(scope?" \u00b7 "+scope:"")):"")+
+            (m.pendingHours?"excl. shifts not yet costed":"of takings")+(scope?" \u00b7 "+scope:"")):"")+
           metric("Revenue per hour",money0(m.hours?rev/m.hours:0),"per labour hour")+
           (m.training?metric("Training",money0(m.training),"paid, off the floor"):"")+
           (m.leave?metric("Leave",money0(m.leave),"paid, off the floor"):"")+
@@ -1313,24 +1049,13 @@ function render(){
     if(days.length>1){
       const max=Math.max.apply(null,[1].concat([].concat.apply([],bySeries.map(function(b){
         return Object.keys(b).map(function(k){return b[k];}); }))));
-      // Labour, bucketed by DATE rather than time of day. Same grey-bar treatment as the
-      // day view: scaled to its own maximum, because wage and revenue are different units
-      // and the point is where the two shapes diverge.
-      const lab=F.labour?labourFor(w.from,w.to,"day"):null;
-      const labMax=lab&&lab.ok?Math.max.apply(null,[0.01].concat(
-        Object.keys(lab.slots).map(function(k){return lab.slots[k].hours;}))):1;
       const cols=days.map(function(d){
         const tip=series.map(function(v,i){
           return (v?vShort(v)+" ":"")+money(bySeries[i][d]||0);
         }).join("  \u00b7  ");
         const on=F.slot&&F.slot.kind==="day"&&F.slot.key===d;
         const cls="col"+(F.slot&&F.slot.kind==="day"?(on?" sel":" dim"):"");
-        const ls=lab&&lab.ok?(lab.slots[d]||{hours:0,cost:0}):null;
-        const labTip=ls?"  \u00b7  "+ls.hours.toFixed(1)+"h labour"+
-          (ls.cost?" ("+money(ls.cost)+")":""):"";
-        return '<div class="'+cls+'" onclick="setSlot(\'day\',\''+d+'\')" title="'+fmtDay(d)+' \u2014 '+tip+labTip+'">'+
-          (ls?'<div class="labbar" style="height:'+Math.round(ls.hours/labMax*140)+'px"></div>':"")+
-          '<div class="pair">'+
+        return '<div class="'+cls+'" onclick="setSlot(\'day\',\''+d+'\')" title="'+fmtDay(d)+' \u2014 '+tip+'"><div class="pair">'+
           series.map(function(v,i){
             return '<div class="bx" style="height:'+Math.round((bySeries[i][d]||0)/max*140)+
                    'px;background:'+colour(v)+'"></div>';
@@ -1350,43 +1075,9 @@ function render(){
           metric("Per day",money0(total/days.length),days.length+" trading days")+
           metric("Best day",fmtShort(best),money(cur[best]));
       }
-      /* Labour for the week or month, and for one day when a bar is selected. This is the
-         number the dashboard exists to produce, and it was previously unavailable in the
-         very views used to judge a period against the 30% target. */
-      let labMets="";
-      if(lab&&lab.ok){
-        const selDay=(F.slot&&F.slot.kind==="day")?F.slot.key:null;
-        const L=(selDay==null)?lab:labourFor(w.from,w.to,"day",selDay);
-        const m=L.meta;
-        const rev=(selDay==null)?sum(bucket(rows,"day")):(bucket(rows,"day")[selDay]||0);
-        const pct=(m.costedCost&&rev)?(m.costedCost/rev*100):null;
-        const scope=(selDay==null)?"":fmtDay(selDay);
-        labMets = m.hours>0 ? (
-          '<div class="metrics" style="margin-top:2px">'+
-          metric("Labour hours",m.hours.toFixed(m.hours<10?2:1),
-                 m.staff+" "+(m.staff===1?"person":"people")+(scope?" on "+scope:" on"))+
-          (m.cost?metric("Wage cost",money(m.cost),
-            (m.salaryCost?"incl. "+money0(m.salaryCost)+" salaried \u00b7 ":"")+
-            (m.pendingHours?m.pendingHours.toFixed(1)+"h not costed yet":"all costed")):"")+
-          (pct!==null?metric("Labour %",pct.toFixed(1)+"%",
-            (m.pendingHours?"of costed shifts only":"of takings")+(scope?" \u00b7 "+scope:"")):"")+
-          metric("Revenue per hour",money0(m.hours?rev/m.hours:0),"per labour hour")+
-          (m.training?metric("Training",money0(m.training),"paid, off the floor"):"")+
-          (m.leave?metric("Leave",money0(m.leave),"paid, off the floor"):"")+
-          '</div>'+labourTable(L)
-        ) : '<div class="note">Nobody rostered'+(scope?" on "+scope:" in this window")+'.</div>';
-      } else if(F.labour){
-        labMets='<div class="note">'+(SHIFTS_OK?'No shifts in this window.'
-          :'No <b>DeputyShifts</b> tab found \u2014 run processDeputy in the script.')+'</div>';
-      }
-      chart='<div class="card" data-sec="chart"><div class="label">Sales by day'+hideChip("chart")+
-        '<span class="chip" style="padding:4px 10px;'+(F.labour?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" onclick="toggleLabour()">'+
-          (F.labour?"\u2713 ":"")+'Labour</span>'+
-        cmpChip+cmpLegend+
-        (F.labour&&lab&&lab.ok?'<span class="legend"><i style="background:#c9c6bf"></i>labour hours</span>':"")+
-        '</div>'+
+      chart='<div class="card" data-sec="chart"><div class="label">Sales by day'+hideChip("chart")+cmpChip+cmpLegend+'</div>'+
         '<div class="chart">'+cols+'</div>'+
-        '<div class="metrics">'+mets+'</div>'+labMets+'</div>';
+        '<div class="metrics">'+mets+'</div></div>';
     }
   }
 
