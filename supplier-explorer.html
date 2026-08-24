@@ -57,7 +57,7 @@
 </head>
 <body>
 <header>
-  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-053328</span></a>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-060412</span></a>
   <div class="crumb" id="crumb"></div>
   <button onclick="loadAll()">↻ refresh</button>
   <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-053328"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-060412"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -79,11 +79,35 @@ const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 const SALES_SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
 const SALES_CUTOVER  = "2026-08-03";
 
+/* Live wage cost from Deputy (BG Sales Data > DeputyShifts). From WAGES_CUTOVER onward,
+   wages come from actual timesheets instead of the manager-entered weekly figure.
+
+   WAGES_CUTOVER MUST BE A MONDAY. The weekly reporting sheets spread a week's wages
+   across the seven days ending Sunday, so a cutover mid-week would take part of a week
+   from the form and part from Deputy — the two would not add back to that week's payroll.
+   A Monday is the only date where no reporting week straddles the join.
+
+   Set to "" to ignore Deputy entirely and go back to the weekly sheets for everything. */
+const DEPUTY_TAB    = "DeputyShifts";
+const WAGES_CUTOVER = "2026-08-03";           // Monday. Old KPI sheets run to Sun 2 Aug.
+/* Which Deputy rows are a wage cost here. This is a P&L figure — prime cost against
+   sales — so it is the whole wage bill, including apprentice school time ("training")
+   and paid leave. The sales-explorer deliberately holds both OUT of its Labour %,
+   because neither is labour on the floor. Same data, two different questions; the two
+   dashboards are meant to disagree. */
+const WAGE_KINDS = { shift:1, training:1, leave:1 };
+/* Deputy Cost is the base wage: no super, no workers comp, no payroll tax. If the
+   manager-entered figure on the old sheets included on-costs, the series steps DOWN at
+   the cutover for a reason that is not real. Set this to gross up (e.g. 1.12 for 12%
+   super) once you have checked what the old figure actually contained. 1 = base only. */
+const WAGE_ONCOST_MULT = 1;
+
 /* Weekly sales + wage reporting (Google Form response sheets, one per site — the
    Cambridge sheet carries Luma as a second pair of columns). Weekly figures are
    spread evenly across the seven days ending on Week Ending, so any date range
    picks up a sensible share instead of only ranges containing that Sunday.
-   Sales from these are used BEFORE the cutover only; wages always. */
+   Sales from these are used BEFORE the sales cutover only; wages before the wage
+   cutover only. */
 const WEEKLY_SOURCES = [
   { id:"10e898xL_QX9THVnxE3UJPdIe5uY7qBvC6PJfdn4k6qQ", gid:"345653728", weekEnd:1,
     venues:[{name:"Red Square Cambridge", sales:2, wages:3},
@@ -95,6 +119,11 @@ const SIGNOFF = "Cheers,\nAdrian";
 
 /* ================= DATA & FILTER STATE ================= */
 let INV = [], LINES = [], byNumber = {}, CFG = {}, VENUE_LIST = [], SALES = [], INV_MIN_DATE = null, STAFF = [], SMAP = {}, SALES_SOURCE = null;
+/* WAGE_SOURCE: the date Deputy takes over, or null if it never loaded.
+   WAGE_ROWS: the per-day/venue/kind/state Deputy aggregate, kept whole so the KPI card
+   can say how much of the window Deputy has not costed yet. Summing wages alone loses
+   that, and an uncosted shift is indistinguishable from a cheap one once it is a total. */
+let WAGE_SOURCE = null, WAGE_ROWS = [];
 /* Window for the product price-history chart and purchase list, in days (0 = all).
    Deliberately NOT tied to the top date filter: the stat cards, the 90-day average and
    the volatile flag all read full history, so a chart scoped to the filter disagreed
@@ -351,6 +380,75 @@ async function fetchSalesDaily(){
   })).filter(r=>r.date&&r.venue);
 }
 
+/* Wage cost from Deputy timesheets. DeputyShifts is one row per person per shift, so
+   this is summed server-side like the sales feed.
+
+   Columns read: A date, B venue, C kind, I cost, J costed. Deliberately only those —
+   the tab has gained columns before (it went from ten to eleven when salaried rates
+   were added) and reading by position means a future column lands harmlessly at the end.
+
+   `costed` is TRI-STATE, and this is the whole reason the raw rows are kept:
+     final    Deputy costed it on payroll export
+     salary   costed by our own engine — Deputy never allocates a salary to a shift
+     pending  approved but not exported yet. Cost is 0, and it does NOT mean $0.
+   Anything not "pending" is a real dollar figure. Treating "salary" as pending would
+   drop every manager's wage; treating "pending" as costed understates the current week
+   by most of its labour. */
+async function fetchWagesDaily(){
+  if(!WAGES_CUTOVER) return [];
+  /* No WHERE clause, for the same reason as the sales feed: gviz types the date column
+     inconsistently and comparing it to a bare date silently matches nothing. Grouped
+     this way it is a few dozen rows a day, so pulling the lot and filtering here costs
+     nothing and removes a failure mode that looks like "wages are zero". */
+  const q="select A, B, C, J, sum(I), sum(H) group by A, B, C, J"
+         +" label A 'date', B 'venue', C 'kind', J 'costed', sum(I) 'wages', sum(H) 'hours'";
+  const url=`https://docs.google.com/spreadsheets/d/${SALES_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(DEPUTY_TAB)}&tq=${encodeURIComponent(q)}`;
+  const res=await fetch(url);
+  const txt=await res.text();
+  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("Deputy wage tab not readable");
+  const rows=parseCsv(txt);
+  if(rows.length<2) return [];
+  return rows.slice(1).map(r=>({
+    date:feedDate_(r[0]), venue:String(r[1]||"").trim(),
+    kind:String(r[2]||"shift").trim().toLowerCase() || "shift",
+    costed:String(r[3]||"").trim().toLowerCase(),
+    wages:+String(r[4]||"").replace(/[^0-9.\-]/g,"")||0,
+    hours:+String(r[5]||"").replace(/[^0-9.\-]/g,"")||0
+  })).filter(r=>r.date&&r.venue&&WAGE_KINDS[r.kind]);
+}
+
+/* One row per venue per DAY, from the Deputy rows above. */
+function wagesDailyFold(rows){
+  const by={};
+  rows.forEach(r=>{
+    const k=(+r.date)+"|"+r.venue;
+    const o=by[k]||(by[k]={date:r.date, venue:r.venue, wages:0});
+    o.wages += r.wages * WAGE_ONCOST_MULT;
+  });
+  return Object.values(by);
+}
+
+/* What Deputy has not costed yet, and roughly what it is worth.
+   The blended rate is taken from EVERY costed hour in WAGE_ROWS, not from the rows in
+   the current date filter: a week that is entirely un-exported contains no costed hour
+   to derive a rate from, which is exactly when the estimate is needed. Salary rows are
+   excluded from the rate — a salaried day is a flat cost spread over whatever hours were
+   worked, so blending it in drags the hourly figure around for no good reason. */
+function pendingWages(from,to){
+  let pendHours=0, rateD=0, rateH=0;
+  WAGE_ROWS.forEach(r=>{
+    if(!venueOk(r.venue)) return;
+    if(r.costed==="final"){ rateD+=r.wages; rateH+=r.hours; }   // rate: all history
+    if(from && r.date<from) return;                              // exposure: this window
+    if(to && r.date>to) return;
+    if(r.costed==="pending") pendHours+=r.hours;
+  });
+  /* rateD is the raw Deputy figure, so the gross-up is applied once here and nowhere
+     else — the same way wagesDailyFold applies it once to the actuals. */
+  const rate = rateH>0 ? rateD/rateH : 0;
+  return { pendHours, rate, estimate:pendHours*rate*WAGE_ONCOST_MULT, haveRate:rateH>0 };
+}
+
 /* The feed returns dates unpadded ("2026-8-3"), which gvizDate rejects. Try the
    shared parser first so anything it already handles keeps working, then fall back
    to a tolerant form. */
@@ -419,7 +517,7 @@ async function loadAll(){
   const app=document.getElementById("app");
   app.innerHTML='<div id="status">Loading data…</div>';
   try{
-    const [inv,lines,cfgRows,salesRows,pmRows,staffRows,staffMapRows,manualRows,feedDaily,weeklyRows]=await Promise.all([
+    const [inv,lines,cfgRows,salesRows,pmRows,staffRows,staffMapRows,manualRows,feedDaily,weeklyRows,wageRows]=await Promise.all([
       fetchTab("Invoices"),
       fetchTab("InvoiceLines"),
       fetchTab("SupplierConfig").catch(()=>[]),
@@ -429,7 +527,8 @@ async function loadAll(){
       fetchTab("StaffSupplierMap").catch(()=>[]),
       fetchTab("ManualPurchases").catch(()=>[]),
       fetchSalesDaily().catch(()=>null),
-      fetchWeekly().catch(()=>[])
+      fetchWeekly().catch(()=>[]),
+      fetchWagesDaily().catch(()=>[])
     ]);
     /* Sales tab first. If the POS feed answered, its sales replace the tab's from the
        cutover on — wages are kept from the tab either side, since payroll still lives
@@ -437,7 +536,19 @@ async function loadAll(){
        degrades to the old numbers rather than showing zero sales. */
     const feedLive = Array.isArray(feedDaily) && feedDaily.length>0;
     const weeklyLive = Array.isArray(weeklyRows) && weeklyRows.length>0;
+    const wageLive = Array.isArray(wageRows) && wageRows.length>0;
     const cutover = (feedLive && SALES_CUTOVER) ? gvizDate(SALES_CUTOVER) : null;
+    /* Two independent handovers, each guarded by its own source actually having loaded.
+       Sales move to the ImPOS feed at SALES_CUTOVER; wages move to Deputy timesheets at
+       WAGES_CUTOVER. If either source is down its cutover is null and that half of the
+       dashboard silently falls back to the old sheets — a broken feed shows last month's
+       numbers, not zero. */
+    WAGE_ROWS = wageLive ? wageRows : [];
+    const wCutover = (wageLive && WAGES_CUTOVER) ? gvizDate(WAGES_CUTOVER) : null;
+    /* True while the OLD wage sources still own this date. One test, used in all three
+       places below, so the form sheets and the Sales tab can never disagree about where
+       the join is and quietly double-count a week. */
+    const oldWages = d => !wCutover || !d || d < wCutover;
     /* The Sales tab holds the SAME weekly wage figures as the form sheets, dated on
        week ending. Counting both double-counted wages. When the form sheets load they
        win outright — they're the source the forms write to — and the tab contributes
@@ -448,20 +559,26 @@ async function loadAll(){
       return {
         date:d, venue:r.venue||"",
         sales: useTabSales ? (+String(r.sales||"").replace(/[^0-9.\-]/g,"")||0) : 0,
-        wages: weeklyLive ? 0 : (+String(r.wages||"").replace(/[^0-9.\-]/g,"")||0)
+        wages: (weeklyLive || !oldWages(d)) ? 0 : (+String(r.wages||"").replace(/[^0-9.\-]/g,"")||0)
       };
     }).filter(r=>r.date);
-    /* Weekly form data: wages always, sales only before the cutover so the feed
-       isn't double-counted in the changeover week. */
+    /* Weekly form data: sales only before the sales cutover, wages only before the wage
+       cutover, so neither feed is double-counted in its changeover week. */
     weeklyRows.forEach(w=>{
       SALES.push({date:w.date, venue:w.venue,
                   sales:(cutover && w.date>=cutover) ? 0 : w.sales,
-                  wages:w.wages});
+                  wages: oldWages(w.date) ? w.wages : 0});
     });
     if(feedLive){
       feedDaily.forEach(f=>{ if(f.date>=cutover) SALES.push({date:f.date, venue:f.venue, sales:f.sales, wages:0}); });
     }
+    if(wageLive){
+      wagesDailyFold(wageRows).forEach(w=>{
+        if(w.date>=wCutover) SALES.push({date:w.date, venue:w.venue, sales:0, wages:w.wages});
+      });
+    }
     SALES_SOURCE = feedLive ? cutover : null;
+    WAGE_SOURCE  = wageLive ? wCutover : null;
     SMAP=Object.assign({}, STAFF_MAP_DEFAULT);
     staffMapRows.forEach(r=>{ const f=norm(r.staff_name||r.staff||r.from), t=(r.pipeline_name||r.into||r.to||""); if(f&&t) SMAP[String(r.staff_name||r.staff||r.from).trim().toLowerCase()]=String(t).trim(); });
     const mapName=n=>{ const k=String(n||"").trim().toLowerCase(); return SMAP[k]||n||""; };
@@ -1106,17 +1223,30 @@ function renderReports(){
   const unmappedList=Object.entries(unmapped).sort((a,b)=>b[1]-a[1]);
   const kpiPct=(a,b)=>b?Math.round(a/b*1000)/10+"%":"—";
   const clampNote = (!FILTER.from && INV_MIN_DATE) ? ` (sales from ${fmtD(INV_MIN_DATE)}, matched to invoice history)` : "";
+  /* Labour Deputy has not costed yet. Wages% is read as an answer, so it must not quietly
+     report a triumph that is really an un-run payroll export: a week approved but not yet
+     exported shows only the salaried staff and lands around 6%, against a true 26%. The
+     window matches scopedSales exactly — same floor, same filter — or the warning would
+     describe a different period from the number it sits under. */
+  const pw = WAGE_SOURCE ? pendingWages(fromDate()||INV_MIN_DATE, toDate()) : null;
+  const pendMaterial = pw && pw.pendHours>0 && (!wagesTot || pw.estimate > wagesTot*0.02);
+  const wageFlag = pendMaterial ? `<span style="color:var(--red)"> ▲</span>` : "";
   const kpiCard=salesTot>0?`
     <div class="card"><div class="label">KPIs — ${esc(periodLabel())}${clampNote}</div>
       <div class="statgrid">
         <div class="stat"><div class="v">${money(salesTot)}</div><div class="k">Sales</div></div>
         <div class="stat"><div class="v">${kpiPct(cogsSpend,salesTot)}</div><div class="k">COGS % of sales</div></div>
-        ${wagesTot>0?`<div class="stat"><div class="v">${kpiPct(wagesTot,salesTot)}</div><div class="k">Wages % of sales</div></div>
-        <div class="stat"><div class="v">${kpiPct(cogsSpend+wagesTot,salesTot)}</div><div class="k">Prime cost %</div></div>`:""}
+        ${wagesTot>0?`<div class="stat"><div class="v">${kpiPct(wagesTot,salesTot)}${wageFlag}</div><div class="k">Wages % of sales</div></div>
+        <div class="stat"><div class="v">${kpiPct(cogsSpend+wagesTot,salesTot)}${wageFlag}</div><div class="k">Prime cost %</div></div>`:""}
       </div>
       <div style="font-size:11px;color:var(--dim);margin-top:6px">
         COGS = ${money(cogsSpend)} of ${money(tot.spend)} spend; ${money(nonCogsSpend)} excluded as non-COGS (cleaning, equipment, energy, overheads and similar).
-        ${SALES_SOURCE?`<br>Sales from the ImPOS feed from ${fmtD(SALES_SOURCE)}; earlier sales and all wages from the weekly reporting sheets, spread evenly across each week. Wages arrive the Monday after week end, so the current week shows none.`:""}
+        ${pendMaterial?`<br><b style="color:var(--red)">▲ Understated:</b> ${Math.round(pw.pendHours)} h of approved labour is not yet exported to payroll, so Deputy still carries it at $0.
+          ${pw.haveRate?`At the ${money(pw.rate)}/h blended rate across costed shifts that is roughly <b>${money(pw.estimate)}</b> to come — wages nearer <b>${kpiPct(wagesTot+pw.estimate,salesTot)}</b> and prime cost <b>${kpiPct(cogsSpend+wagesTot+pw.estimate,salesTot)}</b>.`:`No costed shifts in range to estimate a rate from.`}
+          It settles by itself on the next payroll export.`:""}
+        ${SALES_SOURCE?`<br>Sales from the ImPOS feed from ${fmtD(SALES_SOURCE)}; earlier sales from the weekly reporting sheets, spread evenly across each week.`:""}
+        ${WAGE_SOURCE?`<br>Wages from Deputy timesheets from ${fmtD(WAGE_SOURCE)} — actual shifts, dated on the day worked, including apprentice training and paid leave${WAGE_ONCOST_MULT!==1?`, grossed up ${Math.round((WAGE_ONCOST_MULT-1)*1000)/10}% for on-costs`:` at base wage (no super or on-costs)`}. Earlier wages from the weekly reporting sheets, spread across each week.`
+                    :`<br>Wages from the weekly reporting sheets, spread evenly across each week. Wages arrive the Monday after week end, so the current week shows none.`}
         ${unmappedList.length?`<br><b style="color:var(--red)">Unmapped:</b> ${unmappedList.map(([g,v])=>esc(g)+" "+money(v)).join(", ")} — counted in COGS; assign a group in supplier settings if that's wrong.`:""}
       </div>
     </div>`:`
