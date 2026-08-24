@@ -57,7 +57,7 @@
 </head>
 <body>
 <header>
-  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-060412</span></a>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-061955</span></a>
   <div class="crumb" id="crumb"></div>
   <button onclick="loadAll()">↻ refresh</button>
   <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-060412"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-061955"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -149,6 +149,16 @@ let SUPP_SORT = { key: "total", dir: -1 };
 
 /* Sort state for the per-supplier Products table. Defaults to biggest price rise first. */
 let PROD_SORT = { key: "change", dir: -1 };
+/* Sort state for the four tables on the Reports page, one entry each, so a new table
+   needs a key here and nothing else. Keys: k = the label column, n = invoices, s = spend.
+   Month defaults to ascending because a month table is read as a series — biggest-first
+   would scramble the one table on the page whose order carries meaning. */
+let RPT_SORT = {
+  venue:    { key:"s", dir:-1 },
+  group:    { key:"s", dir:-1 },
+  supplier: { key:"s", dir:-1 },
+  month:    { key:"k", dir: 1 }
+};
 let SELECTED = {}, SEL_SUPPLIER = "", CURR_PRODS = [];
 
 const UNIT_ALIAS={each:"ea",ea:"ea",unit:"ea",units:"ea",pack:"ea",pk:"ea","6pack":"ea",carton:"ctn",cartons:"ctn",ctn:"ctn",ct:"ctn",cs:"ctn",case:"ctn",box:"box",bx:"box",pkt:"pkt",packet:"pkt",pk:"pkt",sleeve:"slv",slv:"slv",bottle:"btl",btl:"btl",kg:"kg",g:"g",l:"l",ltr:"l",litre:"l",tray:"tray",bag:"bag",tub:"tub",doz:"doz",dozen:"doz"};
@@ -795,6 +805,16 @@ function sortProducts(k){
   else PROD_SORT={key:k, dir:(k==="desc"?1:-1)};
   route();
 }
+/* Reports page. Same click-to-sort, click-again-to-flip behaviour, but the table has to
+   say which one it is — four tables share the handler and each keeps its own state, so
+   sorting Suppliers does not reorder By group underneath it. */
+function sortReport(t,k){
+  const st=RPT_SORT[t];
+  if(!st) return;
+  if(st.key===k) st.dir*=-1;
+  else { st.key=k; st.dir=(k==="k"?1:-1); }   // labels A–Z, numbers biggest-first
+  route();
+}
 // Reset date range AND venues in one go — used by the "no invoices in this window" empty
 // state so you can get back to the supplier's data without clearing two filters by hand.
 function clearFilters(){
@@ -1196,24 +1216,46 @@ function renderReports(){
   crumb("reports");
   const inv=scopedInv();
   const tot={spend:0,gst:0,freight:0,cdl:0,credits:0,n:0};
-  const byVenue={}, byGroup={}, byCat={}, byMonth={};
+  const byVenue={}, byGroup={}, bySupp={}, byMonth={};
   inv.forEach(r=>{
     tot.spend+=r.total; tot.gst+=r.gst; tot.freight+=r.freight; tot.cdl+=r.cdl||0; tot.n++;
     if(r.type==="credit_note") tot.credits+=r.total;
     (byVenue[r.venue]=byVenue[r.venue]||{s:0,n:0}).s+=r.total; byVenue[r.venue].n++;
     const g=rowGroup(r);
     (byGroup[g]=byGroup[g]||{s:0,n:0}).s+=r.total; byGroup[g].n++;
-    (byCat[r.category||"Other"]=byCat[r.category||"Other"]||{s:0,n:0}).s+=r.total; byCat[r.category||"Other"].n++;
+    /* Supplier totals are NET of credit notes, which carry a negative total. That is the
+       figure to check a supplier statement against — but it means a supplier whose only
+       activity this period was a credit shows a negative, which is correct and looks
+       wrong. The credit count is carried so the table can say so rather than leave it
+       to be discovered. */
+    const sp=(bySupp[r.supplier]=bySupp[r.supplier]||{s:0,n:0,cr:0});
+    sp.s+=r.total; sp.n++; if(r.type==="credit_note") sp.cr++;
     const mk=monthKey(r.date);
     (byMonth[mk]=byMonth[mk]||{s:0,n:0}).s+=r.total; byMonth[mk].n++;
   });
-  const tbl=(obj,label,keyFmt)=>{
-    const rows=Object.entries(obj).sort((a,b)=>b[1].s-a[1].s);
+  /* One builder for every table on this page: same four columns, same sort behaviour,
+     independent state per table.
+       id      key into RPT_SORT
+       keyFmt  display transform for the label column — sorting always uses the RAW key,
+               so months order chronologically off "2026-08" instead of alphabetically
+               off "Aug 2026", which would put April first. */
+  const tbl=(obj,label,id,keyHead,keyFmt,note)=>{
+    const st=RPT_SORT[id]||{key:"s",dir:-1};
+    /* "% of total" is spend over a constant, so it orders identically to Spend. It is
+       still clickable: a header that looks sortable and isn't reads as broken. */
+    const pick={k:e=>String(e[0]).toLowerCase(), n:e=>e[1].n, s:e=>e[1].s, pct:e=>e[1].s}[st.key]||(e=>e[1].s);
+    const rows=Object.entries(obj).sort((a,b)=>{
+      const x=pick(a), y=pick(b);
+      return (x<y?-1:x>y?1:0)*st.dir || String(a[0]).localeCompare(String(b[0]));
+    });
+    const h=(k,l,cls)=>`<th class="${cls||""}" style="cursor:pointer;user-select:none" onclick="sortReport('${id}','${k}')">${l}${st.key===k?(st.dir<0?" ↓":" ↑"):""}</th>`;
+    const sumS=rows.reduce((a,[,v])=>a+v.s,0), sumN=rows.reduce((a,[,v])=>a+v.n,0);
     return `<div class="card"><div class="label">${label}</div>
-      <table><thead><tr><th></th><th class="num">Invoices</th><th class="num">Spend</th><th class="num hide-sm">% of total</th></tr></thead>
-      <tbody>${rows.map(([k,v])=>`<tr><td>${esc(keyFmt?keyFmt(k):k)}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td><td class="num hide-sm">${tot.spend?Math.round(v.s/tot.spend*1000)/10:0}%</td></tr>`).join("")}</tbody></table></div>`;
+      <table><thead><tr>${h("k",keyHead||"")}${h("n","Invoices","num")}${h("s","Spend","num")}${h("pct","% of total","num hide-sm")}</tr></thead>
+      <tbody>${rows.map(([k,v])=>`<tr><td>${esc(keyFmt?keyFmt(k):k)}${v.cr?` <span style="color:var(--dim);font-size:11px">(${v.cr} credit${v.cr>1?"s":""})</span>`:""}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td><td class="num hide-sm">${tot.spend?Math.round(v.s/tot.spend*1000)/10:0}%</td></tr>`).join("")}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--line)"><td><b>Total</b></td><td class="num"><b>${sumN}</b></td><td class="num"><b>${money(sumS)}</b></td><td class="num hide-sm"></td></tr></tfoot></table>
+      ${note?`<div style="font-size:11px;color:var(--dim);margin-top:6px">${note}</div>`:""}</div>`;
   };
-  const monthRows=Object.entries(byMonth).sort((a,b)=>a[0]<b[0]?-1:1);
 
   // KPI section (needs a "Sales" tab: date, venue, sales, wages)
   const salesScope=scopedSales();
@@ -1269,12 +1311,11 @@ function renderReports(){
       <div style="margin-top:10px"><a class="btn outline" onclick="window.print()" style="cursor:pointer">🖨 Print / save as PDF</a></div>
     </div>
     ${kpiCard}
-    ${FILTER.venues.length===1?"":tbl(byVenue,"By venue")}
-    ${tbl(byGroup,"By group")}
-    ${tbl(byCat,"By category")}
-    <div class="card"><div class="label">By month</div>
-      <table><thead><tr><th>Month</th><th class="num">Invoices</th><th class="num">Spend</th></tr></thead>
-      <tbody>${monthRows.map(([k,v])=>`<tr><td>${monthName(k)}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td></tr>`).join("")}</tbody></table></div>`;
+    ${FILTER.venues.length===1?"":tbl(byVenue,"By venue","venue","Venue")}
+    ${tbl(byGroup,"By group","group","Group")}
+    ${tbl(bySupp,`Suppliers — ${esc(periodLabel())}`,"supplier","Supplier",null,
+      "Totals are net of credit notes, so this is the figure to check a supplier statement against. Counts include credit notes as documents. Suppliers set inactive in supplier settings are excluded here and from every total above.")}
+    ${tbl(byMonth,"By month","month","Month",monthName)}`;
 }
 
 /* ================= CONFIG VIEW ================= */
