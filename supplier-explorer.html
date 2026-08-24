@@ -57,7 +57,7 @@
 </head>
 <body>
 <header>
-  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-061955</span></a>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-063340</span></a>
   <div class="crumb" id="crumb"></div>
   <button onclick="loadAll()">↻ refresh</button>
   <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-061955"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-063340"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -157,7 +157,9 @@ let RPT_SORT = {
   venue:    { key:"s", dir:-1 },
   group:    { key:"s", dir:-1 },
   supplier: { key:"s", dir:-1 },
-  month:    { key:"k", dir: 1 }
+  month:    { key:"k", dir: 1 },
+  posItem:  { key:"s", dir:-1 },
+  stockItem:{ key:"s", dir:-1 }
 };
 let SELECTED = {}, SEL_SUPPLIER = "", CURR_PRODS = [];
 
@@ -457,6 +459,105 @@ function pendingWages(from,to){
      else — the same way wagesDailyFold applies it once to the actuals. */
   const rate = rateH>0 ? rateD/rateH : 0;
   return { pendHours, rate, estimate:pendHours*rate*WAGE_ONCOST_MULT, haveRate:rateH>0 };
+}
+
+/* Top-selling POS items, for the Reports page only.
+
+   This is the ONE thing on this page that cannot be served from what loadAll already
+   pulls. The daily sales aggregate is ~3 rows a day; item level is ~3k rows a day before
+   grouping, so it is fetched lazily when Reports is opened and cached against the current
+   filter, rather than made everyone's problem on first load.
+
+   Two shapes, in order of preference:
+     scope "filter"  date-bounded query — respects the date filter, small payload
+     scope "all"     venue+item over ALL history — ignores dates, always works, ~1.5k rows
+   The fallback exists because the date column has bitten this project before: gviz types
+   it as datetime, and comparing it to a bare date silently returns an EMPTY SET rather
+   than an error (see fetchSalesDaily). An empty result is therefore treated as a failed
+   query, not as "no sales" — those are indistinguishable here and guessing wrong would
+   show a confidently blank panel. */
+let POS_ITEMS = { key:null, rows:[], state:"idle", scope:"", err:"" };
+let ITEMMAP = null;   // POS spelling variants -> one product name; null until first fetch
+
+async function gvizRows_(sheetId, tab, q){
+  const url=`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(tab)}&tq=${encodeURIComponent(q)}`;
+  const res=await fetch(url);
+  const txt=await res.text();
+  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("query rejected");
+  const rows=parseCsv(txt);
+  return rows.length<2 ? [] : rows.slice(1);
+}
+
+/* ItemMap folds POS spelling variants into one product — Cambridge rings "H&C Toastie (W)"
+   where Glenorchy rings "Ham & Cheese Toastie (W)" for the same $8.50 item. Without this
+   the same product competes with itself for a top-10 slot and neither half ranks properly.
+   A missing tab is a tidiness problem, not a reason to show nothing, so it degrades to raw
+   POS names. */
+async function fetchItemMap_(){
+  if(ITEMMAP) return ITEMMAP;
+  const m={};
+  try{
+    const rows=await gvizRows_(SALES_SHEET_ID,"ItemMap","select A, B");
+    rows.forEach(r=>{ const f=norm(r[0]), t=String(r[1]||"").trim(); if(f&&t) m[f]=t; });
+  }catch(e){ /* raw names */ }
+  ITEMMAP=m;
+  return m;
+}
+
+async function fetchPosItems_(){
+  const map=await fetchItemMap_();
+  const fold=n=>map[norm(n)]||String(n||"").trim();
+  const shape=(rows,vIdx)=>{
+    const by={};
+    rows.forEach(r=>{
+      const venue=vIdx===null?"":String(r[0]||"").trim();
+      const item=fold(r[vIdx===null?0:1]);
+      const qty=+String(r[vIdx===null?1:2]||"").replace(/[^0-9.\-]/g,"")||0;
+      const sales=+String(r[vIdx===null?2:3]||"").replace(/[^0-9.\-]/g,"")||0;
+      if(!item) return;
+      const o=by[item]||(by[item]={item, qty:0, s:0, venues:{}});
+      o.qty+=qty; o.s+=sales; if(venue) o.venues[venue]=1;
+    });
+    return Object.values(by);
+  };
+  const cols="C, F, sum(G), sum(H) group by C, F"
+            +" label C 'venue', F 'item', sum(G) 'qty', sum(H) 'sales'";
+  // 1. date-bounded. Two literal forms, because which one this install accepts is exactly
+  //    the kind of thing that has been guessed wrong here before.
+  const f=FILTER.from, t=FILTER.to;
+  if(f||t){
+    const forms=[
+      [f?`B >= datetime '${f} 00:00:00'`:"", t?`B <= datetime '${t} 23:59:59'`:""],
+      [f?`toDate(B) >= date '${f}'`:"",       t?`toDate(B) <= date '${t}'`:""]
+    ];
+    for(const w of forms){
+      const where=w.filter(Boolean).join(" and ");
+      try{
+        const rows=await gvizRows_(SALES_SHEET_ID,"SalesFeed",`select ${cols.replace(" group by"," where "+where+" group by")}`);
+        if(rows.length) return { rows:shape(rows,1), scope:"filter" };
+      }catch(e){ /* try the next form */ }
+    }
+  }
+  // 2. whole history. One row per venue+item — bounded by the menu, not by how long the
+  //    feed has been running, so this stays small however much history accumulates.
+  return { rows:shape(await gvizRows_(SALES_SHEET_ID,"SalesFeed",`select ${cols}`),1),
+           scope:(f||t)?"all-fallback":"all" };
+}
+
+function posKey_(){ return (FILTER.from||"")+"|"+(FILTER.to||"")+"|"+FILTER.venues.slice().sort().join(","); }
+/* Re-renders once the answer lands. renderReports calls this again on that pass, but the
+   key now matches and the state is settled, so it returns immediately — no loop. A result
+   whose key no longer matches is dropped: the filter moved while it was in flight. */
+async function ensurePosItems(){
+  const k=posKey_();
+  if(POS_ITEMS.key===k && POS_ITEMS.state!=="idle") return;
+  POS_ITEMS={key:k, rows:[], state:"loading", scope:"", err:""};
+  let next;
+  try{ const r=await fetchPosItems_(); next={key:k, rows:r.rows, state:"ok", scope:r.scope, err:""}; }
+  catch(e){ next={key:k, rows:[], state:"error", scope:"", err:e.message||"unreadable"}; }
+  if(posKey_()!==k) return;
+  POS_ITEMS=next;
+  if(location.hash.slice(1).split("::")[0]==="r") route();
 }
 
 /* The feed returns dates unpadded ("2026-8-3"), which gvizDate rejects. Try the
@@ -1239,7 +1340,7 @@ function renderReports(){
        keyFmt  display transform for the label column — sorting always uses the RAW key,
                so months order chronologically off "2026-08" instead of alphabetically
                off "Aug 2026", which would put April first. */
-  const tbl=(obj,label,id,keyHead,keyFmt,note)=>{
+  const tbl=(obj,label,id,keyHead,keyFmt,note,linkFn)=>{
     const st=RPT_SORT[id]||{key:"s",dir:-1};
     /* "% of total" is spend over a constant, so it orders identically to Spend. It is
        still clickable: a header that looks sortable and isn't reads as broken. */
@@ -1252,7 +1353,10 @@ function renderReports(){
     const sumS=rows.reduce((a,[,v])=>a+v.s,0), sumN=rows.reduce((a,[,v])=>a+v.n,0);
     return `<div class="card"><div class="label">${label}</div>
       <table><thead><tr>${h("k",keyHead||"")}${h("n","Invoices","num")}${h("s","Spend","num")}${h("pct","% of total","num hide-sm")}</tr></thead>
-      <tbody>${rows.map(([k,v])=>`<tr><td>${esc(keyFmt?keyFmt(k):k)}${v.cr?` <span style="color:var(--dim);font-size:11px">(${v.cr} credit${v.cr>1?"s":""})</span>`:""}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td><td class="num hide-sm">${tot.spend?Math.round(v.s/tot.spend*1000)/10:0}%</td></tr>`).join("")}</tbody>
+      <tbody>${rows.map(([k,v])=>{
+        const nav=linkFn?linkFn(k):"";
+        return `<tr${nav?` class="click" onclick="go('${nav}')"`:""}><td>${esc(keyFmt?keyFmt(k):k)}${v.cr?` <span style="color:var(--dim);font-size:11px">(${v.cr} credit${v.cr>1?"s":""})</span>`:""}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td><td class="num hide-sm">${tot.spend?Math.round(v.s/tot.spend*1000)/10:0}%</td></tr>`;
+      }).join("")}</tbody>
       <tfoot><tr style="border-top:2px solid var(--line)"><td><b>Total</b></td><td class="num"><b>${sumN}</b></td><td class="num"><b>${money(sumS)}</b></td><td class="num hide-sm"></td></tr></tfoot></table>
       ${note?`<div style="font-size:11px;color:var(--dim);margin-top:6px">${note}</div>`:""}</div>`;
   };
@@ -1296,6 +1400,72 @@ function renderReports(){
       <div style="font-size:13px;color:var(--dim)">To see COGS % and wages % here, add a <b>Sales</b> tab to the data spreadsheet with columns: <b>date, venue, sales, wages</b> (weekly or daily rows — IMPORTRANGE from your KPI sheet works). It'll be picked up automatically.</div>
     </div>`;
 
+  /* ---- Top 10 panels -------------------------------------------------------------
+     "Top 10 by $" is settled on $ FIRST, then the ten survivors can be re-sorted by any
+     column. Re-ranking on each sort would mean clicking "Qty" silently swapped in a
+     different set of items under the same heading. */
+  const cols=(id,defs,rows,label,note,linkFn)=>{
+    const st=RPT_SORT[id]||{key:"s",dir:-1};
+    const def=defs.find(d=>d.k===st.key)||defs[defs.length-1];
+    const sorted=rows.slice().sort((a,b)=>{
+      const x=def.get(a), y=def.get(b);
+      return (x<y?-1:x>y?1:0)*st.dir || String(defs[0].get(a)).localeCompare(String(defs[0].get(b)));
+    });
+    const h=d=>`<th class="${d.cls||""}" style="cursor:pointer;user-select:none" onclick="sortReport('${id}','${d.k}')">${d.label}${st.key===d.k?(st.dir<0?" \u2193":" \u2191"):""}</th>`;
+    return `<div class="card"><div class="label">${label}</div>
+      ${sorted.length?`<table><thead><tr>${defs.map(h).join("")}</tr></thead>
+      <tbody>${sorted.map(r=>{
+        const nav=linkFn?linkFn(r):"";
+        return `<tr${nav?` class="click" onclick="go('${nav}')"`:""}>${defs.map(d=>`<td class="${d.cls||""}">${d.fmt?d.fmt(r):esc(d.get(r))}</td>`).join("")}</tr>`;
+      }).join("")}</tbody></table>`:`<div style="font-size:13px;color:var(--dim)">Nothing in this period.</div>`}
+      ${note?`<div style="font-size:11px;color:var(--dim);margin-top:6px">${note}</div>`:""}</div>`;
+  };
+
+  /* Stock bought: invoice LINES, folded on prodKey so spelling variants and merged
+     products count once. Same scope as every figure above — supplier active, venue and
+     date filter — so this adds to the Suppliers panel rather than disagreeing with it. */
+  const stock={};
+  LINES.forEach(l=>{
+    if(!supActive(l.supplier)||!inScope(l.venue,l.date)) return;
+    const k=prodKey(l.supplier,l.code,l.desc,l.unit);
+    const o=stock[k]||(stock[k]={desc:l.desc||l.code||"\u2014", supplier:l.supplier, code:l.code,
+                                 unit:l.unit, qty:0, s:0, n:0});
+    o.qty+=l.qty; o.s+=l.total; o.n++;
+  });
+  const topStock=Object.values(stock).sort((a,b)=>b.s-a.s).slice(0,10);
+  const stockTot=Object.values(stock).reduce((a,r)=>a+r.s,0);
+  const stockPanel=cols("stockItem",[
+      {k:"k",  label:"Stock item", get:r=>r.desc,
+       fmt:r=>`${esc(r.desc)}<div style="font-size:11px;color:var(--dim)">${esc(r.supplier)}${r.unit?" \u00b7 "+esc(r.unit):""}</div>`},
+      {k:"qty",label:"Qty",   cls:"num", get:r=>r.qty, fmt:r=>Math.round(r.qty*100)/100},
+      {k:"n",  label:"Lines", cls:"num hide-sm", get:r=>r.n},
+      {k:"s",  label:"Spend", cls:"num", get:r=>r.s, fmt:r=>`<b>${money(r.s)}</b>`},
+      {k:"pct",label:"% of spend", cls:"num hide-sm", get:r=>r.s,
+       fmt:r=>stockTot?Math.round(r.s/stockTot*1000)/10+"%":"\u2014"}
+    ], topStock, "Top 10 stock items bought \u2014 by $ spend",
+    `The ten biggest of ${Object.keys(stock).length} products bought in this period, ${money(stockTot)} in total. Qty is summed as invoiced, so it only means something where a product is always bought in the same unit. Click a row for its price history.`,
+    r=>`p::${encodeURIComponent(r.supplier)}::${encodeURIComponent((r.code||r.desc)+"@@"+(r.unit||""))}`);
+
+  /* Sold: POS items, fetched lazily \u2014 see fetchPosItems_. */
+  ensurePosItems();
+  const posRows=(POS_ITEMS.state==="ok"?POS_ITEMS.rows:[])
+    .filter(r=>!FILTER.venues.length||Object.keys(r.venues).some(v=>FILTER.venues.indexOf(v)!==-1));
+  const posTot=posRows.reduce((a,r)=>a+r.s,0);
+  const topPos=posRows.slice().sort((a,b)=>b.s-a.s).slice(0,10);
+  const posNote=POS_ITEMS.state==="loading" ? "Loading item-level sales\u2026"
+    : POS_ITEMS.state==="error" ? `<b style="color:var(--red)">Couldn't read item-level sales</b> (${esc(POS_ITEMS.err)}). Check the SalesFeed tab in BG Sales Data is shared as "anyone with the link can view".`
+    : POS_ITEMS.scope==="all-fallback"
+      ? `<b style="color:var(--red)">Showing ALL history, not ${esc(periodLabel())}.</b> The date-filtered query came back empty, which on this feed means the filter did not apply rather than that nothing sold. The venue filter and the $ ranking are still right; the date range is not.`
+    : `Customer spend by item, from the POS feed. Folded through the ItemMap tab so venue spelling variants count as one product. $0 lines \u2014 wastage, loyalty coffees, modifiers and kitchen requests \u2014 add nothing to a $ total, so they neither rank nor distort. ${money(posTot)} across ${posRows.length} items${POS_ITEMS.scope==="all"?", all history (no date filter set)":""}.`;
+  const posPanel=cols("posItem",[
+      {k:"k",  label:"Item sold", get:r=>r.item,
+       fmt:r=>`${esc(r.item)}<div style="font-size:11px;color:var(--dim)">${esc(Object.keys(r.venues).map(vShort).sort().join(" \u00b7 "))}</div>`},
+      {k:"qty",label:"Qty",   cls:"num", get:r=>r.qty, fmt:r=>Math.round(r.qty)},
+      {k:"s",  label:"Sales", cls:"num", get:r=>r.s, fmt:r=>`<b>${money(r.s)}</b>`},
+      {k:"pct",label:"% of sales", cls:"num hide-sm", get:r=>r.s,
+       fmt:r=>posTot?Math.round(r.s/posTot*1000)/10+"%":"\u2014"}
+    ], topPos, "Top 10 items sold \u2014 by $ taken", posNote);
+
   document.getElementById("app").innerHTML=`
     <a class="back" onclick="go('')">All suppliers</a>
     <div class="card">
@@ -1314,7 +1484,10 @@ function renderReports(){
     ${FILTER.venues.length===1?"":tbl(byVenue,"By venue","venue","Venue")}
     ${tbl(byGroup,"By group","group","Group")}
     ${tbl(bySupp,`Suppliers — ${esc(periodLabel())}`,"supplier","Supplier",null,
-      "Totals are net of credit notes, so this is the figure to check a supplier statement against. Counts include credit notes as documents. Suppliers set inactive in supplier settings are excluded here and from every total above.")}
+      "Totals are net of credit notes, so this is the figure to check a supplier statement against. Counts include credit notes as documents. Suppliers set inactive in supplier settings are excluded here and from every total above. Click a supplier for its invoices and price history.",
+      name=>`s::${encodeURIComponent(name)}`)}
+    ${stockPanel}
+    ${posPanel}
     ${tbl(byMonth,"By month","month","Month",monthName)}`;
 }
 
