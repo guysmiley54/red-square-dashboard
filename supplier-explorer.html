@@ -57,7 +57,7 @@
 </head>
 <body>
 <header>
-  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-063340</span></a>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-065102</span></a>
   <div class="crumb" id="crumb"></div>
   <button onclick="loadAll()">↻ refresh</button>
   <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-063340"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-065102"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -476,7 +476,7 @@ function pendingWages(from,to){
    than an error (see fetchSalesDaily). An empty result is therefore treated as a failed
    query, not as "no sales" — those are indistinguishable here and guessing wrong would
    show a confidently blank panel. */
-let POS_ITEMS = { key:null, rows:[], state:"idle", scope:"", err:"" };
+let POS_ITEMS = { key:null, rows:[], state:"idle", scope:"", err:"", prev:null, prior:null };
 let ITEMMAP = null;   // POS spelling variants -> one product name; null until first fetch
 
 async function gvizRows_(sheetId, tab, q){
@@ -504,44 +504,86 @@ async function fetchItemMap_(){
   return m;
 }
 
+/* Trend arrow. The ARROW is direction, the COLOUR is whether that direction is good news
+   — and the two panels on the Reports page disagree about which is which: a stock price
+   going up is bad, a dish selling more is good. Both render "▲", one red and one green.
+   This does NOT reuse the .up/.down classes, whose names mean direction but whose colours
+   mean cost-badness; on the sales panel that pairing is inverted and a class called "up"
+   printing green would be a trap for whoever reads this next.
+   DEADBAND matches the supplier trend column: under 10% is noise, not a move. */
+function trendMark(now, before, riseIsGood, band){
+  if(before==null) return "";                                     // nothing to compare to
+  if(!before) return `<span style="color:var(--dim);font-size:11px">new</span>`;
+  const d=(now-before)/Math.abs(before);
+  if(Math.abs(d)<(band==null?0.1:band)) return `<span style="color:var(--dim)">–</span>`;
+  const good=(d>0)===!!riseIsGood;
+  return `<span style="color:${good?"#1a7f37":"var(--red)"};font-weight:600" title="${d>0?"+":""}${Math.round(d*100)}% vs previous period">${d>0?"▲":"▼"}</span>`;
+}
+
+/* The equal-length window immediately before the current filter, for trend arrows.
+   Null when there is no bounded range to step back from ("All time"), which is exactly
+   when a trend arrow would be meaningless. */
+function priorWindow_(){
+  const f=FILTER.from, t=FILTER.to;
+  if(!f||!t) return null;
+  const a=new Date(f+"T00:00:00"), b=new Date(t+"T00:00:00");
+  if(isNaN(a)||isNaN(b)||b<a) return null;
+  const days=Math.round((b-a)/864e5)+1;
+  const pb=new Date(a); pb.setDate(pb.getDate()-1);
+  const pa=new Date(pb); pa.setDate(pa.getDate()-days+1);
+  const iso=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  return { from:iso(pa), to:iso(pb), days };
+}
+
 async function fetchPosItems_(){
   const map=await fetchItemMap_();
   const fold=n=>map[norm(n)]||String(n||"").trim();
-  const shape=(rows,vIdx)=>{
+  const shape=rows=>{
     const by={};
     rows.forEach(r=>{
-      const venue=vIdx===null?"":String(r[0]||"").trim();
-      const item=fold(r[vIdx===null?0:1]);
-      const qty=+String(r[vIdx===null?1:2]||"").replace(/[^0-9.\-]/g,"")||0;
-      const sales=+String(r[vIdx===null?2:3]||"").replace(/[^0-9.\-]/g,"")||0;
+      const venue=String(r[0]||"").trim(), item=fold(r[1]);
       if(!item) return;
       const o=by[item]||(by[item]={item, qty:0, s:0, venues:{}});
-      o.qty+=qty; o.s+=sales; if(venue) o.venues[venue]=1;
+      o.qty+=+String(r[2]||"").replace(/[^0-9.\-]/g,"")||0;
+      o.s  +=+String(r[3]||"").replace(/[^0-9.\-]/g,"")||0;
+      if(venue) o.venues[venue]=1;
     });
     return Object.values(by);
   };
-  const cols="C, F, sum(G), sum(H) group by C, F"
-            +" label C 'venue', F 'item', sum(G) 'qty', sum(H) 'sales'";
-  // 1. date-bounded. Two literal forms, because which one this install accepts is exactly
-  //    the kind of thing that has been guessed wrong here before.
+  const GRP=" group by C, F label C 'venue', F 'item', sum(G) 'qty', sum(H) 'sales'";
+  const q=w=>`select C, F, sum(G), sum(H)${w?" where "+w:""}${GRP}`;
+  // Two literal forms, because which one this install accepts is exactly the kind of
+  // thing that has been guessed wrong on this feed before.
+  const forms=[
+    (a,b)=>[a?`B >= datetime '${a} 00:00:00'`:"", b?`B <= datetime '${b} 23:59:59'`:""].filter(Boolean).join(" and "),
+    (a,b)=>[a?`toDate(B) >= date '${a}'`:"",      b?`toDate(B) <= date '${b}'`:""].filter(Boolean).join(" and ")
+  ];
   const f=FILTER.from, t=FILTER.to;
   if(f||t){
-    const forms=[
-      [f?`B >= datetime '${f} 00:00:00'`:"", t?`B <= datetime '${t} 23:59:59'`:""],
-      [f?`toDate(B) >= date '${f}'`:"",       t?`toDate(B) <= date '${t}'`:""]
-    ];
-    for(const w of forms){
-      const where=w.filter(Boolean).join(" and ");
+    for(const form of forms){
       try{
-        const rows=await gvizRows_(SALES_SHEET_ID,"SalesFeed",`select ${cols.replace(" group by"," where "+where+" group by")}`);
-        if(rows.length) return { rows:shape(rows,1), scope:"filter" };
+        const rows=await gvizRows_(SALES_SHEET_ID,"SalesFeed",q(form(f,t)));
+        if(!rows.length) continue;
+        /* Prior period, using the form that just worked so it is not re-probed. An
+           EMPTY prior window is left as null rather than as all-zeros: zero would mark
+           every dish as newly arrived and paint the column green, and a failed query
+           looks identical to a genuinely quiet period from here. */
+        let prev=null;
+        const pw=priorWindow_();
+        if(pw){
+          try{
+            const pr=await gvizRows_(SALES_SHEET_ID,"SalesFeed",q(form(pw.from,pw.to)));
+            if(pr.length){ prev={}; shape(pr).forEach(r=>{ prev[r.item]=r.qty; }); }
+          }catch(e){ /* no comparison rather than a wrong one */ }
+        }
+        return { rows:shape(rows), scope:"filter", prev, prior:pw };
       }catch(e){ /* try the next form */ }
     }
   }
-  // 2. whole history. One row per venue+item — bounded by the menu, not by how long the
-  //    feed has been running, so this stays small however much history accumulates.
-  return { rows:shape(await gvizRows_(SALES_SHEET_ID,"SalesFeed",`select ${cols}`),1),
-           scope:(f||t)?"all-fallback":"all" };
+  // Whole history. One row per venue+item — bounded by the menu, not by how long the
+  // feed has been running, so this stays small however much history accumulates.
+  return { rows:shape(await gvizRows_(SALES_SHEET_ID,"SalesFeed",q(""))),
+           scope:(f||t)?"all-fallback":"all", prev:null, prior:null };
 }
 
 function posKey_(){ return (FILTER.from||"")+"|"+(FILTER.to||"")+"|"+FILTER.venues.slice().sort().join(","); }
@@ -551,10 +593,11 @@ function posKey_(){ return (FILTER.from||"")+"|"+(FILTER.to||"")+"|"+FILTER.venu
 async function ensurePosItems(){
   const k=posKey_();
   if(POS_ITEMS.key===k && POS_ITEMS.state!=="idle") return;
-  POS_ITEMS={key:k, rows:[], state:"loading", scope:"", err:""};
+  POS_ITEMS={key:k, rows:[], state:"loading", scope:"", err:"", prev:null, prior:null};
   let next;
-  try{ const r=await fetchPosItems_(); next={key:k, rows:r.rows, state:"ok", scope:r.scope, err:""}; }
-  catch(e){ next={key:k, rows:[], state:"error", scope:"", err:e.message||"unreadable"}; }
+  try{ const r=await fetchPosItems_();
+       next={key:k, rows:r.rows, state:"ok", scope:r.scope, err:"", prev:r.prev, prior:r.prior}; }
+  catch(e){ next={key:k, rows:[], state:"error", scope:"", err:e.message||"unreadable", prev:null, prior:null}; }
   if(posKey_()!==k) return;
   POS_ITEMS=next;
   if(location.hash.slice(1).split("::")[0]==="r") route();
@@ -1422,15 +1465,31 @@ function renderReports(){
   };
 
   /* Stock bought: invoice LINES, folded on prodKey so spelling variants and merged
-     products count once. Same scope as every figure above — supplier active, venue and
-     date filter — so this adds to the Suppliers panel rather than disagreeing with it. */
-  const stock={};
+     products count once. Qty and spend follow the page filter; the PRICE does not —
+     it reads full history, the same rule the price chart and the volatility badge use,
+     so "latest price" means the last price actually paid rather than the last one that
+     happened to fall inside the window being viewed. */
+  const stock={}, priceHist={};
   LINES.forEach(l=>{
-    if(!supActive(l.supplier)||!inScope(l.venue,l.date)) return;
+    if(!supActive(l.supplier)) return;
     const k=prodKey(l.supplier,l.code,l.desc,l.unit);
-    const o=stock[k]||(stock[k]={desc:l.desc||l.code||"\u2014", supplier:l.supplier, code:l.code,
-                                 unit:l.unit, qty:0, s:0, n:0});
-    o.qty+=l.qty; o.s+=l.total; o.n++;
+    if(l.price>0&&l.date) (priceHist[k]=priceHist[k]||[]).push({date:l.date,price:l.price});
+    if(!inScope(l.venue,l.date)) return;
+    const o=stock[k]||(stock[k]={key:k, desc:l.desc||l.code||"\u2014", supplier:l.supplier,
+                                 code:l.code, unit:l.unit, qty:0, s:0});
+    o.qty+=l.qty; o.s+=l.total;
+  });
+  /* Latest price, and the last DIFFERENT price before it. Comparing against the previous
+     LINE would show "no change" for a product bought twice at the same price this week
+     even though it rose last month — the question is what the price did, not whether the
+     most recent two invoices happened to match. */
+  Object.values(stock).forEach(o=>{
+    const h=(priceHist[o.key]||[]).slice().sort((a,b)=>a.date-b.date);
+    if(!h.length) return;
+    o.price=h[h.length-1].price;
+    const cents=n=>Math.round(n*100);
+    for(let i=h.length-2;i>=0;i--){ if(cents(h[i].price)!==cents(o.price)){ o.prevPrice=h[i].price; break; } }
+    o.priceN=h.length;
   });
   const topStock=Object.values(stock).sort((a,b)=>b.s-a.s).slice(0,10);
   const stockTot=Object.values(stock).reduce((a,r)=>a+r.s,0);
@@ -1438,12 +1497,14 @@ function renderReports(){
       {k:"k",  label:"Stock item", get:r=>r.desc,
        fmt:r=>`${esc(r.desc)}<div style="font-size:11px;color:var(--dim)">${esc(r.supplier)}${r.unit?" \u00b7 "+esc(r.unit):""}</div>`},
       {k:"qty",label:"Qty",   cls:"num", get:r=>r.qty, fmt:r=>Math.round(r.qty*100)/100},
-      {k:"n",  label:"Lines", cls:"num hide-sm", get:r=>r.n},
+      {k:"price",label:"Latest price", cls:"num", get:r=>r.price||0,
+       fmt:r=>r.price==null?'<span style="color:var(--dim)">\u2014</span>'
+             :`${money(r.price)} ${trendMark(r.price, r.prevPrice==null?null:r.prevPrice, false, 0.005)}`},
       {k:"s",  label:"Spend", cls:"num", get:r=>r.s, fmt:r=>`<b>${money(r.s)}</b>`},
       {k:"pct",label:"% of spend", cls:"num hide-sm", get:r=>r.s,
        fmt:r=>stockTot?Math.round(r.s/stockTot*1000)/10+"%":"\u2014"}
     ], topStock, "Top 10 stock items bought \u2014 by $ spend",
-    `The ten biggest of ${Object.keys(stock).length} products bought in this period, ${money(stockTot)} in total. Qty is summed as invoiced, so it only means something where a product is always bought in the same unit. Click a row for its price history.`,
+    `The ten biggest of ${Object.keys(stock).length} products bought in this period, ${money(stockTot)} in total. Qty is summed as invoiced, so it only means something where a product is always bought in the same unit. <b>Latest price is the last unit price paid across ALL history, not just this window</b>, and the arrow compares it to the last different price before it \u2014 red is a rise, because a rising cost is bad news. A product bought only once has no arrow. Click a row for its full price history.`,
     r=>`p::${encodeURIComponent(r.supplier)}::${encodeURIComponent((r.code||r.desc)+"@@"+(r.unit||""))}`);
 
   /* Sold: POS items, fetched lazily \u2014 see fetchPosItems_. */
@@ -1452,15 +1513,23 @@ function renderReports(){
     .filter(r=>!FILTER.venues.length||Object.keys(r.venues).some(v=>FILTER.venues.indexOf(v)!==-1));
   const posTot=posRows.reduce((a,r)=>a+r.s,0);
   const topPos=posRows.slice().sort((a,b)=>b.s-a.s).slice(0,10);
+  const prevQty=POS_ITEMS.prev;
+  const priorLbl=POS_ITEMS.prior?`the ${POS_ITEMS.prior.days} days to ${fmtD(new Date(POS_ITEMS.prior.to+"T00:00:00"))}`:"";
   const posNote=POS_ITEMS.state==="loading" ? "Loading item-level sales\u2026"
     : POS_ITEMS.state==="error" ? `<b style="color:var(--red)">Couldn't read item-level sales</b> (${esc(POS_ITEMS.err)}). Check the SalesFeed tab in BG Sales Data is shared as "anyone with the link can view".`
     : POS_ITEMS.scope==="all-fallback"
       ? `<b style="color:var(--red)">Showing ALL history, not ${esc(periodLabel())}.</b> The date-filtered query came back empty, which on this feed means the filter did not apply rather than that nothing sold. The venue filter and the $ ranking are still right; the date range is not.`
-    : `Customer spend by item, from the POS feed. Folded through the ItemMap tab so venue spelling variants count as one product. $0 lines \u2014 wastage, loyalty coffees, modifiers and kitchen requests \u2014 add nothing to a $ total, so they neither rank nor distort. ${money(posTot)} across ${posRows.length} items${POS_ITEMS.scope==="all"?", all history (no date filter set)":""}.`;
+    : `Customer spend by item, from the POS feed, folded through ItemMap so venue spelling variants count as one product. ${money(posTot)} across ${posRows.length} items${POS_ITEMS.scope==="all"?", all history (no date filter set)":""}.
+       <br><b>Avg $/unit is takings \u00f7 units</b>, so $0 lines \u2014 loyalty coffees, wastage, modifiers \u2014 pull it BELOW menu price. That gap is the giveaway rate, not a pricing error.
+       ${prevQty?`<br>The Qty arrow compares units sold against ${esc(priorLbl)}; green is selling more. Under 10% either way shows as \u2013.`
+                :`<br><span style="color:var(--dim)">No trend arrows: there is no comparable previous period for this filter.</span>`}`;
   const posPanel=cols("posItem",[
       {k:"k",  label:"Item sold", get:r=>r.item,
        fmt:r=>`${esc(r.item)}<div style="font-size:11px;color:var(--dim)">${esc(Object.keys(r.venues).map(vShort).sort().join(" \u00b7 "))}</div>`},
-      {k:"qty",label:"Qty",   cls:"num", get:r=>r.qty, fmt:r=>Math.round(r.qty)},
+      {k:"qty",label:"Qty",   cls:"num", get:r=>r.qty,
+       fmt:r=>`${Math.round(r.qty)} ${prevQty?trendMark(r.qty, prevQty[r.item]==null?0:prevQty[r.item], true):""}`},
+      {k:"avg",label:"Avg $/unit", cls:"num", get:r=>r.qty?r.s/r.qty:0,
+       fmt:r=>r.qty?money(r.s/r.qty):'<span style="color:var(--dim)">\u2014</span>'},
       {k:"s",  label:"Sales", cls:"num", get:r=>r.s, fmt:r=>`<b>${money(r.s)}</b>`},
       {k:"pct",label:"% of sales", cls:"num hide-sm", get:r=>r.s,
        fmt:r=>posTot?Math.round(r.s/posTot*1000)/10+"%":"\u2014"}
@@ -1486,8 +1555,8 @@ function renderReports(){
     ${tbl(bySupp,`Suppliers — ${esc(periodLabel())}`,"supplier","Supplier",null,
       "Totals are net of credit notes, so this is the figure to check a supplier statement against. Counts include credit notes as documents. Suppliers set inactive in supplier settings are excluded here and from every total above. Click a supplier for its invoices and price history.",
       name=>`s::${encodeURIComponent(name)}`)}
-    ${stockPanel}
     ${posPanel}
+    ${stockPanel}
     ${tbl(byMonth,"By month","month","Month",monthName)}`;
 }
 
