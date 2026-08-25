@@ -57,7 +57,7 @@
 </head>
 <body>
 <header>
-  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-071230</span></a>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-073455</span></a>
   <div class="crumb" id="crumb"></div>
   <button onclick="loadAll()">↻ refresh</button>
   <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-071230"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-073455"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -165,6 +165,67 @@ let SELECTED = {}, SEL_SUPPLIER = "", CURR_PRODS = [];
 
 const UNIT_ALIAS={each:"ea",ea:"ea",unit:"ea",units:"ea",pack:"ea",pk:"ea","6pack":"ea",carton:"ctn",cartons:"ctn",ctn:"ctn",ct:"ctn",cs:"ctn",case:"ctn",box:"box",bx:"box",pkt:"pkt",packet:"pkt",pk:"pkt",sleeve:"slv",slv:"slv",bottle:"btl",btl:"btl",kg:"kg",g:"g",l:"l",ltr:"l",litre:"l",tray:"tray",bag:"bag",tub:"tub",doz:"doz",dozen:"doz"};
 function unitNorm(u){ const n=norm(u); return UNIT_ALIAS[n]||n; }
+
+/* ---- MIXED UNIT BASIS ------------------------------------------------------------
+   Some suppliers invoice the same product two ways. Nichols bills chicken fillets as a
+   weight some weeks ("18.34 KG @ $14.20") and as boxes others ("3 PACK @ $88.06"), for
+   the same product at the same standing price. Charted together those alternate between
+   $14 and $88 and the price history reads as violent volatility when the price has not
+   moved at all — and every derived figure (90-day average, cheapest/dearest, the price
+   rise flag, the top-10 arrow) inherits the nonsense.
+
+   Detection deliberately IGNORES the unit label, because the unit label is the field that
+   is unreliable — the same invoice run carries rows tagged PACK at a per-kg price. Instead
+   the prices themselves are split at their largest ratio gap, and the split is only
+   accepted when the two groups are INTERLEAVED IN TIME.
+
+   That interleaving test is the whole safeguard. A genuine price rise is contiguous: every
+   old price, then every new one — two runs. A spike and return is three. Alternating units
+   ping-pong, and Nichols shows eight. Requiring four or more runs means a real price move
+   is never flattened into a fake flat line, which would be a far worse failure than the
+   chart this fixes. Returns null (leave everything alone) unless the evidence is clear. */
+function unitBasis(hist){
+  const pts=(hist||[]).filter(b=>b.price>0&&b.date).slice().sort((a,b)=>a.date-b.date);
+  if(pts.length<6) return null;                       // too little to tell anything from
+  const asc=pts.map(b=>b.price).sort((a,b)=>a-b);
+  let bestR=1,bestI=-1;
+  for(let i=0;i<asc.length-1;i++){ const r=asc[i+1]/asc[i]; if(r>bestR){bestR=r;bestI=i;} }
+  if(bestR<1.8) return null;                          // one cluster: nothing to reconcile
+  const cut=Math.sqrt(asc[bestI]*asc[bestI+1]);       // geometric midpoint of the gap
+  const lo=pts.filter(b=>b.price<cut), hi=pts.filter(b=>b.price>=cut);
+  if(lo.length<2||hi.length<2) return null;           // a lone keying error is not a basis
+  let runs=1;
+  for(let i=1;i<pts.length;i++) if((pts[i].price>=cut)!==(pts[i-1].price>=cut)) runs++;
+  if(runs<4) return null;                             // contiguous = a real price move
+  const med=a=>{const s=a.slice().sort((x,y)=>x-y);return s.length%2?s[(s.length-1)/2]:(s[s.length/2-1]+s[s.length/2])/2;};
+  const mode=a=>{const c={};let b="",n=0;a.forEach(v=>{c[v]=(c[v]||0)+1;if(c[v]>n){n=c[v];b=v;}});return b;};
+  return { cut, runs, nLo:lo.length, nHi:hi.length,
+           factor: med(hi.map(b=>b.price))/med(lo.map(b=>b.price)),
+           baseUnit: mode(lo.map(b=>unitNorm(b.unit||""))),
+           bulkUnit: mode(hi.map(b=>unitNorm(b.unit||""))),
+           baseLabel: mode(lo.map(b=>String(b.unit||"").trim())),
+           bulkLabel: mode(hi.map(b=>String(b.unit||"").trim())) };
+}
+
+/* Restate every purchase on the base unit. Price and quantity are converted off DIFFERENT
+   signals on purpose: the price by which cluster it falls in, the quantity by its unit
+   label. They are independent fields and on this data they disagree — rows tagged PACK
+   carrying a per-kg price need the quantity converted but not the price.
+   `bad` marks lines where quantity x normalised price no longer reconciles to the recorded
+   line total. Those are not fixed, only flagged: the source row is internally inconsistent
+   and only the actual invoice can say which field is wrong. */
+function applyBasis(hist,ub){
+  return (hist||[]).map(b=>{
+    if(!ub) return Object.assign({},b,{nPrice:b.price,nQty:b.qty,nUnit:b.unit,conv:false,bad:false});
+    const priceIsBulk = b.price>=ub.cut;
+    const qtyIsBulk   = ub.bulkUnit!==ub.baseUnit && unitNorm(b.unit||"")===ub.bulkUnit;
+    const nPrice = priceIsBulk ? b.price/ub.factor : b.price;
+    const nQty   = qtyIsBulk   ? b.qty*ub.factor   : b.qty;
+    const bad = b.total>0 && Math.abs(nQty*nPrice-b.total)/Math.abs(b.total) > 0.02;
+    return Object.assign({},b,{nPrice,nQty,nUnit:ub.baseLabel,conv:priceIsBulk||qtyIsBulk,bad,
+      rawPrice:b.price, rawQty:b.qty, rawUnit:b.unit});
+  });
+}
 let PMERGE={}, VDIFF={};
 // Codeless identity is the description, so cosmetic tails must not split a product.
 // Strip trailing pack-count / unit noise that hand-keyed lines pick up, e.g.
@@ -1031,8 +1092,21 @@ function productsFor(supplier){
   const anchor=toDate()?toDate().getTime():Date.now();
   return Object.values(map).map(p=>{
     p.buys.sort((a,b)=>a.date-b.date);
-    const h=(hist[p.key]||p.buys).slice().sort((a,b)=>a.date-b.date)
+    let h=(hist[p.key]||p.buys).slice().sort((a,b)=>a.date-b.date)
       .filter(b=>b.date.getTime()<=anchor);
+    /* Restate a mixed-unit product on one basis BEFORE anything is derived from it.
+       Last price, 90-day average, cheapest/dearest, the change %, the volatility flag and
+       the price-query email all read these numbers, so normalising here fixes them all at
+       once and keeps them agreeing with the chart. Null basis = untouched. */
+    p.basis=unitBasis(h);
+    if(p.basis){
+      h=applyBasis(h,p.basis);
+      p.buys=applyBasis(p.buys,p.basis);
+      h.forEach(b=>{ b.price=b.nPrice; b.qty=b.nQty; b.unit=b.nUnit; });
+      p.buys.forEach(b=>{ b.price=b.nPrice; b.qty=b.nQty; b.unit=b.nUnit; });
+      p.unit=p.basis.baseLabel;
+      p.badLines=h.filter(b=>b.bad).length;
+    }
     const last=h.length?h[h.length-1]:p.buys[p.buys.length-1];
     let prev=null, prevBuy=null;
     for(let i=h.length-2;i>=0;i--){ if(h[i].price!==last.price){prev=h[i].price;prevBuy=h[i];break;} }
@@ -1511,12 +1585,17 @@ function renderReports(){
      even though it rose last month — the question is what the price did, not whether the
      most recent two invoices happened to match. */
   Object.values(stock).forEach(o=>{
-    const h=(priceHist[o.key]||[]).slice().sort((a,b)=>a.date-b.date);
+    let h=(priceHist[o.key]||[]).slice().sort((a,b)=>a.date-b.date);
     if(!h.length) return;
+    /* Same mixed-unit reconciliation as the product view. Without it the Latest price
+       arrow on a product like the Nichols fillets compares $14.20/kg against $88.06/pack
+       and paints a 84% price CRASH in green — the single most misleading thing this
+       panel could show. */
+    const ub=unitBasis(h);
+    if(ub){ h=applyBasis(h,ub).map(b=>({date:b.date,price:b.nPrice})); o.basis=ub; }
     o.price=h[h.length-1].price;
     const cents=n=>Math.round(n*100);
     for(let i=h.length-2;i>=0;i--){ if(cents(h[i].price)!==cents(o.price)){ o.prevPrice=h[i].price; break; } }
-    o.priceN=h.length;
   });
   const topStock=Object.values(stock).sort((a,b)=>b.s-a.s).slice(0,10);
   const stockTot=Object.values(stock).reduce((a,r)=>a+r.s,0);
@@ -1940,17 +2019,24 @@ function renderProduct(supplier,id){
       <div style="font-size:14px">${p.vdiff.map(v=>`${esc(v.venue)}: <b>${money(v.price)}</b>${v.date?` <span style="color:var(--dim)">(${fmtD(v.date)})</span>`:""}`).join(" &nbsp;·&nbsp; ")} — bought within ${p.vdiff.gapDays!=null?p.vdiff.gapDays:10} days of each other at different prices. This is a venue pricing inconsistency, not a price rise over time.
       ${email?`<div style="margin-top:10px"><a class="btn" href="${venueEmailHref(email,p)}">✉ Query venue price difference</a></div>`:""}</div>
     </div>`:""}
+    ${p.basis?`<div class="card" style="border-color:#1a7f37">
+      <div class="label" style="color:#1a7f37">Mixed units reconciled — priced per ${esc(p.basis.baseLabel)}</div>
+      <div style="font-size:14px">${esc(supplier)} invoices this item two ways: <b>${p.basis.nLo} lines per ${esc(p.basis.baseLabel)}</b> and <b>${p.basis.nHi} lines per ${esc(p.basis.bulkLabel)}</b>, alternating (${p.basis.runs} switches), so it is the same price recorded on two different bases rather than a price that moves.
+      One ${esc(p.basis.bulkLabel)} works out at <b>${Math.round(p.basis.factor*100)/100} ${esc(p.basis.baseLabel)}</b>. Everything below is restated per ${esc(p.basis.baseLabel)}; the chart before this ran from ${money(Math.min(...buys.map(b=>b.rawPrice||b.price)))} to ${money(Math.max(...buys.map(b=>b.rawPrice||b.price)))}.
+      ${p.badLines?`<div style="margin-top:8px;color:var(--red)"><b>${p.badLines} line${p.badLines>1?"s":""} won't reconcile.</b> The quantity and unit price disagree about which basis they are on, so quantity × price doesn't match the invoice line total. Those rows are marked below — worth checking against the paper invoice, since one of the two fields is wrong and the line may be mis-billed.</div>`:""}</div>
+    </div>`:""}
     <div class="card"><div class="label" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <span>${esc(p.desc)} — unit price history · ${esc(winLabel)}</span><span>${winBtns}</span></div>${priceChart(buys)}
+        <span>${esc(p.desc)} — unit price history · ${esc(winLabel)}${p.basis?" · per "+esc(p.basis.baseLabel):""}</span><span>${winBtns}</span></div>${priceChart(buys)}
       ${riseBtn?`<div style="margin-top:12px">${riseBtn}</div>`:""}
     </div>
     <div class="card"><div class="label">Purchases (${buys.length}) · ${esc(winLabel)}</div>
       <table><thead><tr><th>Date</th><th class="hide-sm">Invoice</th><th class="hide-sm">Venue</th><th class="num">Qty</th><th class="num">Unit $</th></tr></thead>
       <tbody>${buys.slice().reverse().map(b=>`
         <tr class="click" onclick="go('i::${encodeURIComponent(supplier)}::${encodeURIComponent(b.number)}')">
-          <td>${fmtD(b.date)}</td><td class="hide-sm">${esc(b.number)}</td>
-          <td class="hide-sm">${esc(b.venue)}</td><td class="num">${b.qty} ${esc(b.unit)}</td>
-          <td class="num"><b>${money(b.price)}</b></td>
+          <td>${fmtD(b.date)}${b.bad?` <span style="color:var(--red)" title="Quantity x unit price does not match this line's invoice total">▲</span>`:""}</td><td class="hide-sm">${esc(b.number)}</td>
+          <td class="hide-sm">${esc(b.venue)}</td>
+          <td class="num">${Math.round(b.qty*100)/100} ${esc(b.unit)}${b.conv?`<div style="font-size:11px;color:var(--dim)">was ${b.rawQty} ${esc(b.rawUnit)}</div>`:""}</td>
+          <td class="num"><b>${money(b.price)}</b>${b.conv&&b.rawPrice!==b.price?`<div style="font-size:11px;color:var(--dim)">was ${money(b.rawPrice)}</div>`:""}</td>
         </tr>`).join("")}</tbody></table>
     </div>`;
 }
