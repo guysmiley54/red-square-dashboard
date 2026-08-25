@@ -812,7 +812,7 @@ function labourFor(from,to,gran,slotKey){
   const byDay=(gran==="day");
   const slots={}, staff=[];
   const meta={hours:0,cost:0,costedCost:0,costedHours:0,pendingHours:0,training:0,staff:0,
-              leave:0,salaryCost:0,byDay:byDay,
+              leave:0,salaryCost:0,byDay:byDay,byArea:{},
               slot:(slotKey==null?null:slotKey)};
   if(!SHIFTS_OK) return {slots:slots,meta:meta,staff:staff,ok:false};
   SHIFTS.forEach(function(sh){
@@ -855,6 +855,10 @@ function labourFor(from,to,gran,slotKey){
       if(sh.basis==="salary") meta.salaryCost+=cst;
     }
     else meta.pendingHours+=hrs;
+    // Hours per area, slot-limited like everything else. Divided by a slot's length it
+    // gives average heads on at once, which is the actual rostering question.
+    const ak=sh.area||"\u2013";
+    meta.byArea[ak]=(meta.byArea[ak]||0)+hrs;
     staff.push({who:sh.who, area:sh.area, venue:sh.venue, day:sh.day,
                 from:sh.from, to:sh.to, hours:hrs, cost:cst,
                 fullHours:sh.hours, fullCost:sh.cost, costed:sh.costed,
@@ -1505,6 +1509,20 @@ function render(){
             (m.pendingHours?"of costed shifts only":"of takings")+(scope?" \u00b7 "+scope:"")):"")+
           // Both are period totals, so the nDays divisors cancel.
           metric("Revenue per hour",money0(m.hours?rev/m.hours:0),"per labour hour")+
+          /* How many people are actually on. With a slot selected, hours divided by the
+             slot's length is the average number on at once - 4.78 hours inside a one-hour
+             bucket means 4.78 people. Without a slot that number would be meaningless
+             across a whole trading day, so it falls back to hours. */
+          (function(){
+            const heads=(selKey!=null), div=heads?(g/60):1;
+            const ks=Object.keys(m.byArea).sort(function(a,b){return m.byArea[b]-m.byArea[a];});
+            if(!ks.length) return "";
+            const bits=ks.slice(0,4).map(function(a){
+              return esc(a)+" "+(m.byArea[a]/nDays/div).toFixed(1);
+            }).join(" \u00b7 ");
+            return metric(heads?"People on":"Hours by area",
+                          (m.hours/nDays/div).toFixed(1), bits);
+          })()+
           /* No staff table here. This mode averages a month into one notional day, so a
              per-shift list is 23 days of records flattened into one column with the same
              name repeated a dozen times - it answers a question the view is not asking.
