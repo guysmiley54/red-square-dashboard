@@ -57,7 +57,7 @@
 </head>
 <body>
 <header>
-  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-065102</span></a>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-071230</span></a>
   <div class="crumb" id="crumb"></div>
   <button onclick="loadAll()">↻ refresh</button>
   <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-065102"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-071230"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -543,10 +543,10 @@ async function fetchPosItems_(){
     rows.forEach(r=>{
       const venue=String(r[0]||"").trim(), item=fold(r[1]);
       if(!item) return;
-      const o=by[item]||(by[item]={item, qty:0, s:0, venues:{}});
-      o.qty+=+String(r[2]||"").replace(/[^0-9.\-]/g,"")||0;
-      o.s  +=+String(r[3]||"").replace(/[^0-9.\-]/g,"")||0;
-      if(venue) o.venues[venue]=1;
+      const o=by[item]||(by[item]={item, venues:{}});
+      const v=o.venues[venue]||(o.venues[venue]={qty:0,s:0});
+      v.qty+=+String(r[2]||"").replace(/[^0-9.\-]/g,"")||0;
+      v.s  +=+String(r[3]||"").replace(/[^0-9.\-]/g,"")||0;
     });
     return Object.values(by);
   };
@@ -573,7 +573,7 @@ async function fetchPosItems_(){
         if(pw){
           try{
             const pr=await gvizRows_(SALES_SHEET_ID,"SalesFeed",q(form(pw.from,pw.to)));
-            if(pr.length){ prev={}; shape(pr).forEach(r=>{ prev[r.item]=r.qty; }); }
+            if(pr.length) prev=shape(pr);
           }catch(e){ /* no comparison rather than a wrong one */ }
         }
         return { rows:shape(rows), scope:"filter", prev, prior:pw };
@@ -586,7 +586,34 @@ async function fetchPosItems_(){
            scope:(f||t)?"all-fallback":"all", prev:null, prior:null };
 }
 
-function posKey_(){ return (FILTER.from||"")+"|"+(FILTER.to||"")+"|"+FILTER.venues.slice().sort().join(","); }
+/* Fold the per-venue rows down to whatever venues are selected.
+
+   THIS IS THE STEP THAT MUST NOT BE SKIPPED. The query groups by venue AND item, and the
+   rows are stored that way, so an item's qty and $ are only meaningful once the selected
+   venues have been summed. Filtering the item LIST by venue is not the same thing and is
+   the bug this replaced: a Luma-only view kept every item that Luma happened to sell, but
+   still showed all three venues' totals against it — and worse, showed items Luma sells
+   none of, carrying another venue's numbers entirely.
+
+   An item with no selected venue is dropped, which is why All Day Breakfast disappears
+   from a Luma view instead of appearing with Cambridge's 213 units. */
+function posAgg_(rows){
+  const sel=FILTER.venues, out=[];
+  (rows||[]).forEach(r=>{
+    let qty=0, s=0; const vs=[];
+    Object.keys(r.venues).forEach(v=>{
+      if(sel.length&&sel.indexOf(v)===-1) return;
+      qty+=r.venues[v].qty; s+=r.venues[v].s; vs.push(v);
+    });
+    if(vs.length) out.push({item:r.item, qty, s, venues:vs});
+  });
+  return out;
+}
+
+/* Venue is deliberately NOT in the key: the query is venue-blind — it returns every venue
+   and posAgg_ does the selecting — so toggling venue would otherwise refetch two identical
+   queries and blank the panel while it waited. Date is, because the query IS date-bound. */
+function posKey_(){ return (FILTER.from||"")+"|"+(FILTER.to||""); }
 /* Re-renders once the answer lands. renderReports calls this again on that pass, but the
    key now matches and the state is settled, so it returns immediately — no loop. A result
    whose key no longer matches is dropped: the filter moved while it was in flight. */
@@ -1509,11 +1536,13 @@ function renderReports(){
 
   /* Sold: POS items, fetched lazily \u2014 see fetchPosItems_. */
   ensurePosItems();
-  const posRows=(POS_ITEMS.state==="ok"?POS_ITEMS.rows:[])
-    .filter(r=>!FILTER.venues.length||Object.keys(r.venues).some(v=>FILTER.venues.indexOf(v)!==-1));
+  const posRows=posAgg_(POS_ITEMS.state==="ok"?POS_ITEMS.rows:[]);
   const posTot=posRows.reduce((a,r)=>a+r.s,0);
   const topPos=posRows.slice().sort((a,b)=>b.s-a.s).slice(0,10);
-  const prevQty=POS_ITEMS.prev;
+  /* The prior period is folded through the SAME venue aggregation, so the arrow compares
+     one venue against itself rather than one venue against all three. */
+  let prevQty=null;
+  if(POS_ITEMS.prev){ prevQty={}; posAgg_(POS_ITEMS.prev).forEach(r=>{ prevQty[r.item]=r.qty; }); }
   const priorLbl=POS_ITEMS.prior?`the ${POS_ITEMS.prior.days} days to ${fmtD(new Date(POS_ITEMS.prior.to+"T00:00:00"))}`:"";
   const posNote=POS_ITEMS.state==="loading" ? "Loading item-level sales\u2026"
     : POS_ITEMS.state==="error" ? `<b style="color:var(--red)">Couldn't read item-level sales</b> (${esc(POS_ITEMS.err)}). Check the SalesFeed tab in BG Sales Data is shared as "anyone with the link can view".`
@@ -1525,7 +1554,7 @@ function renderReports(){
                 :`<br><span style="color:var(--dim)">No trend arrows: there is no comparable previous period for this filter.</span>`}`;
   const posPanel=cols("posItem",[
       {k:"k",  label:"Item sold", get:r=>r.item,
-       fmt:r=>`${esc(r.item)}<div style="font-size:11px;color:var(--dim)">${esc(Object.keys(r.venues).map(vShort).sort().join(" \u00b7 "))}</div>`},
+       fmt:r=>`${esc(r.item)}<div style="font-size:11px;color:var(--dim)">${esc(r.venues.map(vShort).sort().join(" \u00b7 "))}</div>`},
       {k:"qty",label:"Qty",   cls:"num", get:r=>r.qty,
        fmt:r=>`${Math.round(r.qty)} ${prevQty?trendMark(r.qty, prevQty[r.item]==null?0:prevQty[r.item], true):""}`},
       {k:"avg",label:"Avg $/unit", cls:"num", get:r=>r.qty?r.s/r.qty:0,
