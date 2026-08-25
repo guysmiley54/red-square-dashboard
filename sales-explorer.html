@@ -229,6 +229,8 @@ let F={period:"day", offset:0, venues:[], cat:"", q:"", gran:60, compare:false, 
        anchor:null,
        // Labour table: sort column/direction, and which people are expanded.
        lsort:{key:"cost",dir:-1}, lopen:{},
+       // Average-day profile in week/month view, and an optional day-of-week filter.
+       profile:false, dow:null,
        // Sections collapsed on screen. Wastage starts collapsed; the rest start open.
        hide:{venues:false, chart:false, cats:false, products:false},
        // Private mode: only the venues you have selected show their money. For handing a
@@ -616,6 +618,14 @@ function fmtStamp(d){
 }
 /* Offsets from today for a yyyy-MM-dd, so a view change can land on the date you were
    already looking at. Local midnight both sides, so a DST boundary cannot drift the count. */
+/** 0=Mon .. 6=Sun for a yyyy-MM-dd. Averaging a Tuesday in with a Saturday hides both,
+ *  so the profile can be narrowed to one weekday. */
+function dowOf(ymd){ return (new Date(ymd+"T00:00:00").getDay()+6)%7; }
+const DOW_NAME=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+function toggleProfile(){ F.profile=!F.profile; F.slot=null; if(!F.profile) F.dow=null; render(); }
+function setDow(d){ F.dow=(F.dow===d?null:d); F.slot=null; render(); }
+
 function dayOffsetOf(ymd){
   const now=new Date(); now.setHours(0,0,0,0);
   const t=new Date(ymd+"T00:00:00"); t.setHours(0,0,0,0);
@@ -653,6 +663,7 @@ function setPeriod(p){
   F.anchor=anchor;
 
   F.period=p; F.slot=null;
+  if(p==="day"){ F.profile=false; F.dow=null; }   // profile is a multi-day idea only
   F.offset = (p==="day")  ? dayOffsetOf(anchor)
            : (p==="week") ? weekOffsetOf(anchor)
                           : monthOffsetOf(anchor);
@@ -804,6 +815,7 @@ function labourFor(from,to,gran,slotKey){
     if(sh.day<from||sh.day>to) return;
     if(F.venues.length&&!venueOn(sh.venue)) return;
     if(F.day&&sh.day!==F.day) return;
+    if(F.dow!=null&&dowOf(sh.day)!==F.dow) return;
     if(sh.kind==="training"||sh.kind==="leave"){
       /* Paid, but off the floor - never in the curve or the head count. Training is
          apprentice school time; leave is a holiday. Deputy prices most leave lines, so it
@@ -1426,6 +1438,104 @@ function render(){
         '<div class="chart">'+cols+'</div>'+
         '<div class="metrics">'+mets+'</div>'+labMets+'</div>';
     }
+  } else if(HAS_TIME && F.period!=="day" && F.profile){
+    /* AVERAGE DAY PROFILE. One day's curve is mostly noise - a late function, a quiet
+       Tuesday. Averaged across every day in the window it becomes the actual trading shape,
+       which is the only honest basis for moving a start time. Revenue and labour are both
+       divided by the number of days contributing, so the bars read "a typical day" rather
+       than "a month's worth". */
+    const g=F.gran;
+    const prows=(F.dow==null)?rows:rows.filter(function(r){return dowOf(r.day)===F.dow;});
+    const dayset={}; prows.forEach(function(r){ if(r.sales) dayset[r.day]=1; });
+    const nDays=Math.max(1,Object.keys(dayset).length);
+    const bySeries=series.map(function(v){ return bucket(prows,g,v); });
+    const keys=[].concat.apply([],bySeries.map(function(b){return Object.keys(b).map(Number);}));
+    if(keys.length){
+      const lo=Math.min.apply(null,keys), hi=Math.max.apply(null,keys);
+      const max=Math.max.apply(null,[1].concat([].concat.apply([],bySeries.map(function(b){
+        return Object.keys(b).map(function(k){return b[k]/nDays;}); }))));
+      const lab=F.labour?labourFor(w.from,w.to,g):null;
+      const labMax=lab&&lab.ok?Math.max.apply(null,[0.01].concat(
+        Object.keys(lab.slots).map(function(k){return lab.slots[k].hours/nDays;}))):1;
+      let cols="";
+      for(let b=lo;b<=hi;b+=g){
+        const lbl=(g===60)?String(b/60):(b%60===0?String(b/60):"");
+        const tip=series.map(function(v,i){
+          return (v?vShort(v)+" ":"")+money((bySeries[i][b]||0)/nDays);
+        }).join("  \u00b7  ");
+        const on=F.slot&&F.slot.kind==="time"&&F.slot.key===b;
+        const cls="col"+(F.slot&&F.slot.kind==="time"?(on?" sel":" dim"):"");
+        const ls=lab&&lab.ok?(lab.slots[b]||{hours:0,cost:0}):null;
+        const labTip=ls?"  \u00b7  "+(ls.hours/nDays).toFixed(2)+"h labour"+
+          (ls.cost?" ("+money(ls.cost/nDays)+")":""):"";
+        cols+='<div class="'+cls+'" onclick="setSlot(\'time\','+b+')" title="'+clock(b)+'\u2013'+clock(b+g)+
+          ' \u2014 avg of '+nDays+' day'+(nDays===1?"":"s")+' \u2014 '+tip+labTip+'">'+
+          (ls?'<div class="labbar" style="height:'+Math.round(ls.hours/nDays/labMax*140)+'px"></div>':"")+
+          '<div class="pair">'+
+          series.map(function(v,i){
+            return '<div class="bx" style="height:'+Math.round((bySeries[i][b]||0)/nDays/max*140)+
+                   'px;background:'+colour(v)+'"></div>';
+          }).join("")+
+          '</div><div class="lb">'+lbl+'</div></div>';
+      }
+      const span=(hi-lo+g)/60;
+      const total=sum(bySeries[0]||{});
+      const cur=bySeries[0]||{};
+      const bKeys=Object.keys(cur).map(Number);
+      const peak=bKeys.length?bKeys.reduce(function(m,k){return cur[k]>cur[m]?k:m;},bKeys[0]):null;
+      const mets=metric("Avg day",money0(total/nDays),nDays+" "+(F.dow==null?"trading days":DOW_NAME[F.dow]+"s")+" averaged")+
+        metric("Per hour",money0(span?total/nDays/span:0),span.toFixed(1)+" hours trading")+
+        (peak!==null?metric("Busiest "+(g===60?"hour":"15 min"),clock(peak),money(cur[peak]/nDays)+" avg"):"")+
+        metric("Period total",money0(total),esc(w.label));
+
+      /* Labour on the same averaged basis. Selecting a bar narrows to that time of day
+         ACROSS every day in the window - "who is typically on at 3pm", which a single
+         day's chart can never answer. */
+      let labMets="";
+      if(lab&&lab.ok){
+        const selKey=(F.slot&&F.slot.kind==="time")?F.slot.key:null;
+        const L=(selKey==null)?lab:labourFor(w.from,w.to,g,selKey);
+        const m=L.meta;
+        const rev=(selKey==null)?total:(cur[selKey]||0);
+        const pct=(m.costedCost&&rev)?(m.costedCost/rev*100):null;
+        const scope=(selKey==null)?"":clock(selKey)+"\u2013"+clock(selKey+g);
+        labMets = m.hours>0 ? (
+          '<div class="metrics" style="margin-top:2px">'+
+          metric("Labour hours",(m.hours/nDays).toFixed(2),
+                 "avg per day"+(scope?" \u00b7 "+scope:""))+
+          (m.cost?metric("Wage cost",money(m.cost/nDays),
+            "avg per day"+(m.salaryCost?" \u00b7 incl. salaried":"")):"")+
+          (pct!==null?metric("Labour %",pct.toFixed(1)+"%",
+            (m.pendingHours?"of costed shifts only":"of takings")+(scope?" \u00b7 "+scope:"")):"")+
+          // Both sides are period totals, so the nDays divisors cancel - no need to scale.
+          metric("Revenue per hour",money0(m.hours?rev/m.hours:0),"per labour hour")+
+          '</div>'+labourTable(L)
+        ) : '<div class="note">Nobody rostered'+(scope?" during "+scope:"")+'.</div>';
+      }
+      const dowChips='<span class="sep"></span>'+
+        '<span class="chip'+(F.dow==null?" on":"")+'" style="padding:4px 10px;'+
+          (F.dow==null?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" onclick="setDow(null)">All days</span>'+
+        DOW_NAME.map(function(nm,i){
+          return '<span class="chip" style="padding:4px 10px;'+
+            (F.dow===i?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+
+            '" onclick="setDow('+i+')">'+nm+'</span>';
+        }).join("");
+      chart='<div class="card" data-sec="chart"><div class="label">Average day'+
+        (F.dow==null?"":" \u2014 "+DOW_NAME[F.dow]+"s")+hideChip("chart")+
+        '<span class="chip" style="padding:4px 10px;background:var(--ink);color:#fff;border-color:var(--ink)" onclick="toggleProfile()">\u2713 Avg day</span>'+
+        '<span class="chip" style="padding:4px 10px;'+(F.labour?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" onclick="toggleLabour()">'+
+          (F.labour?"\u2713 ":"")+'Labour</span>'+
+        cmpChip+cmpLegend+
+        (F.labour&&lab&&lab.ok?'<span class="legend"><i style="background:#c9c6bf"></i>labour hours</span>':"")+
+        dowChips+
+        '</div>'+
+        '<div class="chart">'+cols+'</div>'+
+        '<div class="metrics">'+mets+'</div>'+labMets+'</div>';
+    }else{
+      chart='<div class="card"><div class="label">Average day</div>'+
+        '<p style="margin:6px 0 0">No sales'+(F.dow==null?"":" on "+DOW_NAME[F.dow]+"s")+' in this window.</p>'+
+        '<div class="muted" style="margin-top:8px"><span class="chip" onclick="toggleProfile()">back to daily bars</span></div></div>';
+    }
   } else if(F.period!=="day"){
     const bySeries=series.map(function(v){ return bucket(rows,"day",v); });
     const days=Object.keys(bucket(rows,"day")).sort();
@@ -1499,6 +1609,7 @@ function render(){
           :'No <b>DeputyShifts</b> tab found \u2014 run processDeputy in the script.')+'</div>';
       }
       chart='<div class="card" data-sec="chart"><div class="label">Sales by day'+hideChip("chart")+
+        (HAS_TIME?'<span class="chip" style="padding:4px 10px" onclick="toggleProfile()">Avg day</span>':"")+
         '<span class="chip" style="padding:4px 10px;'+(F.labour?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" onclick="toggleLabour()">'+
           (F.labour?"\u2713 ":"")+'Labour</span>'+
         cmpChip+cmpLegend+
