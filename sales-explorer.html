@@ -1505,7 +1505,12 @@ function render(){
             (m.pendingHours?"of costed shifts only":"of takings")+(scope?" \u00b7 "+scope:"")):"")+
           // Both are period totals, so the nDays divisors cancel.
           metric("Revenue per hour",money0(m.hours?rev/m.hours:0),"per labour hour")+
-          '</div>'+labourTable(L)
+          /* No staff table here. This mode averages a month into one notional day, so a
+             per-shift list is 23 days of records flattened into one column with the same
+             name repeated a dozen times - it answers a question the view is not asking.
+             The shape of the curve and the cost per slot are the point; individual shifts
+             belong in day view, where they are actually one day's worth. */
+          '</div>'
         ) : '<div class="note">Nobody rostered'+(scope?" during "+scope:"")+'.</div>';
       }
       chart='<div class="card" data-sec="chart"><div class="label">Average day'+hideChip("chart")+
