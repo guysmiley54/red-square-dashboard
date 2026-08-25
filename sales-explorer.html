@@ -227,6 +227,8 @@ let F={period:"day", offset:0, venues:[], cat:"", q:"", gran:60, compare:false, 
        labour:true,
        // Last date looked at, so a view change can return to it. Session-only.
        anchor:null,
+       // Labour table: sort column/direction, and which people are expanded.
+       lsort:{key:"cost",dir:-1}, lopen:{},
        // Sections collapsed on screen. Wastage starts collapsed; the rest start open.
        hide:{venues:false, chart:false, cats:false, products:false},
        // Private mode: only the venues you have selected show their money. For handing a
@@ -841,7 +843,8 @@ function labourFor(from,to,gran,slotKey){
     staff.push({who:sh.who, area:sh.area, venue:sh.venue, day:sh.day,
                 from:sh.from, to:sh.to, hours:hrs, cost:cst,
                 fullHours:sh.hours, fullCost:sh.cost, costed:sh.costed,
-                basis:sh.basis, rate:sh.rate, kind:sh.kind});
+                basis:sh.basis, rate:sh.rate, kind:sh.kind,
+                day:sh.day, venue:sh.venue});
 
     if(byDay){
       const o=slots[sh.day]||(slots[sh.day]={hours:0,cost:0});
@@ -868,33 +871,149 @@ function labourFor(from,to,gran,slotKey){
 function labourTable(L){
   if(!L.staff.length) return "";
   const sel=L.meta.slot!=null;
+
+  /* Two shapes, because a day and a week are different questions.
+
+     DAY: one row per shift is right - there are only a handful and you want the clock
+     times side by side.
+
+     WEEK or MONTH: one row per PERSON. A flat shift list ran to eighty-odd rows where the
+     same name appeared a dozen times, and two shifts on different days with identical
+     hours looked like duplicated data because the table never showed a date. Aggregate,
+     then let a click open that person's own shifts underneath - with the date on them. */
+  const byDay=!!L.meta.byDay;
   const pend=L.staff.filter(function(x){return !x.costed;});
-  return '<table style="margin-top:12px"><thead><tr>'+
-    '<th>Who</th><th class="hide-sm">Area</th><th>Shift</th>'+
-    '<th class="num">Hours'+(sel?" here":"")+'</th>'+
-    '<th class="num">Cost</th><th class="num">$/hr</th></tr></thead><tbody>'+
-    L.staff.map(function(x){
-      const rate=x.fullHours?x.fullCost/x.fullHours:0;
-      return '<tr'+(x.costed?"":' style="background:#fdf8ec"')+'>'+
-        '<td><b>'+esc(x.who||"(unnamed)")+'</b></td>'+
-        '<td class="hide-sm muted">'+esc(x.area||"")+'</td>'+
-        '<td class="muted">'+(x.from!=null?clock(x.from)+"\u2013"+clock(x.to):"?")+
-          (sel?' <span class="muted">of '+x.fullHours.toFixed(1)+'h</span>':'')+'</td>'+
-        '<td class="num">'+x.hours.toFixed(2)+'</td>'+
-        '<td class="num">'+(x.costed?money(x.cost):'<span class="muted">pending</span>')+'</td>'+
-        '<td class="num">'+(x.basis==="salary"&&x.rate
-            // Salaried: the contractual rate from the payslip. Salary is allocated per DAY,
-            // so cost/hours would read $38.46 on a 7.5h day and $33.94 on an 8.5h day for
-            // someone paid a flat $37.955466.
-            ? money(x.rate)+' <span class="muted">salary</span>'
-            : (x.costed&&rate?money(rate):'<span class="muted">\u2013</span>'))+'</td></tr>';
-    }).join("")+
-    '</tbody></table>'+
-    (pend.length?'<div class="note"><b>'+pend.length+' shift(s) with no cost yet:</b> '+
-      pend.map(function(x){return esc(x.who)+" ("+x.fullHours.toFixed(1)+"h)";}).join(", ")+
-      '.<br>Deputy fills cost in on payroll export, so these are hourly staff waiting on a '+
-      'pay run. Salaried staff are costed from their annual salary and no longer appear '+
-      'here. Their hours are right; only the dollars are pending.</div>':'');
+
+  function rateCell(x,agg){
+    // Salaried: the contractual rate from the payslip. Salary is allocated per DAY, so
+    // cost/hours would read $38.46 on a 7.5h day and $33.94 on an 8.5h day for someone
+    // paid a flat $37.955466.
+    if(x.basis==="salary"&&x.rate) return money(x.rate)+' <span class="muted">salary</span>';
+    const r=agg?(x.hours?x.cost/x.hours:0):(x.fullHours?x.fullCost/x.fullHours:0);
+    return (x.costed&&r)?money(r):'<span class="muted">\u2013</span>';
+  }
+  function sortHead(cols){
+    return '<thead><tr>'+cols.map(function(c){
+      const on=F.lsort.key===c.k;
+      return '<th'+(c.cls?' class="'+c.cls+'"':'')+
+        ' style="cursor:pointer;white-space:nowrap" onclick="setLsort(\''+c.k+'\')">'+
+        c.label+(on?' <span style="opacity:.55">'+(F.lsort.dir<0?"\u25be":"\u25b4")+'</span>':'')+
+        '</th>';
+    }).join("")+'</tr></thead>';
+  }
+  function cmp(a,b,key){
+    const va=a[key], vb=b[key];
+    if(typeof va==="string"||typeof vb==="string")
+      return String(va||"").localeCompare(String(vb||""));
+    return (+va||0)-(+vb||0);
+  }
+
+  /* ---------- day view: one row per shift ---------- */
+  if(!byDay){
+    const rows=L.staff.slice().sort(function(a,b){
+      return cmp(a,b,F.lsort.key==="cost"?"cost":F.lsort.key)*F.lsort.dir;
+    });
+    return '<table style="margin-top:12px">'+
+      sortHead([{k:"who",label:"Who"},{k:"area",label:"Area",cls:"hide-sm"},
+                {k:"from",label:"Shift"},{k:"hours",label:"Hours"+(sel?" here":""),cls:"num"},
+                {k:"cost",label:"Cost",cls:"num"},{k:"rate",label:"$/hr",cls:"num"}])+
+      '<tbody>'+rows.map(function(x){
+        return '<tr'+(x.costed?"":' style="background:#fdf8ec"')+'>'+
+          '<td><b>'+esc(x.who||"(unnamed)")+'</b></td>'+
+          '<td class="hide-sm muted">'+esc(x.area||"")+'</td>'+
+          '<td class="muted">'+(x.from!=null?clock(x.from)+"\u2013"+clock(x.to):"?")+
+            (sel?' <span class="muted">of '+x.fullHours.toFixed(1)+'h</span>':'')+'</td>'+
+          '<td class="num">'+x.hours.toFixed(2)+'</td>'+
+          '<td class="num">'+(x.costed?money(x.cost):'<span class="muted">pending</span>')+'</td>'+
+          '<td class="num">'+rateCell(x,false)+'</td></tr>';
+      }).join("")+'</tbody></table>'+pendNote(pend);
+  }
+
+  /* ---------- week / month: one row per person, expandable ---------- */
+  const by={};
+  L.staff.forEach(function(x){
+    const k=x.who||"(unnamed)";
+    const o=by[k]||(by[k]={who:k,shifts:0,days:{},hours:0,cost:0,areas:{},venues:{},
+                           basis:x.basis,rate:x.rate,anyPending:false,rows:[]});
+    o.shifts++; o.days[x.day]=1; o.hours+=x.hours; o.cost+=x.cost;
+    if(x.area) o.areas[x.area]=(o.areas[x.area]||0)+x.hours;
+    if(x.venue) o.venues[x.venue]=(o.venues[x.venue]||0)+x.hours;
+    if(!x.costed) o.anyPending=true;
+    if(x.basis==="salary"){ o.basis="salary"; o.rate=x.rate; }
+    o.rows.push(x);
+  });
+  const people=Object.keys(by).map(function(k){
+    const o=by[k];
+    o.dayCount=Object.keys(o.days).length;
+    o.costed=!o.anyPending;
+    o.area=Object.keys(o.areas).sort(function(a,b){return o.areas[b]-o.areas[a];})[0]||"";
+    o.areaN=Object.keys(o.areas).length;
+    o.venueN=Object.keys(o.venues).length;
+    o.rateVal=o.basis==="salary"&&o.rate?o.rate:(o.hours?o.cost/o.hours:0);
+    return o;
+  }).sort(function(a,b){
+    const k=F.lsort.key;
+    const key=(k==="from")?"dayCount":(k==="rate")?"rateVal":k;
+    return cmp(a,b,key)*F.lsort.dir;
+  });
+
+  return '<table style="margin-top:12px">'+
+    sortHead([{k:"who",label:"Who"},{k:"area",label:"Area",cls:"hide-sm"},
+              {k:"from",label:"Days"},{k:"hours",label:"Hours",cls:"num"},
+              {k:"cost",label:"Cost",cls:"num"},{k:"rate",label:"$/hr",cls:"num"}])+
+    '<tbody>'+people.map(function(o){
+      const open=!!F.lopen[o.who];
+      const head='<tr'+(o.costed?"":' style="background:#fdf8ec"')+
+        ' style="cursor:pointer" onclick="toggleLperson('+JSON.stringify(o.who).replace(/"/g,"&quot;")+')">'+
+        '<td><span style="display:inline-block;width:12px;opacity:.5">'+(open?"\u2013":"+")+'</span>'+
+          '<b>'+esc(o.who)+'</b>'+
+          (o.basis==="salary"?' <span class="muted" style="font-size:11px">salary</span>':'')+'</td>'+
+        '<td class="hide-sm muted">'+esc(o.area)+(o.areaN>1?' <span class="muted">+'+(o.areaN-1)+'</span>':'')+'</td>'+
+        '<td class="muted">'+o.dayCount+' day'+(o.dayCount===1?"":"s")+
+          (o.shifts!==o.dayCount?' <span class="muted">'+o.shifts+' shifts</span>':'')+
+          (o.venueN>1?' <span class="muted">\u00b7 '+o.venueN+' venues</span>':'')+'</td>'+
+        '<td class="num">'+o.hours.toFixed(2)+'</td>'+
+        '<td class="num">'+(o.cost?money(o.cost):'<span class="muted">pending</span>')+'</td>'+
+        '<td class="num">'+rateCell(o,true)+'</td></tr>';
+      if(!open) return head;
+      const kids=o.rows.slice().sort(function(a,b){
+        return a.day<b.day?-1:a.day>b.day?1:(a.from||0)-(b.from||0);
+      }).map(function(x){
+        return '<tr style="background:#faf9f7"><td style="padding-left:26px" class="muted">'+
+          esc(fmtDay(x.day))+'</td>'+
+          '<td class="hide-sm muted">'+esc(x.area||"")+'</td>'+
+          '<td class="muted">'+(x.from!=null?clock(x.from)+"\u2013"+clock(x.to):"\u2013")+
+            (x.kind&&x.kind!=="shift"?' <span class="muted">'+esc(x.kind)+'</span>':'')+
+            (x.venue&&o.venueN>1?' <span class="muted">\u00b7 '+esc(vShort(x.venue))+'</span>':'')+'</td>'+
+          '<td class="num muted">'+x.hours.toFixed(2)+'</td>'+
+          '<td class="num muted">'+(x.costed?money(x.cost):'pending')+'</td>'+
+          '<td class="num muted"></td></tr>';
+      }).join("");
+      return head+kids;
+    }).join("")+'</tbody></table>'+pendNote(pend);
+}
+
+function pendNote(pend){
+  if(!pend.length) return "";
+  const who={};
+  pend.forEach(function(x){ who[x.who]=(who[x.who]||0)+x.fullHours; });
+  return '<div class="note"><b>'+pend.length+' shift(s) with no cost yet:</b> '+
+    Object.keys(who).map(function(k){return esc(k)+" ("+who[k].toFixed(1)+"h)";}).join(", ")+
+    '.<br>Deputy fills cost in on payroll export, so these are hourly staff waiting on a '+
+    'pay run. Salaried staff are costed from their annual salary and no longer appear '+
+    'here. Their hours are right; only the dollars are pending.</div>';
+}
+
+function setLsort(k){
+  // Same column again flips direction. New column starts descending for numbers and
+  // ascending for names, which is what you want nine times out of ten.
+  if(F.lsort.key===k) F.lsort.dir=-F.lsort.dir;
+  else F.lsort={key:k,dir:(k==="who"||k==="area")?1:-1};
+  render();
+}
+function toggleLperson(who){
+  if(F.lopen[who]) delete F.lopen[who]; else F.lopen[who]=1;
+  render();
 }
 
 function metric(k,val,sub,colour){
