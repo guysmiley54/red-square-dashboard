@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-054210"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-055840"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -983,7 +983,7 @@ function fcTrailingBase(map, shape, settleFrom, days){
 
    On a live projection an open day's actual is a FLOOR: you cannot un-sell what you sold
    this morning, and an invoice already captured is not going to un-arrive. */
-function fcProject(map, shape, start, end, settleFrom, blindOpen){
+function fcProject(map, shape, start, end, settleFrom, blindOpen, mode){
   const s=fcMid(start), e=fcMid(end), sf=fcMid(settleFrom);
   let actual=0, firm=0, firmW=0, nDays=0, nFirm=0;
   const open=[];
@@ -995,22 +995,32 @@ function fcProject(map, shape, start, end, settleFrom, blindOpen){
     if(d<sf){ firm+=v; firmW+=sh; nFirm++; }
     else open.push({sh,v});
   }
-  /* Calibrating on the finished days requires them to contain actual money. firmW>0 alone
-     is not enough: on a Tuesday the only finished day is Monday, and a Monday with no
-     delivery would set base=0 and project the entire week's spend as zero.
+  /* Two ways to set the level the open days are filled from, and the right one depends
+     entirely on how lumpy the series is. Measured, not guessed (see experiment.js):
 
-     With nothing settled inside the range - which is every Monday, and every Tuesday too
-     once invoice capture lag is allowed for - fall back to the level of the last four
-     settled weeks rather than a flat twelve-week average. If the site has been running hot
-     for a fortnight that belongs in Monday's forecast, not averaged away against June. */
+       CALIBRATE - infer the level from the days of this range already settled.
+         Sales: median error 2.2% on a Tuesday, 1.1% by Thursday. Clearly right.
+         Spend: median error 35.6% on a Tuesday, 84% at the 90th percentile. Catastrophic,
+         because deliveries are lumpy AND the day they land drifts week to week - one
+         Monday that happens to carry two drops gets multiplied up into a fictional week.
+
+       TRAILING - level of the last four settled weeks, ignoring this range entirely.
+         Spend: median 17.4% on a Tuesday against 35.6%. Immune to one big delivery.
+         Sales: worse than calibrating, because it can't see that this week is running hot.
+
+     Blends of the two were tested at three weightings and beat neither, so there is no
+     clever middle here: pick per series. */
+  /* The trailing window must end BEFORE the range, not at the settle point. Ending it at sf
+     lets days of the very range being projected into the "prior" level - a freak Monday then
+     still inflates the forecast, just diluted, which defeats the point of the mode. Settled
+     days inside the range are not lost by this: they are counted directly as firm actuals. */
+  const trail=fcTrailingBase(map, shape, (sf<s?sf:s), 28) || shape.weekAvg;
+  const cal=(firmW>0 && firm>0) ? firm/firmW : null;   // needs actual money, not just days
   let basis, base;
-  if(firmW>0 && firm>0){ basis="complete"; base=firm/firmW; }
-  else {
-    const trail=fcTrailingBase(map, shape, sf, 28);
-    if(trail>0){              basis="trailing"; base=trail; }
-    else if(shape.weekAvg>0){ basis="history";  base=shape.weekAvg; }
-    else {                    basis="none";     base=0; }
-  }
+  if(mode!=="trailing" && cal!=null){ basis="calibrated"; base=cal; }
+  else if(trail>0){                   basis="trailing";   base=trail; }
+  else if(cal!=null){                 basis="calibrated"; base=cal; }
+  else {                              basis="none";       base=0; }
 
   let projected = firm;
   open.forEach(o=>{
@@ -1024,14 +1034,22 @@ function fcProject(map, shape, start, end, settleFrom, blindOpen){
 /* How wrong has this method been, at exactly this point in the week, on real past weeks?
    The range is shifted back whole weeks so the firm/open split stays on the same weekdays.
    Blind, so the open days genuinely aren't known. */
-function fcBacktest(map, shape, start, end, settleFrom, maxK){
-  const errs=[];
+/* Step back in WHOLE WEEKS so the settled/open split stays on the same weekdays, but never
+   by less than the range itself - stepping a 31-day range back by 7 would compare it against
+   windows that mostly overlap it, and near-identical samples would make the method look far
+   more consistent than it is. */
+function fcStep(start,end){
+  const days=Math.round((fcMid(end)-fcMid(start))/864e5)+1;
+  return Math.max(7, Math.ceil(days/7)*7);
+}
+function fcBacktest(map, shape, start, end, settleFrom, maxK, mode){
+  const errs=[], step=fcStep(start,end);
   for(let k=1;k<=(maxK||FC.HIST_WEEKS);k++){
-    const s2=fcAdd(start,-7*k), e2=fcAdd(end,-7*k), sf2=fcAdd(settleFrom,-7*k);
+    const s2=fcAdd(start,-step*k), e2=fcAdd(end,-step*k), sf2=fcAdd(settleFrom,-step*k);
     let act=0;
     for(let d=fcMid(s2); d<=fcMid(e2); d=fcAdd(d,1)) act+=map[fmtISO(d)]||0;
     if(!(act>0)) continue;
-    const p=fcProject(map, shape, s2, e2, sf2, true);
+    const p=fcProject(map, shape, s2, e2, sf2, true, mode);
     if(p.basis==="none") continue;
     errs.push(p.projected/act - 1);
   }
@@ -1041,19 +1059,32 @@ function fcBacktest(map, shape, start, end, settleFrom, maxK){
 /* Same idea for a ratio (COGS % of sales). Done on the ratio directly rather than by
    combining the two separate bands - the errors are correlated (a big week is big on both
    sides) and multiplying independent bands would overstate the spread. */
-function fcBacktestRatio(mapN, mapD, shapeN, shapeD, start, end, sfN, sfD, maxK){
-  const errs=[];
+function fcBacktestRatio(mapN, mapD, shapeN, shapeD, start, end, sfN, sfD, maxK, modeN, modeD){
+  const errs=[], step=fcStep(start,end);
   for(let k=1;k<=(maxK||FC.HIST_WEEKS);k++){
-    const s2=fcAdd(start,-7*k), e2=fcAdd(end,-7*k);
+    const s2=fcAdd(start,-step*k), e2=fcAdd(end,-step*k);
     let an=0, ad=0;
     for(let d=fcMid(s2); d<=fcMid(e2); d=fcAdd(d,1)){ an+=mapN[fmtISO(d)]||0; ad+=mapD[fmtISO(d)]||0; }
     if(!(an>0)||!(ad>0)) continue;
-    const pn=fcProject(mapN, shapeN, s2, e2, fcAdd(sfN,-7*k), true);
-    const pd=fcProject(mapD, shapeD, s2, e2, fcAdd(sfD,-7*k), true);
+    const pn=fcProject(mapN, shapeN, s2, e2, fcAdd(sfN,-step*k), true, modeN);
+    const pd=fcProject(mapD, shapeD, s2, e2, fcAdd(sfD,-step*k), true, modeD);
     if(pn.basis==="none"||pd.basis==="none"||!(pd.projected>0)) continue;
     errs.push((pn.projected/pd.projected)/(an/ad) - 1);
   }
   return errs.sort((a,b)=>a-b);
+}
+
+/* What the same range actually came to over the previous few comparable periods. A
+   projection that sits outside this spread is visibly wrong at a glance, which beats any
+   amount of caveat text underneath it. */
+function fcRecent(map, start, end, n){
+  const step=fcStep(start,end), out=[];
+  for(let k=1;k<=n;k++){
+    const s2=fcAdd(start,-step*k), e2=fcAdd(end,-step*k);
+    let t=0; for(let d=fcMid(s2); d<=fcMid(e2); d=fcAdd(d,1)) t+=map[fmtISO(d)]||0;
+    if(t>0) out.push({start:s2, end:e2, total:t});
+  }
+  return out;
 }
 
 /* Nearest-rank percentile. Returns null below MIN_BACKTEST rather than inventing a band
@@ -1082,7 +1113,11 @@ function fcCaptureLag(today){
   return {days:Math.max(0,Math.min(FC.MAX_SETTLE,p75)), n:lags.length, known:true, p75};
 }
 
-/* Everything the forecast card needs, in one pass, so Home and Reports agree. */
+/* Everything the forecast card needs, in one pass.
+
+   Spend and sales are levelled differently on purpose - see fcProject. Sales calibrate off
+   the days already settled; spend does not, because a week's deliveries say almost nothing
+   about the week's total until most of them have landed. */
 function forecastModel(){
   const f=fromDate(), t=toDate();
   if(!f||!t) return null;                    // "All time" has no end to project to
@@ -1094,25 +1129,32 @@ function forecastModel(){
   const sfSpend=fcAdd(today,-lag.days);      // spend settles late; sales don't
   const sfSales=today;
   const cut=SALES_CUTOVER?gvizDate(SALES_CUTOVER):null;
+  const SPEND_MODE="trailing", SALES_MODE="calibrate";
 
   const mAll=fcSpendMap(false), mCogs=fcSpendMap(true), mSales=fcSalesMap();
   const shAll  =fcShape(fcWeeks(mAll  ,today,null,FC.HIST_WEEKS));
   const shCogs =fcShape(fcWeeks(mCogs ,today,null,FC.HIST_WEEKS));
   const shSales=fcShape(fcWeeks(mSales,today,cut ,FC.HIST_WEEKS));
 
-  const pAll  =fcProject(mAll  ,shAll  ,start,end,sfSpend,false);
-  const pCogs =fcProject(mCogs ,shCogs ,start,end,sfSpend,false);
-  const pSales=fcProject(mSales,shSales,start,end,sfSales,false);
+  const pAll  =fcProject(mAll  ,shAll  ,start,end,sfSpend,false,SPEND_MODE);
+  const pCogs =fcProject(mCogs ,shCogs ,start,end,sfSpend,false,SPEND_MODE);
+  const pSales=fcProject(mSales,shSales,start,end,sfSales,false,SALES_MODE);
   if(pAll.basis==="none"&&pSales.basis==="none") return null;
 
+  let done=0, total=0;
+  for(let d=new Date(start); d<=end; d=fcAdd(d,1)){ total++; if(d<today) done++; }
+
   return {
-    start,end,today,lag,
+    start,end,today,lag,done,total,
     spend:pAll, cogs:pCogs, sales:pSales,
     shAll,shCogs,shSales,
-    bSpend:fcBand(fcBacktest(mAll  ,shAll  ,start,end,sfSpend,FC.HIST_WEEKS)),
-    bCogs :fcBand(fcBacktest(mCogs ,shCogs ,start,end,sfSpend,FC.HIST_WEEKS)),
-    bSales:fcBand(fcBacktest(mSales,shSales,start,end,sfSales,FC.HIST_WEEKS)),
-    bRatio:fcBand(fcBacktestRatio(mCogs,mSales,shCogs,shSales,start,end,sfSpend,sfSales,FC.HIST_WEEKS)),
+    bSpend:fcBand(fcBacktest(mAll  ,shAll  ,start,end,sfSpend,FC.HIST_WEEKS,SPEND_MODE)),
+    bCogs :fcBand(fcBacktest(mCogs ,shCogs ,start,end,sfSpend,FC.HIST_WEEKS,SPEND_MODE)),
+    bSales:fcBand(fcBacktest(mSales,shSales,start,end,sfSales,FC.HIST_WEEKS,SALES_MODE)),
+    bRatio:fcBand(fcBacktestRatio(mCogs,mSales,shCogs,shSales,start,end,sfSpend,sfSales,
+                                  FC.HIST_WEEKS,SPEND_MODE,SALES_MODE)),
+    rSpend:fcRecent(mAll ,start,end,4),
+    rSales:fcRecent(mSales,start,end,4),
     partial: today>=start && today<=end
   };
 }
@@ -1121,12 +1163,9 @@ function forecastModel(){
 
    The band records e = projected/actual - 1, so the outcome implied by an error e is
    projected/(1+e) - a division, not a multiplication. Getting that backwards would tilt
-   every range the wrong way. A larger e means a SMALLER outcome, so the band's high error
-   gives the low end of the range.
-
-   The headline is corrected for the method's median bias: if it has run 4% hot for the
-   last twelve weeks, saying so is better than repeating the error. Everything is floored
-   at what has already happened - you cannot un-sell this morning's coffee. */
+   every range the wrong way: a larger e means a SMALLER outcome, so the band's high error
+   gives the low end. The headline is corrected for the method's median bias, and everything
+   is floored at what has already happened - you cannot un-sell this morning's coffee. */
 function fcSettle(p,band){
   if(!band) return {mid:p.projected, lo:null, hi:null, n:0};
   const imply=e=>Math.max(p.actual, p.projected/(1+e));
@@ -1137,67 +1176,67 @@ function forecastCard(){
   const m=forecastModel();
   if(!m) return "";
   const money0=v=>"$"+Math.round(v).toLocaleString("en-AU");
+  const kish=v=>v>=1000?"$"+(v/1000).toFixed(1)+"k":"$"+Math.round(v);
+  const dim=t=>`<span style="color:var(--dim)">${t}</span>`;
+
   const sSpend=fcSettle(m.spend,m.bSpend), sSales=fcSettle(m.sales,m.bSales);
-  /* COGS is a strict subset of spend. Correcting the two headlines against separate bands
-     can otherwise put COGS above total spend on screen, which is impossible and reads as a
-     bug. Clamp it, and floor it at what has already been spent on COGS. */
+  /* COGS is a strict subset of spend. Correcting the two against separate bands can put
+     COGS above total spend on screen, which is impossible and reads as a bug. */
   const sCogs=fcSettle(m.cogs,m.bCogs);
   const cogsMidV=Math.max(m.cogs.actual, Math.min(sCogs.mid, sSpend.mid));
 
   const haveSales=m.sales.basis!=="none"&&m.sales.projected>0;
-  const cogsPctProj = haveSales ? cogsMidV/sSales.mid : null;
-  let cogsMid=cogsPctProj, cogsLo=null, cogsHi=null;
-  if(cogsPctProj!=null&&m.bRatio){
-    cogsMid=cogsPctProj/(1+m.bRatio.mid);
-    cogsLo =cogsPctProj/(1+m.bRatio.hi);
-    cogsHi =cogsPctProj/(1+m.bRatio.lo);
+  let cogsMid=haveSales?cogsMidV/sSales.mid:null, cogsLo=null, cogsHi=null;
+  if(cogsMid!=null&&m.bRatio){
+    const raw=cogsMid;
+    cogsMid=raw/(1+m.bRatio.mid); cogsLo=raw/(1+m.bRatio.hi); cogsHi=raw/(1+m.bRatio.lo);
   }
   const pctS=v=>v==null?"—":(Math.round(v*1000)/10)+"%";
-  const dim=t=>`<span style="color:var(--dim)">${t}</span>`;
-  const rangeCell=(lo,hi,fmt)=> (lo==null)?dim("not enough history yet"):fmt(lo)+" – "+fmt(hi);
 
-  const row=(label,actual,proj,lo,hi,fmt,strong)=>`
+  const row=(label,actual,proj,lo,hi,fmt)=>`
     <tr>
-      <td>${strong?"<b>"+label+"</b>":label}</td>
+      <td><b>${label}</b></td>
       <td class="num">${actual==null?dim("—"):fmt(actual)}</td>
-      <td class="num"><b>${proj==null?dim("—"):fmt(proj)}</b></td>
-      <td class="num hide-sm">${rangeCell(lo,hi,fmt)}</td>
+      <td class="num"><b>${proj==null?dim("—"):"~"+fmt(proj)}</b></td>
+      <td class="num hide-sm">${lo==null?dim("—"):fmt(lo)+" – "+fmt(hi)}</td>
     </tr>`;
 
-  let done=0;
-  for(let d=new Date(m.start); d<=m.end; d=fcAdd(d,1)) if(d<m.today) done++;
-  const dayLbl = m.partial
-    ? `${done} of ${m.spend.nDays} days finished · ${m.today.toLocaleDateString("en-AU",{weekday:"long"})} still trading`
-    : `not started — historical baseline only`;
+  /* The plausibility anchor. If the projection sits outside what the last four comparable
+     periods actually came to, that is obvious here in a way no caveat paragraph achieves. */
+  const anchor=(label,recent)=> recent&&recent.length
+    ? `<div style="font-size:11px;color:var(--dim);margin-top:2px">${label} — last ${recent.length} actual: ${recent.map(r=>kish(r.total)).join(" · ")}</div>`
+    : "";
 
   const notes=[];
-  notes.push(`Projected from the shape of a normal week — the share of the week's trade that lands on each weekday — learned from ${m.shAll.weeks} recent weeks of invoices and ${m.shSales.weeks} of daily sales, then calibrated against the days of this range that are already settled. Straight-lining spend-so-far would understate the weekend badly, since Monday and Tuesday are short trading days.`);
+  notes.push(`<b>Sales</b> are projected from the shape of a normal week — the share of trade that lands on each weekday, from ${m.shSales.weeks} week(s) of feed data — levelled against the days of this range already finished. Measured median error at this point in a week: about 2%.`);
+  notes.push(`<b>Spend deliberately ignores the days in this range.</b> Deliveries are lumpy and the day they land drifts, so inferring a whole week from its first two days gave a 36% median error and 84% at the 90th percentile. The level comes from the last four settled weeks instead, which measured 17%. Early in a range treat spend as an order of magnitude, not a number.`);
   if(m.sales.basis!=="none"&&m.shSales.weeks<FC.MIN_BACKTEST)
-    notes.push(`<b style="color:var(--red)">Only ${m.shSales.weeks} complete week(s) of daily sales</b> — the POS feed started on ${fmtD(gvizDate(SALES_CUTOVER))} and everything before it was a weekly total spread evenly over seven days, which would flatten Saturday into Monday if it were used. ${m.shSales.flat?"That is too few weeks to know the shape of a week at all, so every day is currently weighted equally — this understates the weekend.":"That is enough to shape the week but too few to quote an error range on sales."} It improves by itself as the feed accumulates weeks.`);
-  if(m.spend.basis==="trailing"||m.sales.basis==="trailing")
-    notes.push(`Nothing in this range has settled yet, so the starting level comes from the last four settled weeks rather than from days inside the range. Expect the figure to move once the first full day lands.`);
+    notes.push(`<b style="color:var(--red)">Only ${m.shSales.weeks} complete week(s) of daily sales.</b> The POS feed started ${fmtD(gvizDate(SALES_CUTOVER))}; everything before it was a weekly total spread evenly over seven days, which would flatten Saturday into Monday if used. ${m.shSales.flat?"Too few weeks to know the shape at all, so every day is currently weighted equally — this understates the weekend.":"Enough to shape a week, too few to quote an error range."} Improves by itself as weeks accumulate.`);
   if(m.lag.known&&m.lag.days>0)
-    notes.push(`Invoices are typically scanned ${m.lag.days} day(s) after their invoice date (measured over ${m.lag.n} recent invoices), so the last ${m.lag.days} day(s) of spend are treated as still arriving rather than final. Without this a quiet Tuesday reads as "no delivery" when it only means "not scanned yet".`);
+    notes.push(`Invoices are typically scanned ${m.lag.days} day(s) late (over ${m.lag.n} recent invoices), so the last ${m.lag.days} day(s) of spend are treated as still arriving. Otherwise a quiet Tuesday reads as "no delivery" when it means "not scanned yet".`);
   else if(!m.lag.known)
-    notes.push(`Capture lag not measurable (${m.lag.n} invoices carry both an invoice date and a scanned date), so spend up to yesterday is taken as final. If invoices are routinely scanned late, this projection will run low.`);
-  notes.push(`The range is the 10th–90th percentile of how wrong this method actually was on the last comparable weeks, cut at the same point in the week, with the unfinished days genuinely hidden from it. The headline is corrected for its median bias. <b>It cannot allow for invoices that had not been captured yet at the time</b> — history is complete in a way today is not — so the real spread on spend is wider than shown.`);
-  notes.push(`Spend is purchases, not consumption. With no stock count, one large delivery lands wholly in the week it arrives, so a weekly COGS % is noisier than a monthly one. Wages are not projected here: they arrive the Monday after week end, so the current week has none.`);
+    notes.push(`Capture lag not measurable (${m.lag.n} invoices carry both dates), so spend to yesterday is taken as final. If invoices are scanned late this will run low.`);
+  notes.push(`Ranges are the 10th–90th percentile of how wrong the method was on previous comparable periods, cut at the same point, with the unfinished days genuinely hidden from it. Headlines are corrected for measured median bias. <b>It cannot allow for invoices uncaptured at the time</b> — history is complete in a way today is not — so the real spread on spend is wider than shown.`);
+  notes.push(`Spend is purchases, not consumption. With no stock count one large delivery lands wholly in the period it arrives, so COGS % over a week is far noisier than over a month. Wages are not projected: they arrive the Monday after week end.`);
 
   return `
     <div class="card">
-      <div class="label">Forecast — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""}</div>
-      <div style="font-size:12px;color:var(--dim);margin:-4px 0 8px">${esc(dayLbl)}</div>
+      <div class="label">Forecast — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""} · ${m.partial?`${m.done} of ${m.total} days done`:"not started"}</div>
       <table>
         <thead><tr><th></th><th class="num">So far</th><th class="num">Projected</th><th class="num hide-sm">Likely range</th></tr></thead>
         <tbody>
-          ${row("Spend",m.spend.actual,sSpend.mid,sSpend.lo,sSpend.hi,money0,true)}
-          ${row("&nbsp;&nbsp;of which COGS",m.cogs.actual,cogsMidV,null,null,money0,false)}
-          ${haveSales?row("Sales",m.sales.actual,sSales.mid,sSales.lo,sSales.hi,money0,true):""}
-          ${haveSales?row("COGS % of sales",null,cogsMid,cogsLo,cogsHi,pctS,true):""}
+          ${row("Spend",m.spend.actual,sSpend.mid,sSpend.lo,sSpend.hi,money0)}
+          ${row("COGS",m.cogs.actual,cogsMidV,null,null,money0)}
+          ${haveSales?row("Sales",m.sales.actual,sSales.mid,sSales.lo,sSales.hi,money0):""}
+          ${haveSales?row("COGS % of sales",null,cogsMid,cogsLo,cogsHi,pctS):""}
         </tbody>
       </table>
-      ${!haveSales?`<div style="font-size:12px;color:var(--dim);margin-top:6px">No sales in this range yet, so COGS % can't be projected.</div>`:""}
-      <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.5">${notes.join("<br><br>")}</div>
+      ${anchor("Spend",m.rSpend)}
+      ${haveSales?anchor("Sales",m.rSales):`<div style="font-size:12px;color:var(--dim);margin-top:6px">No sales in this range yet, so COGS % can't be projected.</div>`}
+      <details style="margin-top:8px">
+        <summary style="font-size:11px;color:var(--dim);cursor:pointer">how these are worked out, and what they can't tell you</summary>
+        <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.5">${notes.join("<br><br>")}</div>
+      </details>
     </div>`;
 }
 
@@ -1307,7 +1346,6 @@ function renderHome(){
       <div class="stat"><div class="v">${inv.length}</div><div class="k">Invoices in scope</div></div>
       <div class="stat"><div class="v">${money(spendAll)}</div><div class="k">Total in scope</div></div>
     </div>
-    ${forecastCard()}
     <div class="card" style="padding:10px">
       <input type="search" id="psearch" placeholder="Search any product across all suppliers…">
       <div id="presults"></div>
