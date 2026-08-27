@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-055840"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-061455"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -882,7 +882,7 @@ Give a sharp analysis in Australian English: what stands out, trends, anomalies,
 const FC = {
   HIST_WEEKS:   12,  // most complete weeks to learn the shape from
   MIN_WEEKS:     2,  // fewer than this and the shape isn't worth trusting - go flat
-  MIN_BACKTEST:  4,  // fewer than this and no error range is quoted
+  MIN_BACKTEST:  5,  // fewer clean windows than this and no range is quoted
   MAX_SETTLE:    3   // most days of invoice-capture lag we'll allow for
 };
 
@@ -963,77 +963,89 @@ function fcShape(weeks){
 /* Level of the last `days` settled days, expressed in week units so it drops straight into
    the same base*share arithmetic. Weighted by weekday share, so a window that happens to end
    on a weekend isn't read as a permanent boom. */
+/* Earliest day the map has any data for. Cached per map object, since the trailing base is
+   recomputed for every backtest window. */
+function fcMapStart(map){
+  if(map.__start!==undefined) return map.__start;
+  let min=null;
+  Object.keys(map).forEach(k=>{ if(k.charAt(0)==="2" && (!min||k<min)) min=k; });
+  Object.defineProperty(map,"__start",{value:min,enumerable:false});
+  return min;
+}
+
+/* Level of the last `days` covered days, in week units, so it drops straight into the same
+   T*share arithmetic.
+
+   Days BEFORE the map's first data are skipped entirely - not counted as zero, and crucially
+   not counted in the divisor either. Sales only exist from the POS cutover, so a 28-day
+   window ending soon after it covers three real weeks; dividing three weeks of takings by
+   four weeks of weekday share understated the level by a quarter and projected $95.3k
+   against weeks that had actually been running at $128k. Absent data is not a quiet week. */
 function fcTrailingBase(map, shape, settleFrom, days){
-  let sum=0, w=0;
+  const first=fcMapStart(map);
+  let sum=0, w=0, covered=0;
   for(let i=1;i<=days;i++){
-    const d=fcAdd(fcMid(settleFrom),-i);
-    sum+=map[fmtISO(d)]||0;
+    const d=fcAdd(fcMid(settleFrom),-i), k=fmtISO(d);
+    if(first && k<first) continue;              // outside coverage - not a zero
+    sum+=map[k]||0;
     w  +=shape.shares[fcDow(d)];
+    covered++;
   }
+  if(covered<7) return 0;                       // too little to call a level; caller falls back
   return (w>0&&sum>0) ? sum/w : 0;
 }
 
 /* Project a range.
-     settleFrom - days on or after this are treated as still open (not yet reliable).
-                  For sales that's just today. For spend it's today minus the measured
-                  invoice capture lag, because a quiet Tuesday might only mean nobody has
-                  scanned Tuesday yet.
-     blindOpen  - ignore actuals on open days. Used by the backtest, where those days are
-                  history and would otherwise leak the answer into the projection.
 
-   On a live projection an open day's actual is a FLOOR: you cannot un-sell what you sold
-   this morning, and an invoice already captured is not going to un-arrive. */
-function fcProject(map, shape, start, end, settleFrom, blindOpen, mode){
+   TOTAL-FIRST. Estimate what the whole range comes to, then take the larger of that and
+   what has already been spent. The previous build instead kept the settled days and filled
+   the remaining ones from their weekday share - and that is biased HIGH by construction:
+   if trade ran ahead of schedule early in the range, the overshoot is banked AND a full
+   share is still added for every day left. Measured bias +1.5% to +5.2% in simulation, and
+   about +20% in production, where it read $50,085 against four weeks of $40-42k.
+
+   The bias is worst exactly where the weekday shape is weakest, and for purchasing the
+   shape is very weak: delivery days drift, so averaging twelve weeks of shares flattens
+   them towards 1/7 each. A flat shape means "days remaining" is nearly all that is left of
+   the fill, which is how four days ended up carrying 60% of the week.
+
+   Total-first is close to shape-independent over a whole week (the shares sum to 1 either
+   way), which is the right property for a series whose timing is unreliable but whose total
+   is not.
+
+     w - how far to trust the level implied by THIS range's settled days over the level of
+         the last four weeks. 0 = ignore this range, 1 = trust it completely. Fitted from
+         the data by fcFitW rather than chosen, because the answer differs per series and
+         per venue: stable weekly totals want a low w, genuinely trending trade wants high.
+     blindOpen - hide unsettled actuals; used by the backtest so it cannot see the answer. */
+function fcProject(map, shape, start, end, settleFrom, blindOpen, w){
+  w = (typeof w==="number" && isFinite(w)) ? Math.max(0,Math.min(1,w)) : 0;
   const s=fcMid(start), e=fcMid(end), sf=fcMid(settleFrom);
-  let actual=0, firm=0, firmW=0, nDays=0, nFirm=0;
-  const open=[];
+  let seen=0, firm=0, firmW=0, totW=0, nDays=0, nFirm=0;
   for(let d=new Date(s); d<=e; d=fcAdd(d,1)){
     nDays++;
-    const v=map[fmtISO(d)]||0;
-    actual+=v;
-    const sh=shape.shares[fcDow(d)];
-    if(d<sf){ firm+=v; firmW+=sh; nFirm++; }
-    else open.push({sh,v});
+    const v=map[fmtISO(d)]||0, sh=shape.shares[fcDow(d)];
+    totW+=sh;
+    if(d<sf){ firm+=v; firmW+=sh; nFirm++; seen+=v; }
+    else if(!blindOpen) seen+=v;
   }
-  /* Two ways to set the level the open days are filled from, and the right one depends
-     entirely on how lumpy the series is. Measured, not guessed (see experiment.js):
-
-       CALIBRATE - infer the level from the days of this range already settled.
-         Sales: median error 2.2% on a Tuesday, 1.1% by Thursday. Clearly right.
-         Spend: median error 35.6% on a Tuesday, 84% at the 90th percentile. Catastrophic,
-         because deliveries are lumpy AND the day they land drifts week to week - one
-         Monday that happens to carry two drops gets multiplied up into a fictional week.
-
-       TRAILING - level of the last four settled weeks, ignoring this range entirely.
-         Spend: median 17.4% on a Tuesday against 35.6%. Immune to one big delivery.
-         Sales: worse than calibrating, because it can't see that this week is running hot.
-
-     Blends of the two were tested at three weightings and beat neither, so there is no
-     clever middle here: pick per series. */
-  /* The trailing window must end BEFORE the range, not at the settle point. Ending it at sf
-     lets days of the very range being projected into the "prior" level - a freak Monday then
-     still inflates the forecast, just diluted, which defeats the point of the mode. Settled
-     days inside the range are not lost by this: they are counted directly as firm actuals. */
+  /* The trailing window must end BEFORE the range. Ending it at the settle point lets days
+     of the very range being projected into the "prior" level, so a freak Monday still
+     inflates the forecast, just diluted. Settled days are not lost by this - they are what
+     the calibrated estimate is built from. */
   const trail=fcTrailingBase(map, shape, (sf<s?sf:s), 28) || shape.weekAvg;
   const cal=(firmW>0 && firm>0) ? firm/firmW : null;   // needs actual money, not just days
-  let basis, base;
-  if(mode!=="trailing" && cal!=null){ basis="calibrated"; base=cal; }
-  else if(trail>0){                   basis="trailing";   base=trail; }
-  else if(cal!=null){                 basis="calibrated"; base=cal; }
-  else {                              basis="none";       base=0; }
 
-  let projected = firm;
-  open.forEach(o=>{
-    const exp = base*o.sh;
-    projected += blindOpen ? exp : Math.max(o.v, exp);
-  });
-  if(basis==="none") projected = actual;
-  return {actual, projected, basis, nDays, nFirm, nOpen:open.length, base};
+  let T, basis;
+  if(cal!=null && trail>0){ T=w*cal+(1-w)*trail; basis = w>=0.85?"calibrated":w<=0.15?"trailing":"blend"; }
+  else if(trail>0){        T=trail; basis="trailing"; }
+  else if(cal!=null){      T=cal;   basis="calibrated"; }
+  else return {actual:seen, projected:seen, basis:"none", nDays, nFirm, nOpen:nDays-nFirm, base:0, w};
+
+  return {actual:seen, projected:Math.max(seen, T*totW), basis, nDays, nFirm,
+          nOpen:nDays-nFirm, base:T, w};
 }
 
-/* How wrong has this method been, at exactly this point in the week, on real past weeks?
-   The range is shifted back whole weeks so the firm/open split stays on the same weekdays.
-   Blind, so the open days genuinely aren't known. */
 /* Step back in WHOLE WEEKS so the settled/open split stays on the same weekdays, but never
    by less than the range itself - stepping a 31-day range back by 7 would compare it against
    windows that mostly overlap it, and near-identical samples would make the method look far
@@ -1042,36 +1054,92 @@ function fcStep(start,end){
   const days=Math.round((fcMid(end)-fcMid(start))/864e5)+1;
   return Math.max(7, Math.ceil(days/7)*7);
 }
-function fcBacktest(map, shape, start, end, settleFrom, maxK, mode){
-  const errs=[], step=fcStep(start,end);
+
+/* Candidate comparison windows: the same range shifted back in whole periods, keeping the
+   settled/open split on the same weekdays.
+
+   Windows whose data is obviously incomplete are DROPPED rather than scored. Invoice capture
+   ramped up over time, so early windows hold a fraction of a real week; scoring one of those
+   as a forecasting miss is what produced a range of $42,754 - $196,777 on screen. A window
+   that came in 75% below its projection was not a bad forecast, it was a week we had barely
+   captured. Anything under 40% of the median window is treated as a coverage gap. */
+function fcWindows(map, start, end, settleFrom, maxK){
+  const step=fcStep(start,end), all=[];
   for(let k=1;k<=(maxK||FC.HIST_WEEKS);k++){
     const s2=fcAdd(start,-step*k), e2=fcAdd(end,-step*k), sf2=fcAdd(settleFrom,-step*k);
     let act=0;
     for(let d=fcMid(s2); d<=fcMid(e2); d=fcAdd(d,1)) act+=map[fmtISO(d)]||0;
-    if(!(act>0)) continue;
-    const p=fcProject(map, shape, s2, e2, sf2, true, mode);
-    if(p.basis==="none") continue;
-    errs.push(p.projected/act - 1);
+    if(act>0) all.push({s:s2,e:e2,sf:sf2,act});
   }
-  return errs.sort((a,b)=>a-b);
+  if(all.length<2) return all;
+  /* A window also needs a covered LOOKBACK, not just covered days of its own. Each window's
+     projection is built from the 28 days before it, so a window sitting just after the
+     ramp-up gets a tiny trailing level and projects far too low - which reads as a huge
+     forecasting error and widens the band for no real reason. Filtering only on the window's
+     own total left the band's upper multiplier at 1.27 against weekly totals that move 2.5%. */
+  all.forEach(w=>{
+    let look=0;
+    for(let i=1;i<=28;i++) look+=map[fmtISO(fcAdd(w.s,-i))]||0;
+    w.look=look;
+  });
+  const med=arr=>{ const x=arr.slice().sort((a,b)=>a-b); return x[Math.floor(x.length/2)]; };
+  const mAct=med(all.map(w=>w.act)), mLook=med(all.map(w=>w.look));
+  return all.filter(w=>w.act>=0.4*mAct && w.look>=0.4*mLook);
 }
 
-/* Same idea for a ratio (COGS % of sales). Done on the ratio directly rather than by
-   combining the two separate bands - the errors are correlated (a big week is big on both
-   sides) and multiplying independent bands would overstate the spread. */
-function fcBacktestRatio(mapN, mapD, shapeN, shapeD, start, end, sfN, sfD, maxK, modeN, modeD){
-  const errs=[], step=fcStep(start,end);
-  for(let k=1;k<=(maxK||FC.HIST_WEEKS);k++){
-    const s2=fcAdd(start,-step*k), e2=fcAdd(end,-step*k);
+/* Choose w by measuring, not by argument. For each candidate weighting, run the blind
+   projection over every clean window and keep the one with the lowest median absolute
+   error. Ties break toward the LOWER w: when this range's own days add nothing measurable,
+   the safer default is to lean on four settled weeks rather than on two days. */
+function fcFitW(map, shape, start, end, settleFrom, maxK){
+  const wins=fcWindows(map,start,end,settleFrom,maxK);
+  if(wins.length<FC.MIN_BACKTEST) return {w:0, n:wins.length, fitted:false, err:null};
+  const grid=[0,0.15,0.3,0.5,0.75,1];
+  let best=null;
+  grid.forEach(w=>{
+    const errs=[];
+    wins.forEach(win=>{
+      const p=fcProject(map,shape,win.s,win.e,win.sf,true,w);
+      if(p.basis==="none"||!(p.projected>0)) return;
+      errs.push(Math.abs(p.projected/win.act-1));
+    });
+    if(errs.length<FC.MIN_BACKTEST) return;
+    errs.sort((a,b)=>a-b);
+    const med=errs[Math.floor(errs.length/2)];
+    if(!best||med<best.err-1e-9) best={w,err:med,n:errs.length};
+  });
+  return best?{...best,fitted:true}:{w:0,n:wins.length,fitted:false,err:null};
+}
+
+/* How wrong was this method, at this point in the period, on real past periods?
+   Returns the RATIO actual/projected per window. Working in ratios rather than in errors
+   matters: the old code took percentiles of e = projected/actual - 1 and then divided by
+   (1+e) to get an outcome, which runs to infinity as e approaches -1. One bad window
+   therefore set the top of the range. A ratio is bounded by the data itself. */
+function fcBacktest(map, shape, start, end, settleFrom, maxK, w){
+  const out=[];
+  fcWindows(map,start,end,settleFrom,maxK).forEach(win=>{
+    const p=fcProject(map,shape,win.s,win.e,win.sf,true,w);
+    if(p.basis==="none"||!(p.projected>0)) return;
+    out.push(win.act/p.projected);
+  });
+  return out.sort((a,b)=>a-b);
+}
+
+function fcBacktestRatio(mapN, mapD, shapeN, shapeD, start, end, sfN, sfD, maxK, wN, wD){
+  const out=[], step=fcStep(start,end);
+  const wins=fcWindows(mapD,start,end,sfD,maxK);
+  wins.forEach(win=>{
     let an=0, ad=0;
-    for(let d=fcMid(s2); d<=fcMid(e2); d=fcAdd(d,1)){ an+=mapN[fmtISO(d)]||0; ad+=mapD[fmtISO(d)]||0; }
-    if(!(an>0)||!(ad>0)) continue;
-    const pn=fcProject(mapN, shapeN, s2, e2, fcAdd(sfN,-step*k), true, modeN);
-    const pd=fcProject(mapD, shapeD, s2, e2, fcAdd(sfD,-step*k), true, modeD);
-    if(pn.basis==="none"||pd.basis==="none"||!(pd.projected>0)) continue;
-    errs.push((pn.projected/pd.projected)/(an/ad) - 1);
-  }
-  return errs.sort((a,b)=>a-b);
+    for(let d=fcMid(win.s); d<=fcMid(win.e); d=fcAdd(d,1)){ an+=mapN[fmtISO(d)]||0; ad+=mapD[fmtISO(d)]||0; }
+    if(!(an>0)||!(ad>0)) return;
+    const k=Math.round((fcMid(start)-fcMid(win.s))/864e5/step);
+    const pn=fcProject(mapN,shapeN,win.s,win.e,fcAdd(sfN,-step*k),true,wN);
+    const pd=fcProject(mapD,shapeD,win.s,win.e,fcAdd(sfD,-step*k),true,wD);
+    if(pn.basis==="none"||pd.basis==="none"||!(pd.projected>0)) return;
+    out.push((an/ad)/(pn.projected/pd.projected));
+  });
+  return out.sort((a,b)=>a-b);
 }
 
 /* What the same range actually came to over the previous few comparable periods. A
@@ -1089,11 +1157,14 @@ function fcRecent(map, start, end, n){
 
 /* Nearest-rank percentile. Returns null below MIN_BACKTEST rather than inventing a band
    from two data points. */
-function fcBand(errs){
-  const n=errs.length;
+/* Band from the ratio distribution. 20th/80th rather than 10th/90th: with a dozen windows
+   the extreme percentiles ARE the extreme observations, so they track the worst single week
+   rather than the spread. Returns multipliers to apply to a projection. */
+function fcBand(ratios){
+  const n=ratios.length;
   if(n<FC.MIN_BACKTEST) return null;
-  const at=q=>errs[Math.max(0,Math.min(n-1,Math.ceil(q*n)-1))];
-  return {n, lo:at(0.10), mid:at(0.50), hi:at(0.90)};
+  const at=q=>ratios[Math.max(0,Math.min(n-1,Math.ceil(q*n)-1))];
+  return {n, lo:at(0.20), mid:at(0.50), hi:at(0.80)};
 }
 
 /* Median invoice capture lag: invoice_date -> scanned. If deliveries are routinely scanned
@@ -1129,16 +1200,22 @@ function forecastModel(){
   const sfSpend=fcAdd(today,-lag.days);      // spend settles late; sales don't
   const sfSales=today;
   const cut=SALES_CUTOVER?gvizDate(SALES_CUTOVER):null;
-  const SPEND_MODE="trailing", SALES_MODE="calibrate";
 
   const mAll=fcSpendMap(false), mCogs=fcSpendMap(true), mSales=fcSalesMap();
   const shAll  =fcShape(fcWeeks(mAll  ,today,null,FC.HIST_WEEKS));
   const shCogs =fcShape(fcWeeks(mCogs ,today,null,FC.HIST_WEEKS));
   const shSales=fcShape(fcWeeks(mSales,today,cut ,FC.HIST_WEEKS));
 
-  const pAll  =fcProject(mAll  ,shAll  ,start,end,sfSpend,false,SPEND_MODE);
-  const pCogs =fcProject(mCogs ,shCogs ,start,end,sfSpend,false,SPEND_MODE);
-  const pSales=fcProject(mSales,shSales,start,end,sfSales,false,SALES_MODE);
+  /* How far to trust this range's own settled days is fitted per series from the venue's
+     own history, not hard-coded. Spend usually fits low (stable weekly totals, unreliable
+     timing); sales usually fits higher. */
+  const fAll  =fcFitW(mAll  ,shAll  ,start,end,sfSpend,FC.HIST_WEEKS);
+  const fCogs =fcFitW(mCogs ,shCogs ,start,end,sfSpend,FC.HIST_WEEKS);
+  const fSales=fcFitW(mSales,shSales,start,end,sfSales,FC.HIST_WEEKS);
+
+  const pAll  =fcProject(mAll  ,shAll  ,start,end,sfSpend,false,fAll.w);
+  const pCogs =fcProject(mCogs ,shCogs ,start,end,sfSpend,false,fCogs.w);
+  const pSales=fcProject(mSales,shSales,start,end,sfSales,false,fSales.w);
   if(pAll.basis==="none"&&pSales.basis==="none") return null;
 
   let done=0, total=0;
@@ -1147,29 +1224,27 @@ function forecastModel(){
   return {
     start,end,today,lag,done,total,
     spend:pAll, cogs:pCogs, sales:pSales,
-    shAll,shCogs,shSales,
-    bSpend:fcBand(fcBacktest(mAll  ,shAll  ,start,end,sfSpend,FC.HIST_WEEKS,SPEND_MODE)),
-    bCogs :fcBand(fcBacktest(mCogs ,shCogs ,start,end,sfSpend,FC.HIST_WEEKS,SPEND_MODE)),
-    bSales:fcBand(fcBacktest(mSales,shSales,start,end,sfSales,FC.HIST_WEEKS,SALES_MODE)),
+    shAll,shCogs,shSales, fAll,fCogs,fSales,
+    bSpend:fcBand(fcBacktest(mAll  ,shAll  ,start,end,sfSpend,FC.HIST_WEEKS,fAll.w)),
+    bCogs :fcBand(fcBacktest(mCogs ,shCogs ,start,end,sfSpend,FC.HIST_WEEKS,fCogs.w)),
+    bSales:fcBand(fcBacktest(mSales,shSales,start,end,sfSales,FC.HIST_WEEKS,fSales.w)),
     bRatio:fcBand(fcBacktestRatio(mCogs,mSales,shCogs,shSales,start,end,sfSpend,sfSales,
-                                  FC.HIST_WEEKS,SPEND_MODE,SALES_MODE)),
+                                  FC.HIST_WEEKS,fCogs.w,fSales.w)),
     rSpend:fcRecent(mAll ,start,end,4),
     rSales:fcRecent(mSales,start,end,4),
     partial: today>=start && today<=end
   };
 }
 
-/* Turn a raw projection plus a measured error band into a headline and a range.
-
-   The band records e = projected/actual - 1, so the outcome implied by an error e is
-   projected/(1+e) - a division, not a multiplication. Getting that backwards would tilt
-   every range the wrong way: a larger e means a SMALLER outcome, so the band's high error
-   gives the low end. The headline is corrected for the method's median bias, and everything
-   is floored at what has already happened - you cannot un-sell this morning's coffee. */
+/* Apply the measured band. It now holds RATIOS of actual to projected, so these are
+   multipliers - low ratio gives the low end, directly. The previous build stored errors and
+   divided by (1+e), which ran away to infinity as e approached -1 and let a single badly
+   covered week set the top of the range at 3.9x. The headline is nudged by the median ratio
+   to take out measured bias, and everything is floored at what has already happened. */
 function fcSettle(p,band){
   if(!band) return {mid:p.projected, lo:null, hi:null, n:0};
-  const imply=e=>Math.max(p.actual, p.projected/(1+e));
-  return {mid:imply(band.mid), lo:imply(band.hi), hi:imply(band.lo), n:band.n};
+  const at=r=>Math.max(p.actual, p.projected*r);
+  return {mid:at(band.mid), lo:at(band.lo), hi:at(band.hi), n:band.n};
 }
 
 function forecastCard(){
@@ -1208,15 +1283,17 @@ function forecastCard(){
     : "";
 
   const notes=[];
-  notes.push(`<b>Sales</b> are projected from the shape of a normal week — the share of trade that lands on each weekday, from ${m.shSales.weeks} week(s) of feed data — levelled against the days of this range already finished. Measured median error at this point in a week: about 2%.`);
-  notes.push(`<b>Spend deliberately ignores the days in this range.</b> Deliveries are lumpy and the day they land drifts, so inferring a whole week from its first two days gave a 36% median error and 84% at the 90th percentile. The level comes from the last four settled weeks instead, which measured 17%. Early in a range treat spend as an order of magnitude, not a number.`);
+  const wTxt=v=>v===0?"entirely on the last four settled weeks":v===1?"entirely on the days of this range already finished":`${Math.round(v*100)}% on this range's finished days, ${Math.round((1-v)*100)}% on the last four settled weeks`;
+  notes.push(`Each line estimates the <b>total</b> for the whole range and then takes the larger of that and what has already happened — rather than keeping the finished days and adding a share for each day left, which is biased high whenever trade runs ahead of schedule early on.`);
+  notes.push(`How far to trust this range's own finished days is <b>fitted from your history</b>, not fixed: whichever weighting had the lowest error on previous comparable periods wins. Right now spend leans ${wTxt(m.fAll.w)}${m.fAll.fitted?` (chosen over ${m.fAll.n} comparable periods)`:` (too few clean periods to fit, so defaulting to the safer end)`}; sales leans ${wTxt(m.fSales.w)}.`);
+  notes.push(`Purchasing has no reliable weekday shape — delivery days drift, so averaging twelve weeks flattens them toward equal. Its weekly <em>total</em> is far steadier than its timing, which is why the estimate is built on the total.`);
   if(m.sales.basis!=="none"&&m.shSales.weeks<FC.MIN_BACKTEST)
     notes.push(`<b style="color:var(--red)">Only ${m.shSales.weeks} complete week(s) of daily sales.</b> The POS feed started ${fmtD(gvizDate(SALES_CUTOVER))}; everything before it was a weekly total spread evenly over seven days, which would flatten Saturday into Monday if used. ${m.shSales.flat?"Too few weeks to know the shape at all, so every day is currently weighted equally — this understates the weekend.":"Enough to shape a week, too few to quote an error range."} Improves by itself as weeks accumulate.`);
   if(m.lag.known&&m.lag.days>0)
     notes.push(`Invoices are typically scanned ${m.lag.days} day(s) late (over ${m.lag.n} recent invoices), so the last ${m.lag.days} day(s) of spend are treated as still arriving. Otherwise a quiet Tuesday reads as "no delivery" when it means "not scanned yet".`);
   else if(!m.lag.known)
     notes.push(`Capture lag not measurable (${m.lag.n} invoices carry both dates), so spend to yesterday is taken as final. If invoices are scanned late this will run low.`);
-  notes.push(`Ranges are the 10th–90th percentile of how wrong the method was on previous comparable periods, cut at the same point, with the unfinished days genuinely hidden from it. Headlines are corrected for measured median bias. <b>It cannot allow for invoices uncaptured at the time</b> — history is complete in a way today is not — so the real spread on spend is wider than shown.`);
+  notes.push(`Ranges are the 20th–80th percentile of actual against projected on previous comparable periods, cut at the same point, with the unfinished days genuinely hidden. Periods whose own data or whose preceding four weeks look badly covered are dropped rather than scored — an under-captured week is not a forecasting error, and scoring one previously widened this range to nearly 4× the projection. <b>It still cannot allow for invoices uncaptured at the time</b>, so the real spread on spend is a little wider than shown.`);
   notes.push(`Spend is purchases, not consumption. With no stock count one large delivery lands wholly in the period it arrives, so COGS % over a week is far noisier than over a month. Wages are not projected: they arrive the Monday after week end.`);
 
   return `
