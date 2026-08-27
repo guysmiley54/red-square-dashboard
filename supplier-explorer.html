@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-061455"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-064512"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -1095,7 +1095,7 @@ function fcFitW(map, shape, start, end, settleFrom, maxK){
   const wins=fcWindows(map,start,end,settleFrom,maxK);
   if(wins.length<FC.MIN_BACKTEST) return {w:0, n:wins.length, fitted:false, err:null};
   const grid=[0,0.15,0.3,0.5,0.75,1];
-  let best=null;
+  const scored=[];
   grid.forEach(w=>{
     const errs=[];
     wins.forEach(win=>{
@@ -1105,10 +1105,18 @@ function fcFitW(map, shape, start, end, settleFrom, maxK){
     });
     if(errs.length<FC.MIN_BACKTEST) return;
     errs.sort((a,b)=>a-b);
-    const med=errs[Math.floor(errs.length/2)];
-    if(!best||med<best.err-1e-9) best={w,err:med,n:errs.length};
+    scored.push({w, err:errs[Math.floor(errs.length/2)], n:errs.length});
   });
-  return best?{...best,fitted:true}:{w:0,n:wins.length,fitted:false,err:null};
+  if(!scored.length) return {w:0, n:wins.length, fitted:false, err:null};
+  /* Parsimony. A dozen windows is a thin sample, so the outright winner is often winning by
+     noise: production fitted w=0.15 over eleven weeks and pushed the projection above every
+     one of the last four actual weeks. Take the SMALLEST weighting that comes within 5% of
+     the best score - leaning on four settled weeks is the assumption-light option, and it
+     should have to be beaten properly, not narrowly. Where calibrating genuinely helps, as
+     it does for sales, it wins by far more than 5% and is still chosen. */
+  const bestErr=Math.min(...scored.map(x=>x.err));
+  const chosen=scored.filter(x=>x.err<=bestErr*1.05).sort((a,b)=>a.w-b.w)[0];
+  return {...chosen, fitted:true, bestErr, w0Err:(scored.find(x=>x.w===0)||{}).err};
 }
 
 /* How wrong was this method, at this point in the period, on real past periods?
@@ -1140,6 +1148,113 @@ function fcBacktestRatio(mapN, mapD, shapeN, shapeD, start, end, sfN, sfD, maxK,
     out.push((an/ad)/(pn.projected/pd.projected));
   });
   return out.sort((a,b)=>a-b);
+}
+
+/* WHY is the period running high or low?
+
+   Compares period-to-date against the same point in previous comparable periods, split by
+   whatever key you pass (supplier, venue, weekday). Deliberately to-date rather than
+   projected-per-key: projecting a single supplier's week is far too noisy to be worth
+   showing, but "by day three PFD has usually spent $1.9k and this week it is $4.5k" is a
+   fact, and it is the fact that explains the headline.
+
+   The absence case matters as much as the excess. A supplier that has delivered by this
+   point in every one of the last four weeks and has nothing this week is a forgotten order,
+   and that is invisible in any total. */
+function fcDrivers(rows, dateOf, keyOf, amtOf, filterFn, start, end, today, maxK){
+  const step=fcStep(start,end);
+  /* Clamp the to-date boundary to the end of the period. Without this, a range that has
+     already finished measures an elapsed window longer than the period itself, and the
+     comparison windows then run into the following period. The forecast card never hits
+     that because it hides once the period is over, but the supplier view is browsed on
+     past weeks all the time. */
+  const s=fcMid(start), endNext=fcAdd(fcMid(end),1);
+  const cut=fcMid(today)>endNext ? endNext : fcMid(today);
+  const elapsed=+cut - +s;
+  if(elapsed<=0) return {items:[], now:0, usual:0, elapsedDays:0};
+
+  const n=maxK||FC.HIST_WEEKS;
+  const now={}, prev={}, periodHasData=new Array(n).fill(false);
+  (rows||[]).forEach(r=>{
+    if(filterFn && !filterFn(r)) return;
+    const d=dateOf(r); if(!d) return;
+    const t=+fcMid(d), k=String(keyOf(r)||"").trim(), a=+amtOf(r)||0;
+    if(!k||!a) return;
+    if(t>=+s && t<+cut){ now[k]=(now[k]||0)+a; return; }
+    for(let i=1;i<=n;i++){
+      const ps=+fcAdd(s,-step*i);
+      if(t>=ps && t<ps+elapsed){
+        if(!prev[k]) prev[k]=new Array(n).fill(0);
+        prev[k][i-1]+=a; periodHasData[i-1]=true;
+        break;
+      }
+    }
+  });
+  /* Only score against periods we actually hold data for, so the ramp-up in invoice capture
+     doesn't read as "this supplier used to deliver more". */
+  const idx=[]; periodHasData.forEach((v,i)=>{ if(v) idx.push(i); });
+  if(idx.length<2) return {items:[], now:0, usual:0, elapsedDays:Math.round(elapsed/864e5)};
+
+  const med=a=>{ const x=a.slice().sort((p,q)=>p-q); const m=x.length>>1;
+                 return x.length%2?x[m]:(x[m-1]+x[m])/2; };
+  const keys=new Set([...Object.keys(now),...Object.keys(prev)]);
+  const items=[];
+  let totNow=0, totUsual=0;
+  keys.forEach(k=>{
+    const series=idx.map(i=>(prev[k]?prev[k][i]:0)||0);
+    const usual=med(series), cur=now[k]||0;
+    const seen=series.filter(v=>v>0).length;
+    /* Median absolute deviation, so "unusual" is judged against how much THIS key normally
+       swings rather than a flat percentage. A venue whose mid-week spend routinely halves
+       and doubles should not be flagged for doing it again. */
+    const mad=med(series.map(v=>Math.abs(v-usual)));
+    totNow+=cur; totUsual+=usual;
+    items.push({key:k, now:cur, usual, delta:cur-usual, seen, of:idx.length, series, mad, n:idx.length,
+                lo:Math.min(...series), hi:Math.max(...series),
+                missing: cur===0 && usual>0 && seen>=Math.max(3,Math.ceil(idx.length*0.6))});
+  });
+  items.sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+  return {items, now:totNow, usual:totUsual, elapsedDays:Math.round(elapsed/864e5), periods:idx.length};
+}
+
+/* Is a mover worth an arrow? Judged against the key's own historical swing, not a flat
+   percentage, and floored in dollars so a $37 line at Luma cannot shout as loudly as a
+   $2,000 one at Cambridge.
+
+   Returns null for "nothing to see", which is the common case and should stay silent. */
+function fcMove(item, floorAbs){
+  if(!item || item.n<4) return null;                  // too few comparable periods to judge
+  const d=Math.abs(item.delta), floor=floorAbs||200;
+
+  /* Three gates, and a move has to pass all of them. Any one alone gives false positives:
+       dollars   - $75 on a venue that spends $1,275 is not news, however statistically odd.
+       relative  - keeps the dollar floor from shouting at big suppliers for small wobbles.
+       spread    - the same $400 swing is routine at a venue that always swings and genuinely
+                   unusual at one that never does, so it is judged against the key's own MAD.
+     An arrow on every row is the same as no arrows at all. */
+  if(d<floor) return null;
+  if(item.usual===0) return item.now>0 ? {dir:"up", z:Infinity} : null;
+  if(d < Math.abs(item.usual)*0.20) return null;
+  const sd=item.mad>0 ? 1.4826*item.mad : Math.abs(item.usual)*0.15;
+  if(!(sd>0)) return null;
+  const z=d/sd;
+  if(z<2) return null;
+  return {dir:item.delta>0?"up":"down", z};
+}
+
+/* Biggest single line on a driver's invoices this period - the "they bought a pallet of
+   cottonseed" detail. Returns null when the supplier has no line-level data, which is the
+   case for manual purchases. */
+function fcTopLine(supplier, start, today){
+  const s=fcMid(start), cut=fcMid(today);
+  let best=null;
+  (LINES||[]).forEach(l=>{
+    if(l.supplier!==supplier||!l.date||!venueOk(l.venue)) return;
+    const t=+fcMid(l.date);
+    if(t<+s||t>=+cut) return;
+    if(!best||l.total>best.total) best={desc:l.desc, total:l.total, qty:l.qty, unit:l.unit};
+  });
+  return best;
 }
 
 /* What the same range actually came to over the previous few comparable periods. A
@@ -1232,6 +1347,12 @@ function forecastModel(){
                                   FC.HIST_WEEKS,fCogs.w,fSales.w)),
     rSpend:fcRecent(mAll ,start,end,4),
     rSales:fcRecent(mSales,start,end,4),
+    dSpend:fcDrivers(INV, r=>r.date, r=>r.supplier, r=>r.total,
+             r=>supActive(r.supplier)&&venueOk(r.venue), start,end,today,FC.HIST_WEEKS),
+    dSales:fcDrivers(SALES, r=>r.date, r=>(FILTER.venues.length===1
+             ? r.date.toLocaleDateString("en-AU",{weekday:"long"}) : r.venue),
+             r=>r.sales, r=>venueOk(r.venue)&&(!cut||(r.date&&r.date>=cut)),
+             start,end,today,FC.HIST_WEEKS),
     partial: today>=start && today<=end
   };
 }
@@ -1247,7 +1368,40 @@ function fcSettle(p,band){
   return {mid:at(band.mid), lo:at(band.lo), hi:at(band.hi), n:band.n};
 }
 
+/* Hidden state persists per browser, like the AI key already does. Wrapped because Safari
+   in private mode throws on localStorage rather than returning null. */
+const FC_HIDE_KEY="fc_forecast_hidden";
+function fcHidden(){ try{ return localStorage.getItem(FC_HIDE_KEY)==="1"; }catch(e){ return false; } }
+function fcSetHidden(v){ try{ localStorage.setItem(FC_HIDE_KEY, v?"1":"0"); }catch(e){} route(); }
+
+/* One line explaining the gap: what is unusually high, what is unusually absent.
+   Only material movers are named - anything under $200 or under 8% of the gap is noise at
+   this level and would bury the one line that matters. */
+function fcWhy(d, label, moneyFn, withLines, start, today){
+  if(!d||!d.items.length||!d.periods) return "";
+  const gap=d.now-d.usual;
+  const floor=Math.max(200, Math.abs(gap)*0.08);
+  const movers=d.items.filter(i=>!i.missing&&Math.abs(i.delta)>=floor).slice(0,2);
+  const missing=d.items.filter(i=>i.missing&&i.usual>=floor).slice(0,2);
+  if(!movers.length&&!missing.length) return "";
+
+  const bits=movers.map(i=>{
+    let t=`<b>${esc(i.key)}</b> ${i.delta>0?"+":"−"}${moneyFn(Math.abs(i.delta))} on its usual ${moneyFn(i.usual)}`;
+    if(withLines&&i===movers[0]&&i.delta>0){
+      const L=fcTopLine(i.key,start,today);
+      if(L&&L.total>=Math.abs(i.delta)*0.3)
+        t+=` (biggest line: ${esc(String(L.desc).slice(0,42))}${L.qty?" ×"+L.qty:""} ${moneyFn(L.total)})`;
+    }
+    return t;
+  });
+  missing.forEach(i=>bits.push(`<b>${esc(i.key)}</b> nothing yet — usually ${moneyFn(i.usual)} by now, in ${i.seen} of the last ${i.of}`));
+
+  const dir=Math.abs(gap)<floor?"in line with":gap>0?`${moneyFn(gap)} ahead of`:`${moneyFn(-gap)} behind`;
+  return `<div style="font-size:11px;color:var(--dim);margin-top:2px">${label} ${dir} the usual ${moneyFn(d.usual)} by day ${d.elapsedDays} — ${bits.join("; ")}</div>`;
+}
+
 function forecastCard(){
+  if(fcHidden()) return `<div class="card" style="padding:8px 14px"><span style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">Forecast hidden</span> <a style="cursor:pointer;font-size:11px;color:var(--red);text-decoration:underline;margin-left:8px" onclick="fcSetHidden(false)">show</a></div>`;
   const m=forecastModel();
   if(!m) return "";
   const money0=v=>"$"+Math.round(v).toLocaleString("en-AU");
@@ -1285,7 +1439,7 @@ function forecastCard(){
   const notes=[];
   const wTxt=v=>v===0?"entirely on the last four settled weeks":v===1?"entirely on the days of this range already finished":`${Math.round(v*100)}% on this range's finished days, ${Math.round((1-v)*100)}% on the last four settled weeks`;
   notes.push(`Each line estimates the <b>total</b> for the whole range and then takes the larger of that and what has already happened — rather than keeping the finished days and adding a share for each day left, which is biased high whenever trade runs ahead of schedule early on.`);
-  notes.push(`How far to trust this range's own finished days is <b>fitted from your history</b>, not fixed: whichever weighting had the lowest error on previous comparable periods wins. Right now spend leans ${wTxt(m.fAll.w)}${m.fAll.fitted?` (chosen over ${m.fAll.n} comparable periods)`:` (too few clean periods to fit, so defaulting to the safer end)`}; sales leans ${wTxt(m.fSales.w)}.`);
+  notes.push(`How far to trust this range's own finished days is <b>fitted from your history</b>, not fixed: the lowest-error weighting on previous comparable periods wins, and ties inside 5% go to the lower weighting so a thin sample can't talk it into trusting three days over four weeks. Right now spend leans ${wTxt(m.fAll.w)}${m.fAll.fitted?` (chosen over ${m.fAll.n} comparable periods)`:` (too few clean periods to fit, so defaulting to the safer end)`}; sales leans ${wTxt(m.fSales.w)}.`);
   notes.push(`Purchasing has no reliable weekday shape — delivery days drift, so averaging twelve weeks flattens them toward equal. Its weekly <em>total</em> is far steadier than its timing, which is why the estimate is built on the total.`);
   if(m.sales.basis!=="none"&&m.shSales.weeks<FC.MIN_BACKTEST)
     notes.push(`<b style="color:var(--red)">Only ${m.shSales.weeks} complete week(s) of daily sales.</b> The POS feed started ${fmtD(gvizDate(SALES_CUTOVER))}; everything before it was a weekly total spread evenly over seven days, which would flatten Saturday into Monday if used. ${m.shSales.flat?"Too few weeks to know the shape at all, so every day is currently weighted equally — this understates the weekend.":"Enough to shape a week, too few to quote an error range."} Improves by itself as weeks accumulate.`);
@@ -1298,7 +1452,10 @@ function forecastCard(){
 
   return `
     <div class="card">
-      <div class="label">Forecast — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""} · ${m.partial?`${m.done} of ${m.total} days done`:"not started"}</div>
+      <div class="label" style="display:flex;align-items:baseline;gap:8px">
+        <span>Forecast — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""} · ${m.partial?`${m.done} of ${m.total} days done`:"not started"}</span>
+        <a style="margin-left:auto;cursor:pointer;text-transform:none;letter-spacing:0;font-size:11px;color:var(--dim);text-decoration:underline" onclick="fcSetHidden(true)">hide</a>
+      </div>
       <table>
         <thead><tr><th></th><th class="num">So far</th><th class="num">Projected</th><th class="num hide-sm">Likely range</th></tr></thead>
         <tbody>
@@ -1309,12 +1466,49 @@ function forecastCard(){
         </tbody>
       </table>
       ${anchor("Spend",m.rSpend)}
+      ${fcWhy(m.dSpend,"Spend",money0,true,m.start,m.today)}
       ${haveSales?anchor("Sales",m.rSales):`<div style="font-size:12px;color:var(--dim);margin-top:6px">No sales in this range yet, so COGS % can't be projected.</div>`}
+      ${haveSales?fcWhy(m.dSales,"Sales",money0,false,m.start,m.today):""}
       <details style="margin-top:8px">
         <summary style="font-size:11px;color:var(--dim);cursor:pointer">how these are worked out, and what they can't tell you</summary>
         <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.5">${notes.join("<br><br>")}</div>
       </details>
     </div>`;
+}
+
+/* Up/down markers for the per-venue footer on the supplier view.
+
+   The period in view is usually PART finished, so the comparison is period-to-date against
+   the same elapsed window in previous comparable periods - never against whole past weeks,
+   which would mark every venue "down" on a Wednesday. Returns a lookup keyed by venue plus
+   one for the supplier overall, or null when there is nothing sensible to compare against. */
+function supplierVenueMoves(name){
+  const f=fromDate(), t=toDate();
+  if(!f||!t) return null;                       // "All time" has no comparable period
+  const today=fcMid(new Date());
+  const keep=r=>r.supplier===name && venueOk(r.venue) && supActive(r.supplier);
+  const byVenue=fcDrivers(INV, r=>r.date, r=>r.venue||"—", r=>r.total, keep,
+                          fcMid(f), fcMid(t), today, FC.HIST_WEEKS);
+  const overall=fcDrivers(INV, r=>r.date, ()=>"__all", r=>r.total, keep,
+                          fcMid(f), fcMid(t), today, FC.HIST_WEEKS);
+  if(!byVenue.periods) return null;
+  const map={};
+  byVenue.items.forEach(i=>{ map[i.key]=i; });
+  return {map, all:overall.items[0]||null, periods:byVenue.periods, days:byVenue.elapsedDays};
+}
+
+/* One marker. Silent unless the move is outside what this venue normally does at this point,
+   because an arrow on every row is the same as no arrows at all. */
+function moveTag(item){
+  if(!item) return "";
+  const mv=fcMove(item);   // default gates: $200, 20% of usual, 2x its own swing
+  if(!mv) return "";
+  const band=item.n?`${money(item.lo)}–${money(item.hi)} over ${item.n}`:"";
+  const title=item.usual===0
+    ? `${money(item.now)} so far; nothing at this point in the last ${item.n} comparable periods`
+    : `${money(item.now)} so far vs a usual ${money(item.usual)} at this point (range ${band})`;
+  const cls=mv.dir==="up"?"up":"down";
+  return ` <span class="${cls}" title="${esc(title)}">${mv.dir==="up"?"▲":"▼"}</span>`;
 }
 
 /* ================= ROUTING ================= */
@@ -1681,6 +1875,8 @@ function renderSupplier(name){
   /* Share of the period's spend. Guarded against a zero total, which happens when credits
      exactly offset invoices — rare, but it would otherwise print NaN%. */
   const invVenuePct=t=>invVenueTotal?(t/invVenueTotal*100).toFixed(1)+"%":"—";
+  /* Like-for-like movement per venue for this supplier - see supplierVenueMoves. */
+  const vMoves=supplierVenueMoves(name);
   // Statement periods: month or week, per the toggle. Each period also carries a
   // per-venue split so the "By venue" view can show columns without a second pass.
   const pKey = STMT_PERIOD==="week" ? weekKey : monthKey;
@@ -1781,9 +1977,9 @@ function renderSupplier(name){
           <td class="hide-sm">${esc(r.venue)}</td><td class="num">${money(r.total)}</td>
           <td>${r.type==="credit_note"?'<span class="pill credit">credit</span>':""}${r.status==="CHECK"?' <span class="pill check">check</span>':""}${r.dup?' <span class="pill check">dup</span>':""}</td>
         </tr>`).join("")}</tbody>
-      ${invVenueRows.length?`<tfoot>${invVenueRows.map(([v,t])=>`<tr><td colspan="2" style="color:var(--dim)">${esc(v)}</td><td class="hide-sm num" style="color:var(--dim)">${invVenuePct(t)}</td><td class="num"><b>${money(t)}</b></td><td></td></tr>`).join("")}
-        <tr><td colspan="2"><b>Total</b></td><td class="hide-sm num" style="color:var(--dim)">100.0%</td><td class="num"><b>${money(invVenueTotal)}</b></td><td></td></tr></tfoot>`:""}
-      </table>
+      ${invVenueRows.length?`<tfoot>${invVenueRows.map(([v,t])=>`<tr><td colspan="2" style="color:var(--dim)">${esc(v)}</td><td class="hide-sm num" style="color:var(--dim)">${invVenuePct(t)}</td><td class="num"><b>${money(t)}</b></td><td>${vMoves?moveTag(vMoves.map[v]):""}</td></tr>`).join("")}
+        <tr><td colspan="2"><b>Total</b></td><td class="hide-sm num" style="color:var(--dim)">100.0%</td><td class="num"><b>${money(invVenueTotal)}</b></td><td>${vMoves?moveTag(vMoves.all):""}</td></tr></tfoot>`:""}
+      </table><div style="font-size:11px;color:var(--dim);margin-top:6px">${vMoves?`Arrows compare the first ${vMoves.days} day(s) of this period against the same opening stretch of the ${vMoves.periods} comparable periods before it, and appear only when a venue sits outside its own normal swing. Hover for the numbers.`:""}</div>
     </div>`;
   wireRowSearch("prodSearch","prodTbody","prodCount","products");
   renderSelBar(name,email);
