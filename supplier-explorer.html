@@ -57,7 +57,7 @@
 </head>
 <body>
 <header>
-  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-053328</span></a>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span id="buildtag" style="font-size:9px;color:#666;margin-left:6px"></span></a>
   <div class="crumb" id="crumb"></div>
   <button onclick="loadAll()">↻ refresh</button>
   <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
@@ -69,7 +69,11 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-064512"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-065140"; console.log("Supplier Explorer " + BUILD_ID);
+/* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
+   hardcoded copy of this string and silently fell six builds behind, which made a paste that
+   had landed indistinguishable from one that had not. */
+{ const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
