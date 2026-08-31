@@ -747,10 +747,16 @@ function hideChip(k){
    not which part of one, and labourFor handles it through F.slot directly. */
 function selKeyOf(){ return (F.slot&&F.slot.kind==="time")?F.slot.key:null; }
 
-/* Takings the labour figures should be measured against. */
+/* Takings the labour figures must be measured against.
+
+   This has to follow the SAME selection labourFor does, or the ratio compares one day's
+   wages against a whole week's revenue - which read as a 5.0% labour day. A day bar buckets
+   by day; a time bar buckets by granularity; no selection is the whole window. */
 function revFor(rows,g){
+  if(F.slot&&F.slot.kind==="day"){ const b=bucket(rows,"day"); return b[F.slot.key]||0; }
   const k=selKeyOf();
-  return (k==null)?sum(bucket(rows,g)):(bucket(rows,g)[k]||0);
+  const b=bucket(rows,g);
+  return (k==null)?sum(b):(b[k]||0);
 }
 
 /* Labour metrics for the current window.
@@ -768,9 +774,9 @@ function labourPanel(w, g, rows, selKey, rev){
   if(!L.ok) return '<div class="note">'+(SHIFTS_OK?'No shifts in this window.'
       :'No <b>DeputyShifts</b> tab found \u2014 run processDeputy in the script.')+'</div>';
   const m=L.meta;
+  const scope=slotLabel();          // "" when nothing is selected; day or time range otherwise
   if(!(m.hours>0)) return '<div class="note">Nobody rostered'+
-      (selKey!=null?" during "+clock(selKey)+"\u2013"+clock(selKey+g):" in this window")+'.</div>';
-  const scope=(selKey==null)?"":clock(selKey)+"\u2013"+clock(selKey+g);
+      (scope?" during "+scope:" in this window")+'.</div>';
   /* Leave and training are wage cost against the same takings, so they belong in Labour %.
      They stay out of HOURS - nobody was on the floor - which is why Revenue per hour still
      divides by m.hours alone. With a time bar selected they are excluded entirely: annual
@@ -1114,7 +1120,7 @@ function render(){
         cmpChip+cmpLegend+'</div>'+
         '<div class="chart">'+cols+'</div>'+
         '<div class="metrics">'+mets+'</div>'+
-        labourPanel(w,F.gran,rows,null,sum(bucket(rows,"day")))+'</div>';
+        labourPanel(w,F.gran,rows,selKeyOf(),revFor(rows,F.gran))+'</div>';
     }
   }
 
