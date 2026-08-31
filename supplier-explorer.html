@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-065140"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-072615"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -423,7 +423,7 @@ async function loadAll(){
   const app=document.getElementById("app");
   app.innerHTML='<div id="status">Loading data…</div>';
   try{
-    const [inv,lines,cfgRows,salesRows,pmRows,staffRows,staffMapRows,manualRows,feedDaily,weeklyRows]=await Promise.all([
+    const [inv,lines,cfgRows,salesRows,pmRows,staffRows,staffMapRows,manualRows,feedDaily,shiftRows,weeklyRows]=await Promise.all([
       fetchTab("Invoices"),
       fetchTab("InvoiceLines"),
       fetchTab("SupplierConfig").catch(()=>[]),
@@ -433,8 +433,14 @@ async function loadAll(){
       fetchTab("StaffSupplierMap").catch(()=>[]),
       fetchTab("ManualPurchases").catch(()=>[]),
       fetchSalesDaily().catch(()=>null),
+      fetchShifts().catch(()=>null),
       fetchWeekly().catch(()=>[])
     ]);
+    /* Deputy timesheets. Optional: a missing tab just leaves wages coming from the
+       weekly form sheets as before, so nothing breaks if processDeputy has not run. */
+    SHIFTS = Array.isArray(shiftRows) ? shiftRows : [];
+    SHIFTS_OK = SHIFTS.length > 0;
+    WAGE_RATE = SHIFTS_OK ? wageRates(SHIFTS, new Date()) : {};
     /* Sales tab first. If the POS feed answered, its sales replace the tab's from the
        cutover on — wages are kept from the tab either side, since payroll still lives
        there. If the feed failed or is empty the tab stands alone, so a broken feed
@@ -943,17 +949,23 @@ function fcWeeks(map, today, minDate, maxWeeks){
   return out;
 }
 
-/* Average share of the week landing on each weekday.
-   Shares are averaged PER WEEK, not pooled, so one enormous week can't dictate the shape. */
+/* Typical share of the period landing on each weekday.
+
+   MEDIAN, not mean. A handful of weekend market runs would otherwise buy Saturday and Sunday
+   a standing share of every future week, and the estimator would then expect money on days
+   the major suppliers are shut. The median says what a normal weekday looks like; a rare
+   event stays rare instead of being smeared across all of them. */
 function fcShape(weeks){
   const flat={shares:new Array(7).fill(1/7), weeks:(weeks||[]).length, flat:true, weekAvg:0};
   if(!weeks || weeks.length<FC.MIN_WEEKS) {
     if(weeks && weeks.length) flat.weekAvg = weeks.reduce((s,w)=>s+w.total,0)/weeks.length;
     return flat;
   }
-  const acc=new Array(7).fill(0);
-  weeks.forEach(w=>{ for(let i=0;i<7;i++) acc[i]+=w.days[i]/w.total; });
-  const shares=acc.map(v=>v/weeks.length);
+  const med=a=>{ const x=a.slice().sort((p,q)=>p-q); const m=x.length>>1;
+                 return x.length%2?x[m]:(x[m-1]+x[m])/2; };
+  const per=[[],[],[],[],[],[],[]];
+  weeks.forEach(w=>{ for(let i=0;i<7;i++) per[i].push(w.days[i]/w.total); });
+  const shares=per.map(a=>med(a));
   const sum=shares.reduce((a,b)=>a+b,0);
   if(!(sum>0)) return flat;
   return {
@@ -964,9 +976,6 @@ function fcShape(weeks){
   };
 }
 
-/* Level of the last `days` settled days, expressed in week units so it drops straight into
-   the same base*share arithmetic. Weighted by weekday share, so a window that happens to end
-   on a weekend isn't read as a permanent boom. */
 /* Earliest day the map has any data for. Cached per map object, since the trailing base is
    recomputed for every backtest window. */
 function fcMapStart(map){
@@ -1026,12 +1035,13 @@ function fcProject(map, shape, start, end, settleFrom, blindOpen, w){
   w = (typeof w==="number" && isFinite(w)) ? Math.max(0,Math.min(1,w)) : 0;
   const s=fcMid(start), e=fcMid(end), sf=fcMid(settleFrom);
   let seen=0, firm=0, firmW=0, totW=0, nDays=0, nFirm=0;
+  const open=[];
   for(let d=new Date(s); d<=e; d=fcAdd(d,1)){
     nDays++;
     const v=map[fmtISO(d)]||0, sh=shape.shares[fcDow(d)];
     totW+=sh;
     if(d<sf){ firm+=v; firmW+=sh; nFirm++; seen+=v; }
-    else if(!blindOpen) seen+=v;
+    else { open.push({sh,v}); if(!blindOpen) seen+=v; }
   }
   /* The trailing window must end BEFORE the range. Ending it at the settle point lets days
      of the very range being projected into the "prior" level, so a freak Monday still
@@ -1040,14 +1050,35 @@ function fcProject(map, shape, start, end, settleFrom, blindOpen, w){
   const trail=fcTrailingBase(map, shape, (sf<s?sf:s), 28) || shape.weekAvg;
   const cal=(firmW>0 && firm>0) ? firm/firmW : null;   // needs actual money, not just days
 
+  /* Two estimates of the period total, blended by w.
+
+       A = T * totW                      the level says the period lands here, wherever it
+                                         currently is. Over a whole week the shares sum to 1,
+                                         so A cannot see WHICH days are left - on a Saturday
+                                         it still expected $1,128 of weekend deliveries from
+                                         suppliers that are shut.
+
+       B = banked + what is still owed    per remaining day, whatever that day normally
+                                         carries, less anything already on it. Empty days ask
+                                         for nothing, so a finished trading week projects to
+                                         roughly what is already banked.
+
+     B replaces the old multiplicative scale-up (banked / settled share), which was wildly
+     noisy early in a period and was the source of the original overshoot. B also carries a
+     genuine trend for free: if trade is running hot, `banked` is high and so is B. */
   let T, basis;
-  if(cal!=null && trail>0){ T=w*cal+(1-w)*trail; basis = w>=0.85?"calibrated":w<=0.15?"trailing":"blend"; }
-  else if(trail>0){        T=trail; basis="trailing"; }
-  else if(cal!=null){      T=cal;   basis="calibrated"; }
+  if(trail>0){ T=trail; basis="trailing"; }
+  else if(cal!=null){ T=cal; basis="calibrated"; }
   else return {actual:seen, projected:seen, basis:"none", nDays, nFirm, nOpen:nDays-nFirm, base:0, w};
 
-  return {actual:seen, projected:Math.max(seen, T*totW), basis, nDays, nFirm,
-          nOpen:nDays-nFirm, base:T, w};
+  let owed=0;
+  open.forEach(o=>{ owed += Math.max(0, T*o.sh - (blindOpen?0:o.v)); });
+  const A=T*totW, B=seen+owed;
+  const est=w*B+(1-w)*A;
+  if(cal!=null&&trail>0) basis = w>=0.85?"progress":w<=0.15?"level":"blend";
+
+  return {actual:seen, projected:Math.max(seen, est), basis, nDays, nFirm,
+          nOpen:nDays-nFirm, base:T, w, A, B};
 }
 
 /* Step back in WHOLE WEEKS so the settled/open split stays on the same weekdays, but never
@@ -1515,6 +1546,111 @@ function moveTag(item){
   return ` <span class="${cls}" title="${esc(title)}">${mv.dir==="up"?"▲":"▼"}</span>`;
 }
 
+
+/* ================= LABOUR (Deputy) =================
+   Wage cost per venue per day, from the DeputyShifts tab in BG Sales Data - the same
+   spreadsheet the sales feed comes from.
+
+   Why this exists: wages otherwise arrive only from the weekly form sheets, which are
+   submitted AFTER week end and dated on Week Ending. A week still running therefore had no
+   wages at all, so Wages % and Prime cost % simply vanished from the KPI card and looked
+   broken rather than pending.
+
+   Column names are read from the header row rather than by position, matching how
+   sales-explorer.html reads the same tab - the tab has gained columns before (`rate`) and
+   position-based reads would silently take the wrong one. */
+const DEPUTY_TAB = "DeputyShifts";
+let SHIFTS = [], SHIFTS_OK = false, WAGE_RATE = {};
+
+async function fetchShifts(){
+  const url=`https://docs.google.com/spreadsheets/d/${SALES_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(DEPUTY_TAB)}`;
+  const res=await fetch(url);
+  const txt=await res.text();
+  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("no DeputyShifts tab");
+  const rows=parseCsv(txt.trim());
+  if(rows.length<2) return [];
+  const head=(rows.shift()||[]).map(h=>String(h).trim().toLowerCase());
+  const ix=n=>head.indexOf(n);
+  const need=["date","venue","hours","cost"];
+  if(need.some(n=>ix(n)<0)) throw new Error("DeputyShifts is missing "+need.filter(n=>ix(n)<0).join(", "));
+  return rows.map(r=>({
+    date:gvizDate(r[ix("date")]),
+    venue:String(r[ix("venue")]||"").trim(),
+    /* shift | training | leave. Training is apprentice school time and leave is annual or
+       sick - both are money out the door against the same takings, so both count here.
+       Neither is on the floor, which matters to the Sales Explorer's hours-based figures
+       but not to a wage total. */
+    kind:String(ix("kind")>-1?r[ix("kind")]:"shift").trim().toLowerCase()||"shift",
+    who:String(ix("employee")>-1?r[ix("employee")]:"").trim(),
+    hours:+String(r[ix("hours")]||"").replace(/[^0-9.\-]/g,"")||0,
+    cost:+String(r[ix("cost")]||"").replace(/[^0-9.\-]/g,"")||0,
+    /* THREE states, not two: final (Deputy exported it to payroll), salary (allocated by
+       the script, because Deputy never costs a salaried shift), pending (hourly, awaiting
+       export). A pending row carries hours but a cost of ZERO - reading that as "cost
+       nothing" understates the current week badly, and understates it most on the most
+       recent days. Same shape of error as the invoice capture lag. */
+    basis:String(ix("costed")>-1?r[ix("costed")]:"").trim().toLowerCase(),
+    rate:ix("rate")>-1?(+String(r[ix("rate")]||"").replace(/[^0-9.\-]/g,"")||0):0
+  })).filter(r=>r.date&&r.venue);
+}
+
+const wageFinal = b => b==="final"||b==="salary";
+
+/* Effective hourly rate per venue, from shifts that Deputy HAS costed over the trailing
+   window. Used to value pending shifts, because their hours are known immediately and their
+   dollars land days later. An estimate that is labelled beats a zero that is not. */
+function wageRates(shifts, today){
+  const cut=+fcAdd(fcMid(today||new Date()),-56);
+  const acc={}, all={c:0,h:0};
+  shifts.forEach(s=>{
+    if(!wageFinal(s.basis)||!(s.hours>0)||!(s.cost>0)) return;
+    if(+s.date<cut) return;
+    const a=acc[s.venue]||(acc[s.venue]={c:0,h:0});
+    a.c+=s.cost; a.h+=s.hours; all.c+=s.cost; all.h+=s.hours;
+  });
+  const out={__all: all.h>0 ? all.c/all.h : 0};
+  Object.keys(acc).forEach(v=>{ if(acc[v].h>0) out[v]=acc[v].c/acc[v].h; });
+  return out;
+}
+
+/* Cost of one shift: what Deputy says where it knows, else hours x rate.
+   A salaried row carries its own contractual rate; an hourly one falls back to the venue's
+   recent effective rate, then to the group rate. */
+function shiftCost(s, rates){
+  if(wageFinal(s.basis) && s.cost>0) return {cost:s.cost, est:false};
+  if(s.cost>0) return {cost:s.cost, est:false};
+  const r=(s.rate>0?s.rate:0) || (rates&&rates[s.venue]) || (rates&&rates.__all) || 0;
+  return {cost:s.hours*r, est:r>0};
+}
+
+/* Wage cost per venue per day. Leave and training included - all of it is payroll. */
+function wagesByDay(shifts, rates){
+  const m={};
+  (shifts||[]).forEach(s=>{
+    const {cost,est}=shiftCost(s,rates);
+    if(!(cost>0)) return;
+    const k=fmtISO(s.date)+"|"+s.venue;
+    const e=m[k]||(m[k]={cost:0, est:0, hours:0});
+    e.cost+=cost; e.hours+=s.hours; if(est) e.est+=cost;
+  });
+  return m;
+}
+
+/* Totals for the current filter, so the KPI card can show a live wage figure. */
+function wagesInScope(){
+  if(!SHIFTS_OK) return null;
+  let cost=0, est=0, hours=0, leave=0, training=0;
+  SHIFTS.forEach(s=>{
+    if(!inScope(s.venue,s.date)) return;
+    const c=shiftCost(s,WAGE_RATE);
+    if(!(c.cost>0)) return;
+    cost+=c.cost; hours+=s.hours; if(c.est) est+=c.cost;
+    if(s.kind==="leave") leave+=c.cost;
+    else if(s.kind==="training") training+=c.cost;
+  });
+  return cost>0 ? {cost,est,hours,leave,training} : null;
+}
+
 /* ================= ROUTING ================= */
 function route(){
   const h=decodeURIComponent(location.hash.slice(1));
@@ -1756,6 +1892,13 @@ function renderReports(){
   const salesScope=scopedSales();
   const salesTot=salesScope.reduce((s,r)=>s+r.sales,0);
   const wagesTot=salesScope.reduce((s,r)=>s+r.wages,0);
+  /* Deputy wins where it has data. The weekly form sheets are the payroll record but
+     arrive only after week end, so a week still running showed no wages at all and the
+     tiles vanished. Deputy is daily, includes leave and training, and can be estimated
+     for shifts not yet exported to payroll. Falls back to the forms when it has none. */
+  const dep=wagesInScope();
+  const wages=dep?dep.cost:wagesTot;
+  const wageSrc=dep?"deputy":(wagesTot>0?"forms":"none");
   const {cogs:cogsSpend,excluded:nonCogsSpend,unmapped}=cogsSplit(byGroup);
   const unmappedList=Object.entries(unmapped).sort((a,b)=>b[1]-a[1]);
   const kpiPct=(a,b)=>b?Math.round(a/b*1000)/10+"%":"—";
@@ -1765,11 +1908,12 @@ function renderReports(){
       <div class="statgrid">
         <div class="stat"><div class="v">${money(salesTot)}</div><div class="k">Sales</div></div>
         <div class="stat"><div class="v">${kpiPct(cogsSpend,salesTot)}</div><div class="k">COGS % of sales</div></div>
-        ${wagesTot>0?`<div class="stat"><div class="v">${kpiPct(wagesTot,salesTot)}</div><div class="k">Wages % of sales</div></div>
-        <div class="stat"><div class="v">${kpiPct(cogsSpend+wagesTot,salesTot)}</div><div class="k">Prime cost %</div></div>`:""}
+        ${wages>0?`<div class="stat"><div class="v">${kpiPct(wages,salesTot)}</div><div class="k">Wages % of sales</div></div>
+        <div class="stat"><div class="v">${kpiPct(cogsSpend+wages,salesTot)}</div><div class="k">Prime cost %</div></div>`:`<div class="stat"><div class="v" style="color:var(--dim)">—</div><div class="k">Wages % — no labour data</div></div>`}
       </div>
       <div style="font-size:11px;color:var(--dim);margin-top:6px">
         COGS = ${money(cogsSpend)} of ${money(tot.spend)} spend; ${money(nonCogsSpend)} excluded as non-COGS (cleaning, equipment, energy, overheads and similar).
+        ${wageSrc==="deputy"?`<br>Wages ${money(wages)} from Deputy timesheets${dep.leave||dep.training?` including ${money(dep.leave+dep.training)} of leave and training`:``}${dep.est>0?`, of which ${money(dep.est)} is estimated from hours at recent rates because Deputy has not yet exported those shifts to payroll`:``}.`:``}
         ${SALES_SOURCE?`<br>Sales from the ImPOS feed from ${fmtD(SALES_SOURCE)}; earlier sales and all wages from the weekly reporting sheets, spread evenly across each week. Wages arrive the Monday after week end, so the current week shows none.`:""}
         ${unmappedList.length?`<br><b style="color:var(--red)">Unmapped:</b> ${unmappedList.map(([g,v])=>esc(g)+" "+money(v)).join(", ")} — counted in COGS; assign a group in supplier settings if that's wrong.`:""}
       </div>
