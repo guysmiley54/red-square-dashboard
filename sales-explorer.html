@@ -743,6 +743,58 @@ function hideChip(k){
  * TRAINING (apprentice school time) is a real wage cost but the person is not on the
  * floor, so it never enters the time-of-day curve. It is reported separately.
  */
+/* Which time bar is selected, if any. A day bar is not a time bar - it narrows WHICH day,
+   not which part of one, and labourFor handles it through F.slot directly. */
+function selKeyOf(){ return (F.slot&&F.slot.kind==="time")?F.slot.key:null; }
+
+/* Takings the labour figures should be measured against. */
+function revFor(rows,g){
+  const k=selKeyOf();
+  return (k==null)?sum(bucket(rows,g)):(bucket(rows,g)[k]||0);
+}
+
+/* Labour metrics for the current window.
+
+   These used to live INSIDE the time-of-day chart block, which only runs for a single day
+   with timestamped sales. In Week, Month or Quarter view that block is skipped entirely, so
+   the whole labour panel silently disappeared even with the toggle on - and the toggle
+   itself lives in that chart's header, so there was no way to tell it was still on.
+
+   Wage cost, Labour %, leave and staff are all just as meaningful over a week as over a day.
+   Only the grey overlay BEHIND the bars needs a time-of-day axis, so that stays put. */
+function labourPanel(w, g, rows, selKey, rev){
+  if(!F.labour) return "";
+  const L=(selKey==null)?labourFor(w.from,w.to,g):labourFor(w.from,w.to,g,selKey);
+  if(!L.ok) return '<div class="note">'+(SHIFTS_OK?'No shifts in this window.'
+      :'No <b>DeputyShifts</b> tab found \u2014 run processDeputy in the script.')+'</div>';
+  const m=L.meta;
+  if(!(m.hours>0)) return '<div class="note">Nobody rostered'+
+      (selKey!=null?" during "+clock(selKey)+"\u2013"+clock(selKey+g):" in this window")+'.</div>';
+  const scope=(selKey==null)?"":clock(selKey)+"\u2013"+clock(selKey+g);
+  /* Leave and training are wage cost against the same takings, so they belong in Labour %.
+     They stay out of HOURS - nobody was on the floor - which is why Revenue per hour still
+     divides by m.hours alone. With a time bar selected they are excluded entirely: annual
+     leave has no time of day, so charging it to 10am would be meaningless. */
+  const offFloor=(selKey==null)?m.offFloorCosted:0;
+  const wageAll=m.cost+((selKey==null)?(m.training+m.leave):0);
+  const pct=((m.costedCost+offFloor)&&rev)?((m.costedCost+offFloor)/rev*100):null;
+  return '<div class="metrics" style="margin-top:2px">'+
+    metric("Labour hours",m.hours.toFixed(m.hours<10?2:1),
+           m.staff+" "+(m.staff===1?"person":"people")+" on"+(scope?" "+scope:""))+
+    (wageAll?metric("Wage cost",money(wageAll),
+      [ m.pendingHours?m.pendingHours.toFixed(1)+"h not costed yet":null,
+        offFloor?"incl. "+money0(offFloor)+" leave/training":null,
+        m.salaryCost?"incl. "+money0(m.salaryCost)+" salary":null
+      ].filter(Boolean).join(" \u00b7 ")||"all costed"):"")+
+    (pct!==null?metric("Labour %",pct.toFixed(1)+"%",
+      (m.pendingHours?"excl. shifts not yet costed":"of takings")
+      +(offFloor?" \u00b7 incl. leave":"")+(scope?" \u00b7 "+scope:"")):"")+
+    metric("Revenue per hour",money0(m.hours?rev/m.hours:0),"per labour hour")+
+    (m.training?metric("Training",money0(m.training),"paid, off the floor"):"")+
+    (m.leave?metric("Leave",money0(m.leave),"paid, off the floor"):"")+
+    '</div>'+labourTable(L);
+}
+
 function labourFor(from,to,gran,slotKey){
   /* slotKey (minutes since midnight) narrows everything to that one bar. Without it the
      figures were the whole day even with a slot selected, so "3 people on" answered a
@@ -757,7 +809,10 @@ function labourFor(from,to,gran,slotKey){
   SHIFTS.forEach(function(sh){
     if(sh.day<from||sh.day>to) return;
     if(F.venues.length&&!venueOn(sh.venue)) return;
-    if(F.day&&sh.day!==F.day) return;
+    /* A selected DAY bar must narrow labour the same way it narrows revenue. The old check
+       read F.day, which nothing ever sets, so picking a day in Week view left the labour
+       figures showing the whole week beside that one day's takings. */
+    if(F.slot&&F.slot.kind==="day"&&sh.day!==F.slot.key) return;
     if(sh.kind==="training"){
       // Paid, but off the floor - never in the curve, and only counted when looking at a
       // whole period rather than a single slot.
@@ -1006,44 +1061,7 @@ function render(){
                  ((hi-lo)/g+1)+" slots");
       }
       // Labour figures live under the chart, not mixed into the revenue metrics.
-      let labMets="";
-      if(lab&&lab.ok){
-        // With a bar selected, every labour figure is for THAT bar - hours, cost, who was
-        // on. Reporting the whole day next to one hour's takings was the bug.
-        const selKey=(F.slot&&F.slot.kind==="time")?F.slot.key:null;
-        const L=(selKey==null)?lab:labourFor(w.from,w.to,g,selKey);
-        const m=L.meta;
-        const rev=(selKey==null)?sum(bucket(rows,g)):(bucket(rows,g)[selKey]||0);
-        /* Leave and training are wage cost against the same takings, so they belong in
-           Labour %. They stay out of HOURS - nobody was on the floor - which is why
-           "Revenue per hour" still divides by m.hours alone. With a time bar selected they
-           are excluded entirely: annual leave has no time of day, so charging it to 10am
-           would be meaningless. */
-        const offFloor=(selKey==null)?m.offFloorCosted:0;
-        const wageAll=m.cost+((selKey==null)?(m.training+m.leave):0);
-        const pct=((m.costedCost+offFloor)&&rev)?((m.costedCost+offFloor)/rev*100):null;
-        const scope=(selKey==null)?"":clock(selKey)+"\u2013"+clock(selKey+g);
-        labMets = m.hours>0 ? (
-          '<div class="metrics" style="margin-top:2px">'+
-          metric("Labour hours",m.hours.toFixed(m.hours<10?2:1),
-                 m.staff+" "+(m.staff===1?"person":"people")+" on"+(scope?" "+scope:""))+
-          (wageAll?metric("Wage cost",money(wageAll),
-            [ m.pendingHours?m.pendingHours.toFixed(1)+"h not costed yet":null,
-              offFloor?"incl. "+money0(offFloor)+" leave/training":null,
-              m.salaryCost?"incl. "+money0(m.salaryCost)+" salary":null
-            ].filter(Boolean).join(" \u00b7 ")||"all costed"):"")+
-          (pct!==null?metric("Labour %",pct.toFixed(1)+"%",
-            (m.pendingHours?"excl. shifts not yet costed":"of takings")
-            +(offFloor?" \u00b7 incl. leave":"")+(scope?" \u00b7 "+scope:"")):"")+
-          metric("Revenue per hour",money0(m.hours?rev/m.hours:0),"per labour hour")+
-          (m.training?metric("Training",money0(m.training),"paid, off the floor"):"")+
-          (m.leave?metric("Leave",money0(m.leave),"paid, off the floor"):"")+
-          '</div>'+labourTable(L)
-        ) : '<div class="note">Nobody rostered'+(scope?" during "+scope:" in this window")+'.</div>';
-      } else if(F.labour){
-        labMets='<div class="note">'+(SHIFTS_OK?'No shifts in this window.'
-          :'No <b>DeputyShifts</b> tab found \u2014 run processDeputy in the script.')+'</div>';
-      }
+      const labMets=labourPanel(w,g,rows,selKeyOf(),revFor(rows,g));
       chart='<div class="card" data-sec="chart"><div class="label">Sales by time of day'+hideChip("chart")+
         '<span class="chip" style="padding:4px 10px;'+(g===60?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" onclick="setGran(60)">Hourly</span>'+
         '<span class="chip" style="padding:4px 10px;'+(g===15?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" onclick="setGran(15)">15 min</span>'+
@@ -1087,9 +1105,16 @@ function render(){
           metric("Per day",money0(total/days.length),days.length+" trading days")+
           metric("Best day",fmtShort(best),money(cur[best]));
       }
-      chart='<div class="card" data-sec="chart"><div class="label">Sales by day'+hideChip("chart")+cmpChip+cmpLegend+'</div>'+
+      /* The Labour toggle lives in this header too now. Previously it existed only on the
+         time-of-day chart, so in Week view there was neither a way to turn labour on nor
+         anything to show if it already was. */
+      chart='<div class="card" data-sec="chart"><div class="label">Sales by day'+hideChip("chart")+
+        '<span class="chip" style="padding:4px 10px;'+(F.labour?"background:var(--ink);color:#fff;border-color:var(--ink)":"")+'" onclick="toggleLabour()">'+
+          (F.labour?"\u2713 ":"")+'Labour</span>'+
+        cmpChip+cmpLegend+'</div>'+
         '<div class="chart">'+cols+'</div>'+
-        '<div class="metrics">'+mets+'</div></div>';
+        '<div class="metrics">'+mets+'</div>'+
+        labourPanel(w,F.gran,rows,null,sum(bucket(rows,"day")))+'</div>';
     }
   }
 
