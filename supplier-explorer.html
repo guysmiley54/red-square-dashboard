@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-072615"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-090318"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -316,14 +316,51 @@ function mailto(to,subject,body){
 }
 
 /* ================= FETCH ================= */
+
+/* gviz does NOT report an error for a sheet name that does not exist. It silently
+   serves the FIRST sheet in the workbook, which here is Invoices. Neither the HTTP
+   status nor the error-JSON test below fires, so `fetchTab("X").catch(()=>[])` never
+   catches anything and 1,100+ invoice rows arrive dressed as whatever was asked for.
+   Verified 3 Sep 2026: a request for a deliberately nonsense tab name returned the
+   entire Invoices tab, and StaffSupplierMap - which does not exist - was doing exactly
+   this in production.
+
+   The only reliable test is the header row, so each tab declares the columns its
+   reader actually needs and a response missing any of them is rejected. Add a tab
+   here whenever a new fetchTab call is added, or it gets no protection. */
+const TAB_COLUMNS = {
+  "Invoices":         ["invoice_number","invoice_date","total"],
+  "InvoiceLines":     ["invoice_number","description","line_total"],
+  "SupplierConfig":   ["supplier","merge_into"],
+  "Sales":            ["date","venue","sales"],
+  "ProductMerge":     ["supplier","match","into"],
+  "StaffInvoices":    ["date","venue","supplier","amount"],
+  "StaffSupplierMap": ["staff_name","pipeline_name"],
+  "ManualPurchases":  ["date","shop","venue","amount"]
+};
+
 async function fetchTab(name){
-  const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
+  /* headers=1 stops gviz guessing how many leading rows are headers. Confirmed a no-op
+     on every tab in use today (identical output with and without), but a tab whose
+     leading rows are all text can otherwise have dozens folded into one mangled header
+     row, silently losing the data. sales-explorer.html has carried this for months. */
+  const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(name)}`;
   const res=await fetch(url);
   const txt=await res.text();
   if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("tab '"+name+"' not found or not shared");
   const rows=parseCsv(txt);
   if(!rows.length) return [];
   const cols=rows[0].map(c=>String(c||"").toLowerCase().trim());
+  const need=TAB_COLUMNS[name]||[];
+  const missing=need.filter(c=>cols.indexOf(c)===-1);
+  if(missing.length){
+    /* Warn as well as throw: most callers are wrapped in .catch(()=>[]), which would
+       otherwise turn a missing tab back into the silence this check exists to end. */
+    console.warn("fetchTab: '"+name+"' answered with columns ["+cols.join(", ")+"] - "
+      +"missing ["+missing.join(", ")+"]. gviz serves the first sheet in the workbook "
+      +"when a tab is absent, so this is almost certainly a missing or misnamed tab.");
+    throw new Error("tab '"+name+"' did not answer with its own columns (missing: "+missing.join(", ")+")");
+  }
   return rows.slice(1).map(r=>{
     const o={};
     cols.forEach((c,i)=>{ o[c]= r[i]!==undefined ? r[i] : null; });
