@@ -26,6 +26,14 @@
   .chip.nav{padding:7px 11px;font-family:ui-monospace,monospace}
   .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
   .rangelbl{font-size:12px;color:var(--dim);font-family:ui-monospace,monospace;margin-left:2px}
+  /* Jump-to-date. Styled as a chip so it reads as part of the same control strip, and
+     left as a native <input type=date> so phones get the OS picker for free. */
+  .datepick{font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);
+    padding:6px 10px;border:1.5px solid var(--line);border-radius:99px;background:#fff;
+    cursor:pointer;height:31px}
+  .datepick:focus{outline:none;border-color:var(--red)}
+  .datepick::-webkit-calendar-picker-indicator{cursor:pointer;opacity:.55}
+  .datepick::-webkit-calendar-picker-indicator:hover{opacity:1}
   .wrap{max-width:1120px;margin:0 auto;padding:20px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
   .label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -129,6 +137,11 @@
 <div class="wrap"><div id="app"><div class="loading">Loading sales feed&hellip;</div></div></div>
 
 <script>
+/* Build marker. supplier-explorer.html has carried one for a while and sales-explorer has
+   not, which made "is the deployed file the one we edited?" a diff rather than a glance.
+   Logged on load and hung off window so it can be read from the console. */
+const BUILD = "build-041140";
+console.log("sales-explorer " + BUILD);
 const SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
 // Display order is deliberate: Cambridge, Luma, Glenorchy.
 const VENUES = ["Red Square Cambridge","Luma Kitchen","Red Square Glenorchy"];
@@ -203,6 +216,9 @@ const DEPUTY_VENUE={
 };
 let OVER_ITEM={}, OVER_DEPT={}, OVER_COUNT=0, KITCHEN_ROWS=0;
 let ITEM_TAB_FOUND=false, OVER_TAB_FOUND=false, OVER_DIAG="";
+// Oldest and newest trading day actually in the feed. Bounds the date picker so it cannot
+// send you to a month that was never going to have anything in it. Set in load().
+let DAY_MIN="", DAY_MAX="";
 // period: day | week | month.  offset: 0 = current, -1 = previous, +1 = next.
 // gran: minutes per bar on the single-day chart (60 or 15).
 // compare: split the chart bars by venue.
@@ -267,27 +283,82 @@ function num(v){ const n=Number(String(v==null?"":v).replace(/[$,\s]/g,"")); ret
 const fmtDay=k=>{const p=String(k).split("-");return p[2]+"/"+p[1]+"/"+p[0];};
 const fmtShort=k=>{const p=String(k).split("-");return p[2]+"/"+p[1];};
 
+const MONTH_NAME=["January","February","March","April","May","June","July","August",
+                  "September","October","November","December"];
+
+/* windowFor is on the hot path: `inWindow` is passed straight to ROWS.filter, so it runs
+   once PER ROW - ~79,000 times per render, twice over. That was survivable while every
+   branch was pure arithmetic, and it stopped being survivable the moment the month branch
+   called toLocaleDateString with an options object, which builds an Intl.DateTimeFormat
+   each time. Measured on the live page, 4 Sep 2026, 78,868 rows:
+
+     windowFor() x2000     day 5ms    week 12ms    month 284ms
+     ROWS.filter(inWindow) day 344ms  week 313ms   month 12,026ms
+     whole month render                            18,787ms
+
+   Month view was not broken, it was taking nineteen seconds - long enough that the tab
+   looks hung and you conclude it does not work. Two fixes, deliberately both:
+
+   1. Memoise. The result only depends on period, offset and which calendar day it is, so
+      one cached object serves every row. Keyed on a minute bucket rather than a date so
+      the cache check itself allocates nothing - a window can be at most 60s stale, which
+      only matters at midnight, when a re-render is a re-render anyway.
+   2. Build the month label from a lookup instead of Intl. Cheap even on a cache miss, and
+      it pins the format to "September 2026" rather than leaving it to the browser's
+      locale data.
+
+   The callers below also hoist the window out of their filters, so neither of the two
+   full-table passes depends on this being fast. Belt and braces: the memo protects any
+   call site added later that forgets to hoist. */
+let _winMemo={key:"", val:null};
+
 // The visible window. Always anchored on TODAY and shifted by offset, so the app opens
 // on the current day and the arrows step back through history. `back` shifts a further
 // whole period earlier - back=1 is the equivalent previous day/week/month, which is what
 // the comparison toggle draws against.
 function windowFor(back){
   const off=F.offset-(back||0);
+  const key=F.period+"|"+off+"|"+Math.floor(Date.now()/60000);
+  if(_winMemo.key===key) return _winMemo.val;
   const now=new Date(); now.setHours(0,0,0,0);
+  let out;
   if(F.period==="day"){
     const d=new Date(now); d.setDate(d.getDate()+off);
-    return {from:dkey(d), to:dkey(d), label:fmtDay(dkey(d)), unit:"day"};
-  }
-  if(F.period==="week"){
+    out={from:dkey(d), to:dkey(d), label:fmtDay(dkey(d)), unit:"day"};
+  }else if(F.period==="week"){
     const a=new Date(now); a.setDate(a.getDate()-((a.getDay()+6)%7)+off*7); // Monday
     const b=new Date(a); b.setDate(b.getDate()+6);
-    return {from:dkey(a), to:dkey(b),
+    out={from:dkey(a), to:dkey(b),
       label:fmtShort(dkey(a))+" \u2013 "+fmtShort(dkey(b)), unit:"week"};
+  }else{
+    const a=new Date(now.getFullYear(), now.getMonth()+off, 1);
+    const b=new Date(a.getFullYear(), a.getMonth()+1, 0);
+    out={from:dkey(a), to:dkey(b),
+      label:MONTH_NAME[a.getMonth()]+" "+a.getFullYear(), unit:"month"};
   }
-  const a=new Date(now.getFullYear(), now.getMonth()+off, 1);
-  const b=new Date(a.getFullYear(), a.getMonth()+1, 0);
-  return {from:dkey(a), to:dkey(b),
-    label:a.toLocaleDateString("en-AU",{month:"long",year:"numeric"}), unit:"month"};
+  _winMemo={key:key, val:out};
+  return out;
+}
+
+/* Jump straight to a date rather than tapping the arrows back to it. The picker sets the
+   OFFSET rather than a date of its own, so there is still exactly one source of truth for
+   the window and nothing downstream needs to know the picker exists.
+
+   The offset it computes is period-aware: in Week view picking any day lands on that
+   day's week, in Month view on that day's month. Differences are taken in whole days and
+   ROUNDED, not floored - Tasmania observes DST, so a span crossing the October or April
+   boundary is 23 or 25 hours and flooring it would land you a day early. */
+function gotoDate(iso){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(iso||""))) return;   // cleared, or half-typed
+  const t=new Date(iso+"T00:00:00"); if(isNaN(t)) return;
+  const now=new Date(); now.setHours(0,0,0,0);
+  const monday=function(d){ const x=new Date(d); x.setHours(0,0,0,0);
+                            x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; };
+  let off;
+  if(F.period==="day")       off=Math.round((t-now)/86400000);
+  else if(F.period==="week") off=Math.round((monday(t)-monday(now))/604800000);
+  else                       off=(t.getFullYear()-now.getFullYear())*12+(t.getMonth()-now.getMonth());
+  F.offset=off; F.slot=null; renderFilters(); render();
 }
 
 function parseCsv(text){
@@ -494,12 +565,44 @@ async function load(force){
   });
   UNMAPPED=Array.from(new Set(ROWS.filter(r=>!r.mapped&&r.category).map(r=>r.category))).sort();
   HAS_TIME = ROWS.some(r=>r.ts && (r.ts.getHours()||r.ts.getMinutes()));
+  /* Date-picker bounds. Day keys are ISO, so string compare is date compare - no parsing.
+     The upper bound is the later of the newest row and today, because the feed can be a
+     few hours behind and refusing to let you pick today would be absurd. */
+  DAY_MIN=""; DAY_MAX="";
+  ROWS.forEach(function(r){
+    if(!r.day) return;
+    if(!DAY_MIN||r.day<DAY_MIN) DAY_MIN=r.day;
+    if(!DAY_MAX||r.day>DAY_MAX) DAY_MAX=r.day;
+  });
+  const todayNow=dkey(new Date());
+  if(!DAY_MAX||todayNow>DAY_MAX) DAY_MAX=todayNow;
   document.getElementById("bld").textContent=ROWS.length.toLocaleString()+" rows";
   renderFilters(); render();
 }
 
+/* Bounds for the picker. DAY_MIN/DAY_MAX are the real extent of the feed, but clamping to
+   them literally would make Month view refuse 01/08 when the feed happens to start on the
+   3rd - you would be blocked from picking the very month you were trying to reach. So the
+   bounds widen to the enclosing week or month for those periods. */
+function pickBounds(){
+  if(!DAY_MIN) return {min:"",max:""};
+  if(F.period==="day") return {min:DAY_MIN,max:DAY_MAX};
+  const lo=new Date(DAY_MIN+"T00:00:00"), hi=new Date(DAY_MAX+"T00:00:00");
+  if(F.period==="week"){
+    lo.setDate(lo.getDate()-((lo.getDay()+6)%7));          // back to Monday
+    hi.setDate(hi.getDate()+(6-((hi.getDay()+6)%7)));      // on to Sunday
+  }else{
+    lo.setDate(1);
+    hi.setMonth(hi.getMonth()+1,0);   // day 0 of next month = last day of this one. The
+                                      // two-argument form is deliberate: setMonth alone
+                                      // on the 31st overflows into the following month.
+  }
+  return {min:dkey(lo),max:dkey(hi)};
+}
+
 function renderFilters(){
   const w=windowFor();
+  const pb=pickBounds();
   document.getElementById("filters").innerHTML=
     '<span class="chip nav" onclick="shift(-1)">&lsaquo;</span>'+
     ["day","week","month"].map(function(p){
@@ -507,6 +610,13 @@ function renderFilters(){
     }).join("")+
     '<span class="chip nav" onclick="shift(1)">&rsaquo;</span>'+
     '<span class="rangelbl">'+esc(w.label)+'</span>'+
+    /* Value is the FIRST day of the current window, so the picker always reflects where
+       you are rather than sitting on a stale date. In Week and Month view that is the
+       Monday / the 1st, which is also what you would pick to get back here. */
+    '<input type="date" class="datepick" value="'+esc(w.from)+'"'+
+      (pb.min?' min="'+esc(pb.min)+'"':"")+(pb.max?' max="'+esc(pb.max)+'"':"")+
+      ' onchange="gotoDate(this.value)"'+
+      ' title="Jump to a date \u2014 lands on that '+esc(w.unit)+'">'+
     (F.offset!==0?'<span class="chip" onclick="setOffset(0)">Today</span>':"")+
     '<span class="sep"></span>'+
     '<span class="chip '+(F.venues.length===0?"on":"")+'" onclick="setVenue(\'\')">All venues</span>'+
@@ -914,7 +1024,9 @@ function metric(k,val,sub,colour){
 function render(){
   const w=windowFor();
   const app=document.getElementById("app");
-  const all=ROWS.filter(inWindow);   // window only - drives the venue cards
+  // `w` is hoisted out of the predicate on purpose. Passing `inWindow` straight to filter
+  // re-derives the window once per row; see the note on windowFor.
+  const all=ROWS.filter(function(r){ return inWin(r,w)&&isSale(r); });   // drives the venue cards
   const rows=scoped();               // window + venue + category - drives the chart
   const drill=rows.filter(inSlot);   // + the selected chart bar - drives the tables
   LAST.drill=drill;
@@ -1271,7 +1383,7 @@ function render(){
   const keyOf = lvl2 ? grpVal : catVal;
   const catMap={};
   ROWS.filter(function(r){
-    return inWindow(r)&&(!F.venues.length||venueOn(r.venue))&&inSlot(r)&&
+    return inWin(r,w)&&isSale(r)&&(!F.venues.length||venueOn(r.venue))&&inSlot(r)&&
            (!lvl2||catVal(r)===F.cat);
   }).forEach(function(r){
     if(!r.sales)return;
