@@ -122,7 +122,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-073110"; console.log("Invoices " + BUILD_ID);
+const BUILD_ID = "build-073820"; console.log("Invoices " + BUILD_ID);
 { const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
 
 const OPS_SHEET_ID   = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -131,7 +131,7 @@ const SALES_CUTOVER  = "2026-08-03";   // POS feed from here; weekly form sheets
 
 /* The /exec URL of the Payables.gs web app deployment. Empty = read-only mode: everything
    displays, but marking paid and saving terms are disabled with an explanation. */
-const WEBAPP_URL = "";
+const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzlsFvzcu8nqVkOL5S1qmjz7zShdrRp2o6fDNP8-Bo5v98A4qsqsddHTqSnc-12Aq8e/exec";
 
 const COMPANY_NAME = "Red Square";
 const SIGNOFF_NAME = "";               // blank = the name entered at "Who is this?"
@@ -465,6 +465,7 @@ function askIdentity(force){
   return new Promise(res=>{
     const id=identity()||{};
     if(!force && id.user && id.pin) return res(id);
+    ID_RESOLVE=res;
     openModal(`<h3>Who is this?</h3>
       <div class="field">Your name (goes on the payment log and remittance emails)<input id="idUser" value="${esc(id.user||"")}" placeholder="Michaela"></div>
       <div class="field">PIN for saving<input id="idPin" type="password" value="${esc(id.pin||"")}" placeholder="from Adrian"></div>
@@ -473,7 +474,7 @@ function askIdentity(force){
     document.getElementById("idSave").onclick=()=>{
       const v={user:document.getElementById("idUser").value.trim(), pin:document.getElementById("idPin").value.trim()};
       if(!v.user||!v.pin){ toast("Name and PIN are both needed"); return; }
-      localStorage.setItem("pb_identity", JSON.stringify(v)); paintWho(); closeModal(); res(v);
+      localStorage.setItem("pb_identity", JSON.stringify(v)); paintWho(); ID_RESOLVE=null; closeModal(); res(v);
     };
   });
 }
@@ -483,7 +484,16 @@ async function post(payload){
   if(!id) throw new Error("cancelled");
   /* Body is a string, so the browser sends text/plain: a "simple" request that needs no
      CORS preflight, which Apps Script web apps cannot answer. JSON content-type fails. */
-  const res=await fetch(WEBAPP_URL,{method:"POST",body:JSON.stringify(Object.assign({pin:id.pin,user:id.user},payload)),redirect:"follow"});
+  let res;
+  try{
+    res=await fetch(WEBAPP_URL,{method:"POST",body:JSON.stringify(Object.assign({pin:id.pin,user:id.user},payload)),redirect:"follow"});
+  }catch(e){
+    /* The request leaves the browser but the reply cannot be read. Nearly always this is the
+       Apps Script deployment being set to "Anyone with a Google Account" rather than "Anyone":
+       Google answers with a redirect to a sign-in page, which carries no CORS header, so the
+       browser refuses to hand the response over. Nothing was saved. */
+    throw new Error("Could not reach the save endpoint. In Apps Script, check Deploy > Manage deployments > edit: 'Who has access' must be Anyone, and the /exec URL must be the current version. Nothing was saved.");
+  }
   const txt=await res.text();
   let j; try{ j=JSON.parse(txt); }catch(e){ throw new Error("Unexpected reply from the web app (not JSON). Is the deployment set to 'Anyone'?"); }
   if(!j.ok) throw new Error(j.error||"save failed");
@@ -523,7 +533,11 @@ async function copyText(t,label){
 let toastT=null;
 function toast(msg){ const el=document.getElementById("toast"); el.textContent=msg; el.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("on"),1800); }
 function openModal(html){ const m=document.getElementById("modal"); m.innerHTML='<div class="dlg">'+html+'</div>'; m.classList.add("on"); }
-function closeModal(){ const m=document.getElementById("modal"); m.classList.remove("on"); m.innerHTML=""; }
+let ID_RESOLVE=null;
+function closeModal(){
+  const m=document.getElementById("modal"); m.classList.remove("on"); m.innerHTML="";
+  if(ID_RESOLVE){ const f=ID_RESOLVE; ID_RESOLVE=null; f(null); }   // a pending "Who is this?" is a cancel
+}
 
 /* ================= REMITTANCE ================= */
 function remittanceText(supplier, rows, info){
