@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoices</title>
+<style>
+  :root {
+    --ink:#111; --paper:#f7f6f3; --line:#ddd; --red:#c8102e; --amber:#b45309; --dim:#777;
+    --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--paper);color:var(--ink);padding-bottom:70px}
+  header{background:var(--ink);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+  header .sq{width:13px;height:13px;background:var(--red)}
+  header h1{font-size:16px;font-weight:700;white-space:nowrap}
+  header .crumb{font-size:12px;color:#aaa;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  header button, header a.hbtn{margin-left:auto;background:none;border:1px solid #555;color:#fff;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;text-decoration:none;white-space:nowrap}
+  header a.hbtn{margin-left:0}
+  #filters{background:#fff;border-bottom:1px solid var(--line);padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;top:49px;z-index:4}
+  #filters:empty{display:none}
+  .chip{border:1px solid var(--line);border-radius:99px;padding:5px 12px;font-size:12px;cursor:pointer;background:#fff;font-weight:600;white-space:nowrap}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .chip.on.red{background:var(--red);border-color:var(--red)}
+  #filters input[type=date], .card input[type=date]{border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px;font-family:var(--mono)}
+  #filters input[type=search]{flex:1;min-width:140px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px}
+  main{max-width:960px;margin:0 auto;padding:14px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+  .label{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th.sort{cursor:pointer;user-select:none}
+  th.sort:hover{color:var(--ink)}
+  td{padding:7px 8px;border-bottom:1px solid #f0efec;vertical-align:middle}
+  tr.click{cursor:pointer}
+  tr.click:hover{background:#faf9f6}
+  tr.paid td{color:var(--dim)}
+  tr.paid td .num{color:var(--dim)}
+  tr.sel td{background:#fff8e6}
+  .num{text-align:right;font-family:var(--mono);white-space:nowrap}
+  .due{white-space:nowrap;font-family:var(--mono);font-size:12px}
+  .due.over{color:var(--red);font-weight:700}
+  .due.soon{color:var(--amber);font-weight:600}
+  .due.done{color:var(--dim)}
+  .pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle}
+  .pill.credit{background:var(--ink);color:#fff}
+  .pill.check{background:var(--red);color:#fff}
+  .pill.grey{background:#eee;color:#555}
+  a.sup{color:var(--ink);font-weight:600;text-decoration:none;cursor:pointer}
+  a.sup:hover{text-decoration:underline}
+  a.pdf{color:var(--ink);text-decoration:none;font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-radius:6px;padding:2px 6px}
+  a.pdf:hover{border-color:var(--ink)}
+  input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:var(--ink)}
+  .back{display:inline-block;margin-bottom:10px;font-size:14px;color:var(--ink);text-decoration:none;font-weight:600;cursor:pointer}
+  .back:before{content:"← "}
+  .statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer}
+  .stat.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+  .stat .v{font-size:20px;font-weight:700;font-family:var(--mono)}
+  .stat .v.red{color:var(--red)}
+  .stat .v.amber{color:var(--amber)}
+  .stat .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+  #status{padding:40px 0;text-align:center;color:var(--dim);font-size:14px}
+  .err{border:1px solid var(--red);color:var(--red);border-radius:10px;padding:12px;font-size:14px;background:#fff;margin-bottom:12px}
+  .note{font-size:12px;color:var(--dim);margin-top:6px;line-height:1.5}
+  .btn{display:inline-block;background:var(--ink);color:#fff;border:none;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap}
+  .btn.outline{background:#fff;color:var(--ink);border:2px solid var(--ink);padding:7px 12px}
+  .btn.small{padding:5px 10px;font-size:12px}
+  .btn.outline.small{padding:3px 8px}
+  .btn:disabled{opacity:.4;cursor:default}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .grow{flex:1}
+  .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim);margin-bottom:10px}
+  .field input,.field select,.field textarea{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;font-family:inherit;color:var(--ink);background:#fff}
+  .field textarea{min-height:64px;font-family:var(--mono);font-size:13px}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--ink);outline-offset:1px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  h2{font-size:20px;font-weight:700;margin-bottom:4px}
+  h3{font-size:14px;font-weight:700;margin-bottom:8px}
+  .sub{font-size:13px;color:var(--dim)}
+  .terms{font-family:var(--mono);font-size:12px;color:var(--dim)}
+  pre.pay{font-family:var(--mono);font-size:13px;white-space:pre-wrap;background:#faf9f6;border:1px solid var(--line);border-radius:8px;padding:10px;margin:6px 0}
+  #selbar{position:fixed;left:0;right:0;bottom:0;background:var(--ink);color:#fff;padding:10px 16px;display:none;align-items:center;gap:10px;flex-wrap:wrap;z-index:6;box-shadow:0 -4px 16px rgba(0,0,0,.25)}
+  #selbar.on{display:flex}
+  #selbar .t{font-family:var(--mono);font-size:14px;font-weight:700}
+  #selbar .s{font-size:12px;color:#aaa}
+  #selbar .btn{background:#fff;color:var(--ink)}
+  #selbar .btn.ghost{background:none;color:#fff;border:1px solid #555}
+  #selbar .btn.pay{background:var(--red);color:#fff}
+  #modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;padding:40px 12px;z-index:9;overflow:auto}
+  #modal.on{display:flex}
+  .dlg{background:#fff;border-radius:12px;padding:18px;width:100%;max-width:520px}
+  .dlg h3{font-size:16px;margin-bottom:12px}
+  .dlg table{margin-bottom:12px}
+  #toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:99px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:10}
+  #toast.on{opacity:1}
+  svg text{font-family:var(--mono);font-size:10px;fill:var(--dim)}
+  .bar{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12px}
+  .bar .n{width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bar .trk{flex:1;height:14px;background:#f0efec;border-radius:3px;overflow:hidden}
+  .bar .fill{height:100%;background:var(--ink)}
+  .bar .fill.red{background:var(--red)}
+  .bar .v{width:150px;text-align:right;font-family:var(--mono);white-space:nowrap}
+  @media (max-width:640px){ .hide-sm{display:none} td,th{padding:6px 5px} #filters{top:auto;position:static} .two{grid-template-columns:1fr} .bar .n{width:110px} .bar .v{width:120px} }
+  @media print { header,#filters,#selbar,.back,.btn{display:none!important} body{background:#fff;padding:0} .card{border:none;padding:0} }
+</style>
+</head>
+<body>
+<header>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Invoices</h1><span id="buildtag" style="font-size:9px;color:#666;margin-left:6px"></span></a>
+  <div class="crumb" id="crumb"></div>
+  <button onclick="loadAll()">↻ refresh</button>
+  <a class="hbtn" onclick="go('sup')" style="cursor:pointer">Suppliers</a>
+  <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
+  <a class="hbtn" id="whoami" onclick="askIdentity(true)" style="cursor:pointer" title="Who is using this, and the PIN for saving">…</a>
+</header>
+<div id="filters"></div>
+<main id="app"><div id="status">Loading data…</div></main>
+<div id="selbar"></div>
+<div id="modal" onclick="if(event.target===this) closeModal()"></div>
+<div id="toast"></div>
+
+<script>
+/* ================= CONFIG ================= */
+const BUILD_ID = "build-071030"; console.log("Invoices " + BUILD_ID);
+{ const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
+
+const OPS_SHEET_ID   = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
+const SALES_SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
+const SALES_CUTOVER  = "2026-08-03";   // POS feed from here; weekly form sheets before
+
+/* The /exec URL of the Payables.gs web app deployment. Empty = read-only mode: everything
+   displays, but marking paid and saving terms are disabled with an explanation. */
+const WEBAPP_URL = "";
+
+const COMPANY_NAME = "Red Square";
+const SIGNOFF_NAME = "";               // blank = the name entered at "Who is this?"
+
+/* Terms used for any supplier that has none saved. Adrian: "we pay most invoices at the
+   end of the month + 7 days". So an invoice dated 31 Aug is due 7 Sep; one dated 1 Sep is
+   due 7 Oct. */
+const DEFAULT_TERMS = { type:"eom", days:7 };
+const DUE_SOON_DAYS = 7;
+
+const SERVICE_TYPES = ["Food","Beverage","Coffee","Packaging","Cleaning","Rent","Energy","Gas","Waste",
+                       "Repairs & maintenance","Crockery & equipment","Professional services","Other"];
+
+/* Invoice `category` (set by the processor) -> service type. Anything not listed is "Other". */
+const CATEGORY_TYPE = { food:"Food", beverage:"Beverage", coffee:"Coffee", packaging:"Packaging", cleaning:"Cleaning",
+                        equipment:"Crockery & equipment", "packaging|cleaning":"Packaging" };
+
+/* Suppliers whose invoice category does not describe the service. Keyed on norm(name).
+   A saved service_type in SupplierTerms beats this; this beats the invoice category. */
+const SUPPLIER_TYPE_DEFAULT = {
+  shellenergyretailptyltd:"Energy", supagasptylimited:"Gas",
+  veoliaenvironmentalservicesaustraliaptyltd:"Waste",
+  scooterselectricalservicesptyltd:"Repairs & maintenance",
+  abrefridgeration:"Repairs & maintenance", abrefrigeration:"Repairs & maintenance",
+  peterbrowntasptyltd:"Crockery & equipment", rewardhospitality:"Crockery & equipment"
+};
+
+/* Weekly sales form sheets, used for revenue BEFORE the cutover only. Same shape as
+   supplier-explorer.html. */
+const WEEKLY_SOURCES = [
+  { id:"10e898xL_QX9THVnxE3UJPdIe5uY7qBvC6PJfdn4k6qQ", gid:"345653728", weekEnd:1,
+    venues:[{name:"Red Square Cambridge", sales:2},{name:"Luma Kitchen", sales:4}] },
+  { id:"1WQF6KzCH8JqV3q2ssr0RE8Qsn1fwF6lI6g0NAoMLWUo", gid:"369747867", weekEnd:1,
+    venues:[{name:"Red Square Glenorchy", sales:2}] }
+];
+
+const PAY_METHODS = ["Bank transfer","BPAY","Direct debit","Card","Cash","Other"];
+
+/* ================= STATE ================= */
+let INV = [], TERMS = {}, PAY = {}, SALES = [], CANON = {}, LOAD_WARN = [];
+let SEL = {};                                   // key -> true (selected for batch)
+let VIEW = { status:"unpaid", q:"", types:[], hidden:false };
+let SORT = { key:"due", dir:1 };
+let SUP_SORT = { key:"balance", dir:-1 };
+let RPT = { kind:"month", offset:0, from:"", to:"" };
+let TODAY = new Date(); TODAY = new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate());
+
+const norm = s => String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+function num_(v){ return +String(v||"").replace(/[^0-9.\-]/g,"")||0; }
+function gvizDate(v){
+  if (v instanceof Date) return v;
+  const s=String(v||"").trim();
+  let m=/Date\((\d+),(\d+),(\d+)/.exec(s);
+  if (m) return new Date(+m[1],+m[2],+m[3]);
+  m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return new Date(+m[1],+m[2]-1,+m[3]);
+  m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);   // dd/mm/yyyy from CSV (AU locale)
+  if (m) return new Date(+m[3],+m[2]-1,+m[1]);
+  return null;
+}
+function fmtISO(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function fmtD(d){ return d ? d.getDate()+" "+["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]+" "+String(d.getFullYear()).slice(2) : ""; }
+function fmtMoney(n){ const s=Math.abs(n).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2}); return (n<0?"-$":"$")+s; }
+function fmtAmt(n){ return Math.abs(n).toFixed(2); }
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function parseEmails(src){ return (String(src||"").match(/[\w.+-]+@[\w.-]+\.\w+/g)||[]); }
+function daysBetween(a,b){ return Math.round((b-a)/864e5); }
+function addDays(d,n){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()+n); }
+
+/* ================= TERMS & DUE DATES ================= */
+/* eom: last day of the invoice month, plus N days. new Date(y, m+1, N) is day N of the
+   next month, which is exactly last-day-of-month + N (day 0 = last day of previous month).
+   net: invoice date + N days. */
+function dueDate(invDate, terms){
+  if(!invDate) return null;
+  const t=terms||DEFAULT_TERMS, n=+t.days||0;
+  if(t.type==="net") return new Date(invDate.getFullYear(), invDate.getMonth(), invDate.getDate()+n);
+  return new Date(invDate.getFullYear(), invDate.getMonth()+1, n);
+}
+function termsFor(supplier){
+  const t=TERMS[norm(supplier)];
+  if(t && t.terms_type) return { type:t.terms_type, days:+t.terms_days||0, saved:true };
+  return Object.assign({saved:false}, DEFAULT_TERMS);
+}
+function termsLabel(t){
+  return t.type==="net" ? `${t.days} days from invoice` : (t.days ? `End of month + ${t.days} days` : "End of month");
+}
+function serviceType(supplier){
+  const t=TERMS[norm(supplier)];
+  if(t && t.service_type) return t.service_type;
+  if(SUPPLIER_TYPE_DEFAULT[norm(supplier)]) return SUPPLIER_TYPE_DEFAULT[norm(supplier)];
+  const tally={};
+  INV.forEach(r=>{ if(r.supplier===supplier){ const k=CATEGORY_TYPE[norm(r.category)]||"Other"; tally[k]=(tally[k]||0)+1; } });
+  const best=Object.entries(tally).sort((a,b)=>b[1]-a[1])[0];
+  return best?best[0]:"Other";
+}
+function isTracked(supplier){ const t=TERMS[norm(supplier)]; return !(t && String(t.tracked||"").toLowerCase()==="no"); }
+function sendsStatement(supplier){ const t=TERMS[norm(supplier)]; return !(t && String(t.sends_statement||"").toLowerCase()==="no"); }
+function paymentDetails(supplier){ const t=TERMS[norm(supplier)]; return t ? String(t.payment_details||"") : ""; }
+function remittanceEmail(supplier){
+  const t=TERMS[norm(supplier)];
+  if(t && t.remittance_email) return String(t.remittance_email).trim();
+  /* Fall back to the most common real mailbox seen on this supplier's invoice emails. */
+  const tally={};
+  INV.filter(r=>r.supplier===supplier).forEach(r=>{
+    parseEmails(r.src).forEach(e=>{
+      e=e.toLowerCase();
+      if(/redsquarecafe|beckitt/.test(e)) return;
+      const w=/sent-via|noreply|no-reply|donotreply/.test(e)?1:10;
+      tally[e]=(tally[e]||0)+w;
+    });
+  });
+  const best=Object.entries(tally).sort((a,b)=>b[1]-a[1])[0];
+  return best?best[0]:"";
+}
+
+/* Recomputes due / paid / state on every invoice from TERMS and PAY. Cheap; run after
+   any change rather than trying to patch rows in place. */
+function derive(){
+  INV.forEach(r=>{
+    r.due=dueDate(r.date, termsFor(r.supplier));
+    const p=PAY[r.key];
+    r.paid=!!(p && p.action==="pay");
+    r.pay=r.paid?p:null;
+    r.type_=serviceType(r.supplier);
+    if(r.paid) r.state="paid";
+    else if(!r.due) r.state="open";
+    else{
+      const d=daysBetween(TODAY, r.due);      // negative = overdue
+      r.state = d<=0 ? "overdue" : (d<=DUE_SOON_DAYS ? "soon" : "open");
+    }
+  });
+}
+function dueLabel(r){
+  if(r.paid) return "paid "+fmtD(r.pay.paid_date);
+  if(!r.due) return "";
+  const d=daysBetween(TODAY, r.due);
+  if(d===0) return "due today";
+  if(d<0) return (-d)+(d===-1?" day":" days")+" overdue";
+  return "due "+fmtD(r.due);
+}
+
+/* ================= FETCH ================= */
+/* gviz serves the FIRST sheet in the workbook when a tab name does not exist, with HTTP
+   200 and no error. So a request for Payments before that tab has been created comes back
+   as the entire Invoices tab. The header check below is the only reliable test. Add a tab
+   here whenever a new fetchTab call is added, or it gets no protection. */
+const TAB_COLUMNS = {
+  "Invoices":       ["invoice_number","invoice_date","total","supplier"],
+  "SupplierConfig": ["supplier","merge_into"],
+  "Payments":       ["action","supplier","invoice_number","paid_date"],
+  "SupplierTerms":  ["supplier","terms_type","terms_days"]
+};
+async function fetchTab(name, sheetId){
+  const url=`https://docs.google.com/spreadsheets/d/${sheetId||OPS_SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(name)}&_=${Date.now()}`;
+  const res=await fetch(url);
+  const txt=await res.text();
+  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("tab '"+name+"' not found or not shared");
+  const rows=parseCsv(txt);
+  if(!rows.length) return [];
+  const cols=rows[0].map(c=>String(c||"").toLowerCase().trim());
+  const need=TAB_COLUMNS[name]||[];
+  const missing=need.filter(c=>cols.indexOf(c)===-1);
+  if(missing.length){
+    console.warn("fetchTab: '"+name+"' answered with columns ["+cols.join(", ")+"] - missing ["+missing.join(", ")+"]. "
+      +"gviz serves the first sheet when a tab is absent, so this is almost certainly a missing or misnamed tab.");
+    throw new Error("tab '"+name+"' did not answer with its own columns (missing: "+missing.join(", ")+")");
+  }
+  return rows.slice(1).map(r=>{ const o={}; cols.forEach((c,i)=>{ o[c]= r[i]!==undefined ? r[i] : null; }); return o; });
+}
+async function fetchSalesDaily(){
+  if(!SALES_CUTOVER) return [];
+  const q="select B, C, sum(H) group by B, C label B 'date', C 'venue', sum(H) 'sales'";
+  const url=`https://docs.google.com/spreadsheets/d/${SALES_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=SalesFeed&tq=${encodeURIComponent(q)}`;
+  const res=await fetch(url);
+  const txt=await res.text();
+  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("sales feed not readable");
+  const rows=parseCsv(txt);
+  if(rows.length<2) return [];
+  return rows.slice(1).map(r=>({ date:feedDate_(r[0]), venue:String(r[1]||"").trim(), sales:num_(r[2]) })).filter(r=>r.date&&r.venue);
+}
+function feedDate_(v){
+  const d=gvizDate(v); if(d) return d;
+  const m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(v||"").trim());
+  return m ? new Date(+m[1],+m[2]-1,+m[3]) : null;
+}
+async function fetchWeekly(){
+  const out=[];
+  for(const src of WEEKLY_SOURCES){
+    let rows;
+    try{
+      const url=`https://docs.google.com/spreadsheets/d/${src.id}/gviz/tq?tqx=out:csv&gid=${src.gid}`;
+      const res=await fetch(url);
+      const txt=await res.text();
+      if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("weekly sheet not readable");
+      rows=parseCsv(txt);
+    }catch(e){ console.warn("weekly source skipped:", src.id, e.message); continue; }
+    rows.slice(1).forEach(r=>{
+      const wk=feedDate_(r[src.weekEnd]); if(!wk) return;
+      src.venues.forEach(v=>{
+        const sales=num_(r[v.sales]); if(!sales) return;
+        for(let i=6;i>=0;i--) out.push({date:new Date(wk.getFullYear(), wk.getMonth(), wk.getDate()-i), venue:v.name, sales:sales/7});
+      });
+    });
+  }
+  return out;
+}
+function parseCsv(text){
+  const rows=[]; let row=[], field="", inQ=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(inQ){ if(ch==='"'){ if(text[i+1]==='"'){field+='"';i++;} else inQ=false; } else field+=ch; }
+    else{
+      if(ch==='"') inQ=true;
+      else if(ch===","){ row.push(field); field=""; }
+      else if(ch==="\n"||ch==="\r"){ if(ch==="\r"&&text[i+1]==="\n") i++; row.push(field); field=""; if(row.length>1||row[0]!=="") rows.push(row); row=[]; }
+      else field+=ch;
+    }
+  }
+  if(field!==""||row.length){ row.push(field); if(row.length>1||row[0]!=="") rows.push(row); }
+  return rows;
+}
+
+/* ================= LOAD ================= */
+function invKey(supplier, number, date, total){
+  const n=norm(number);
+  return norm(supplier)+"|"+(n || ("d"+(date?fmtISO(date):"")+"t"+fmtAmt(+total||0)));
+}
+function canonName(name){
+  let n=CANON[norm(name)]||name||"";
+  let seen={};
+  while(true){ const c=TERMS_MERGE[norm(n)]; if(c&&!seen[norm(c)]){seen[norm(n)]=true;n=c;} else break; }
+  return n;
+}
+let TERMS_MERGE = {};
+
+async function loadAll(){
+  const app=document.getElementById("app");
+  app.innerHTML='<div id="status">Loading data…</div>';
+  LOAD_WARN=[];
+  try{
+    const [inv,cfgRows,payRows,termRows,feedDaily,weeklyRows]=await Promise.all([
+      fetchTab("Invoices"),
+      fetchTab("SupplierConfig").catch(e=>{LOAD_WARN.push("SupplierConfig not read: "+e.message);return [];}),
+      fetchTab("Payments").catch(e=>{LOAD_WARN.push("Payments tab not read - nothing shows as paid. "+e.message);return [];}),
+      fetchTab("SupplierTerms").catch(e=>{LOAD_WARN.push("SupplierTerms tab not read - default terms used everywhere. "+e.message);return [];}),
+      fetchSalesDaily().catch(()=>[]),
+      fetchWeekly().catch(()=>[])
+    ]);
+    ingest(inv,cfgRows,payRows,termRows,feedDaily,weeklyRows);
+    route();
+  }catch(e){
+    app.innerHTML='<div class="err">Could not load: '+esc(e.message)+'</div>';
+  }
+}
+
+/* Pure: builds all state from raw tab rows. Kept free of DOM so it can be tested. */
+function ingest(inv,cfgRows,payRows,termRows,feedDaily,weeklyRows){
+  /* Fold spelling variants to the most common spelling, then apply SupplierConfig merges.
+     Same two steps supplier-explorer.html takes, so the two tools agree on names. */
+  const raw=inv.map(r=>({
+    supplier:String(r.supplier||"").trim(), number:String(r.invoice_number||"").trim(),
+    date:gvizDate(r.invoice_date)||gvizDate(r.scanned),
+    total:num_(r.total), gst:num_(r.gst), category:String(r.category||""), type:String(r.type||"invoice").trim(),
+    status:String(r.status||""), pdf:String(r.pdf_url||"").trim(), src:String(r.source||""), venue:String(r.venue||"")
+  })).filter(r=>r.supplier&&r.date&&r.type!=="superseded");
+  const variants={};
+  raw.forEach(r=>{const k=norm(r.supplier);(variants[k]=variants[k]||{})[r.supplier]=(variants[k][r.supplier]||0)+1;});
+  CANON={};
+  Object.entries(variants).forEach(([k,v])=>{CANON[k]=Object.entries(v).sort((a,b)=>b[1]-a[1])[0][0];});
+  TERMS_MERGE={};
+  cfgRows.forEach(r=>{ const k=norm(r.supplier), m=String(r.merge_into||"").trim(); if(k&&m) TERMS_MERGE[k]=m; });
+  raw.forEach(r=>{ r.supplier=canonName(r.supplier); });
+
+  /* Credit notes arrive with an inconsistent sign (44 of 49 negative, 5 positive as at
+     7 Sep 2026). Force them negative so a balance is always invoices minus credits. */
+  raw.forEach(r=>{
+    r.credit = /credit/.test(r.type);
+    r.amt = r.credit ? -Math.abs(r.total) : r.total;
+    r.check = r.status==="CHECK";
+    r.key = invKey(r.supplier, r.number, r.date, r.total);
+  });
+  /* A duplicate key (same supplier + number twice) would pay both with one tick. Keep
+     the first, flag the rest so they are visible but never counted. */
+  const seen={};
+  raw.forEach(r=>{ r.dup=!!seen[r.key]; seen[r.key]=true; });
+  INV=raw.filter(r=>!r.dup);
+
+  /* Latest row wins, per supplier. Supplier names in the log are whatever the dashboard
+     called them at the time; canonicalise again so a later merge does not orphan them. */
+  TERMS={};
+  termRows.map(r=>Object.assign({},r,{ts:String(r.timestamp||"")})).sort((a,b)=>a.ts<b.ts?-1:a.ts>b.ts?1:0)
+    .forEach(r=>{ const s=canonName(String(r.supplier||"").trim()); if(s) TERMS[norm(s)]=Object.assign({},r,{supplier:s}); });
+  PAY={};
+  payRows.map(r=>Object.assign({},r,{ts:String(r.timestamp||"")})).sort((a,b)=>a.ts<b.ts?-1:a.ts>b.ts?1:0)
+    .forEach(r=>{
+      const s=canonName(String(r.supplier||"").trim());
+      const k=invKey(s, r.invoice_number, gvizDate(r.invoice_date), r.amount);
+      PAY[k]={ action:String(r.action||"").trim(), paid_date:gvizDate(r.paid_date), reference:String(r.reference||""),
+               method:String(r.method||""), note:String(r.note||""), user:String(r.user||""), batch:String(r.batch_id||""),
+               amount:num_(r.amount), ts:r.ts };
+    });
+
+  /* Revenue: POS feed from the cutover, weekly form sheets before it. Company-wide, so
+     venue is summed away. */
+  const cutover=SALES_CUTOVER?gvizDate(SALES_CUTOVER):null;
+  SALES=[];
+  (weeklyRows||[]).forEach(w=>{ if(!cutover||w.date<cutover) SALES.push({date:w.date, sales:w.sales}); });
+  (feedDaily||[]).forEach(f=>{ if(!cutover||f.date>=cutover) SALES.push({date:f.date, sales:f.sales}); });
+  derive();
+}
+
+/* ================= WRITES ================= */
+function identity(){ try{ return JSON.parse(localStorage.getItem("pb_identity")||"null"); }catch(e){ return null; } }
+function paintWho(){ const id=identity(); const el=document.getElementById("whoami"); if(el) el.textContent=id&&id.user?id.user:"Who is this?"; }
+function askIdentity(force){
+  return new Promise(res=>{
+    const id=identity()||{};
+    if(!force && id.user && id.pin) return res(id);
+    openModal(`<h3>Who is this?</h3>
+      <div class="field">Your name (goes on the payment log and remittance emails)<input id="idUser" value="${esc(id.user||"")}" placeholder="Michaela"></div>
+      <div class="field">PIN for saving<input id="idPin" type="password" value="${esc(id.pin||"")}" placeholder="from Adrian"></div>
+      <div class="note">Both are kept in this browser only. Marking invoices paid and saving supplier terms writes to the BG Ops Data sheet; the PIN stops anyone who finds this page from doing that.</div>
+      <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn outline" onclick="closeModal()">Cancel</button><button class="btn" id="idSave">Save</button></div>`);
+    document.getElementById("idSave").onclick=()=>{
+      const v={user:document.getElementById("idUser").value.trim(), pin:document.getElementById("idPin").value.trim()};
+      if(!v.user||!v.pin){ toast("Name and PIN are both needed"); return; }
+      localStorage.setItem("pb_identity", JSON.stringify(v)); paintWho(); closeModal(); res(v);
+    };
+  });
+}
+async function post(payload){
+  if(!WEBAPP_URL) throw new Error("This page is read-only until WEBAPP_URL is set (see Payables.gs).");
+  const id=await askIdentity(false);
+  if(!id) throw new Error("cancelled");
+  /* Body is a string, so the browser sends text/plain: a "simple" request that needs no
+     CORS preflight, which Apps Script web apps cannot answer. JSON content-type fails. */
+  const res=await fetch(WEBAPP_URL,{method:"POST",body:JSON.stringify(Object.assign({pin:id.pin,user:id.user},payload)),redirect:"follow"});
+  const txt=await res.text();
+  let j; try{ j=JSON.parse(txt); }catch(e){ throw new Error("Unexpected reply from the web app (not JSON). Is the deployment set to 'Anyone'?"); }
+  if(!j.ok) throw new Error(j.error||"save failed");
+  return j;
+}
+
+/* Marks a set of invoices paid as one batch (one reference, one paid date). */
+async function markPaid(keys, info){
+  const rows=keys.map(k=>INV.find(r=>r.key===k)).filter(Boolean);
+  if(!rows.length) return null;
+  const batch="b"+Date.now().toString(36);
+  const j=await post({action:"pay", batch_id:batch, paid_date:info.paid_date, reference:info.reference, method:info.method, note:info.note,
+    invoices:rows.map(r=>({supplier:r.supplier, invoice_number:r.number, invoice_date:fmtISO(r.date), amount:r.amt}))});
+  const id=identity();
+  rows.forEach(r=>{ PAY[r.key]={action:"pay", paid_date:gvizDate(info.paid_date), reference:info.reference, method:info.method, note:info.note, user:id.user, batch:batch, amount:r.amt, ts:new Date().toISOString()}; });
+  derive();
+  return batch;
+}
+async function markUnpaid(key){
+  const r=INV.find(x=>x.key===key); if(!r) return;
+  await post({action:"unpay", invoices:[{supplier:r.supplier, invoice_number:r.number, invoice_date:fmtISO(r.date), amount:r.amt}]});
+  PAY[r.key]={action:"unpay", ts:new Date().toISOString()};
+  derive();
+}
+async function saveTerms(t){
+  await post({action:"terms", terms:t});
+  TERMS[norm(t.supplier)]=Object.assign({}, TERMS[norm(t.supplier)]||{}, t, {ts:new Date().toISOString()});
+  derive();
+}
+
+/* ================= CLIPBOARD, TOAST, MODAL ================= */
+async function copyText(t,label){
+  try{ await navigator.clipboard.writeText(t); }
+  catch(e){ const ta=document.createElement("textarea"); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");}catch(_){} ta.remove(); }
+  toast(label||"Copied");
+}
+let toastT=null;
+function toast(msg){ const el=document.getElementById("toast"); el.textContent=msg; el.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("on"),1800); }
+function openModal(html){ const m=document.getElementById("modal"); m.innerHTML='<div class="dlg">'+html+'</div>'; m.classList.add("on"); }
+function closeModal(){ const m=document.getElementById("modal"); m.classList.remove("on"); m.innerHTML=""; }
+
+/* ================= REMITTANCE ================= */
+function remittanceText(supplier, rows, info){
+  const id=identity()||{};
+  const total=rows.reduce((a,r)=>a+r.amt,0);
+  const w=Math.max(10, ...rows.map(r=>r.number.length));
+  const lines=rows.map(r=>(r.credit?"Credit  ":"Invoice ")+r.number.padEnd(w)+"  "+fmtD(r.date).padEnd(10)+"  "+fmtMoney(r.amt).padStart(12));
+  return `Remittance advice from ${COMPANY_NAME}\n\nTo: ${supplier}\nPayment date: ${fmtD(gvizDate(info.paid_date)||TODAY)}`
+    +(info.reference?`\nReference: ${info.reference}`:"")+(info.method?`\nMethod: ${info.method}`:"")
+    +`\n\n${lines.join("\n")}\n${"".padEnd(w+8)}  Total paid  ${fmtMoney(total).padStart(12)}\n\nThanks,\n${SIGNOFF_NAME||id.user||COMPANY_NAME}`;
+}
+function remittanceMailto(supplier, rows, info){
+  const to=remittanceEmail(supplier);
+  const subject=`Remittance advice - ${COMPANY_NAME} - ${fmtD(gvizDate(info.paid_date)||TODAY)}`;
+  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(remittanceText(supplier,rows,info))}`;
+}
+
+/* ================= PAY DIALOG ================= */
+function openPayDialog(keys){
+  const rows=keys.map(k=>INV.find(r=>r.key===k)).filter(r=>r&&!r.paid);
+  if(!rows.length) return;
+  const sups=[...new Set(rows.map(r=>r.supplier))];
+  const total=rows.reduce((a,r)=>a+r.amt,0);
+  openModal(`<h3>Mark as paid</h3>
+    <table><thead><tr><th>Supplier</th><th>Invoice</th><th class="hide-sm">Date</th><th class="num">Amount</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td>${esc(r.supplier)}</td><td class="num">${esc(r.number)||"–"}</td><td class="hide-sm">${fmtD(r.date)}</td><td class="num">${fmtMoney(r.amt)}</td></tr>`).join("")}
+    <tr><td colspan="3"><b>Total</b>${sups.length>1?` <span class="pill grey">${sups.length} suppliers</span>`:""}</td><td class="num"><b>${fmtMoney(total)}</b></td></tr></tbody></table>
+    <div class="two">
+      <div class="field">Paid on<input id="pdDate" type="date" value="${fmtISO(TODAY)}"></div>
+      <div class="field">Method<select id="pdMethod">${PAY_METHODS.map(m=>`<option>${m}</option>`).join("")}</select></div>
+    </div>
+    <div class="field">Reference (as it appears on the transfer)<input id="pdRef" placeholder="e.g. statement Aug 26"></div>
+    <div class="field">Note (optional)<input id="pdNote"></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn outline" onclick="closeModal()">Cancel</button><button class="btn" id="pdGo">Mark as paid</button></div>`);
+  document.getElementById("pdGo").onclick=async()=>{
+    const btn=document.getElementById("pdGo"); btn.disabled=true; btn.textContent="Saving…";
+    const info={paid_date:document.getElementById("pdDate").value, method:document.getElementById("pdMethod").value,
+                reference:document.getElementById("pdRef").value.trim(), note:document.getElementById("pdNote").value.trim()};
+    try{
+      await markPaid(rows.map(r=>r.key), info);
+      rows.forEach(r=>{ delete SEL[r.key]; });
+      afterPaid(rows, info);
+      route();
+    }catch(e){ btn.disabled=false; btn.textContent="Mark as paid"; toast(e.message); }
+  };
+}
+function afterPaid(rows, info){
+  const sups=[...new Set(rows.map(r=>r.supplier))];
+  const total=rows.reduce((a,r)=>a+r.amt,0);
+  openModal(`<h3>Paid ${fmtMoney(total)}</h3>
+    <p class="sub" style="margin-bottom:12px">${rows.length} ${rows.length===1?"invoice":"invoices"} marked paid${info.reference?" · ref "+esc(info.reference):""}.</p>
+    ${sups.map(s=>{
+      const sr=rows.filter(r=>r.supplier===s); const em=remittanceEmail(s);
+      return `<div class="row" style="margin-bottom:8px"><span class="grow"><b>${esc(s)}</b>${em?`<div class="terms">${esc(em)}</div>`:'<div class="terms">no email known - set one under the supplier\'s terms</div>'}</span>
+        <a class="btn outline small" href="${remittanceMailto(s,sr,info)}">Draft remittance email</a>
+        <button class="btn outline small" onclick='copyText(remittanceText(${JSON.stringify(s)},INV.filter(r=>${JSON.stringify(sr.map(r=>r.key))}.includes(r.key)),${JSON.stringify(info)}),"Remittance copied")'>Copy</button></div>`;
+    }).join("")}
+    <div class="row" style="justify-content:flex-end;margin-top:6px"><button class="btn" onclick="closeModal()">Done</button></div>`);
+}
+async function togglePaid(key, cb){
+  const r=INV.find(x=>x.key===key); if(!r) return;
+  if(!r.paid){ cb.checked=false; openPayDialog([key]); return; }
+  if(!confirm(`Mark ${r.supplier} ${r.number||fmtMoney(r.amt)} as NOT paid?`)){ cb.checked=true; return; }
+  try{ await markUnpaid(key); toast("Marked unpaid"); route(); }catch(e){ cb.checked=true; toast(e.message); }
+}
+
+/* ================= SELECTION BAR ================= */
+function toggleSel(key, on){ if(on) SEL[key]=true; else delete SEL[key]; paintSelbar(); document.querySelectorAll(`tr[data-key="${key}"]`).forEach(tr=>tr.classList.toggle("sel",!!on)); }
+function clearSel(){ SEL={}; route(); }
+function selRows(){ return Object.keys(SEL).map(k=>INV.find(r=>r.key===k)).filter(Boolean); }
+function paintSelbar(){
+  const bar=document.getElementById("selbar");
+  const rows=selRows();
+  if(!rows.length){ bar.className=""; bar.innerHTML=""; return; }
+  const total=rows.reduce((a,r)=>a+r.amt,0);
+  const sups=[...new Set(rows.map(r=>r.supplier))];
+  const one=sups.length===1;
+  const pd=one?paymentDetails(sups[0]):"";
+  bar.className="on";
+  bar.innerHTML=`<span class="t">${fmtMoney(total)}</span><span class="s">${rows.length} selected · ${one?esc(sups[0]):sups.length+" suppliers"}</span>
+    <span class="grow"></span>
+    <button class="btn" onclick='copyText(${JSON.stringify(fmtAmt(total))},"Amount copied")'>Copy amount</button>
+    <button class="btn" ${pd?"":"disabled"} title="${pd?"":(one?"No payment details saved for this supplier yet":"Select one supplier to copy their payment details")}" onclick='copyText(${JSON.stringify(pd)},"Payment details copied")'>Copy payment details</button>
+    <button class="btn pay" onclick='openPayDialog(Object.keys(SEL))'>Mark as paid</button>
+    <button class="btn ghost" onclick="clearSel()">Clear</button>`;
+}
+
+/* ================= TABLE ================= */
+function sortBy(rows, key, dir){
+  const v=r=>{
+    switch(key){
+      case "due": return r.paid ? 9e15 : (r.due?r.due.getTime():8e15);
+      case "date": return r.date.getTime();
+      case "amount": return r.amt;
+      case "supplier": return r.supplier.toLowerCase();
+      case "type": return r.type_.toLowerCase();
+      case "number": return r.number.toLowerCase();
+      case "paid": return r.paid?1:0;
+      default: return 0;
+    }
+  };
+  return rows.slice().sort((a,b)=>{ const x=v(a),y=v(b); if(x<y) return -dir; if(x>y) return dir; return b.date-a.date; });
+}
+function th(label, key, cls){
+  const on=SORT.key===key;
+  return `<th class="sort ${cls||""}" onclick="setSort('${key}')">${label}${on?(SORT.dir>0?" ▲":" ▼"):""}</th>`;
+}
+function setSort(key){ if(SORT.key===key) SORT.dir=-SORT.dir; else { SORT.key=key; SORT.dir=key==="amount"||key==="date"?-1:1; } route(); }
+function invoiceTable(rows, opts){
+  opts=opts||{};
+  if(!rows.length) return `<div id="status">${esc(opts.empty||"Nothing here.")}</div>`;
+  const sorted=sortBy(rows, SORT.key, SORT.dir);
+  const allSel=sorted.filter(r=>!r.paid).every(r=>SEL[r.key]) && sorted.some(r=>!r.paid);
+  return `<table><thead><tr>
+    <th><input type="checkbox" ${allSel?"checked":""} title="Select all unpaid" onclick="selectAll(${JSON.stringify(sorted.filter(r=>!r.paid).map(r=>r.key)).replace(/"/g,"&quot;")}, this.checked)"></th>
+    ${th("Due","due")}${opts.noSupplier?"":th("Supplier","supplier")}${th("Type","type","hide-sm")}${th("Invoice","number")}${th("Date","date","hide-sm")}${th("Amount","amount","num")}<th>PDF</th>${th("Paid","paid")}
+  </tr></thead><tbody>
+  ${sorted.map(r=>`<tr data-key="${esc(r.key)}" class="${r.paid?"paid":""} ${SEL[r.key]?"sel":""}">
+    <td>${r.paid?"":`<input type="checkbox" ${SEL[r.key]?"checked":""} onclick="toggleSel(${JSON.stringify(r.key).replace(/"/g,"&quot;")}, this.checked)">`}</td>
+    <td><span class="due ${r.state==="overdue"?"over":r.state==="soon"?"soon":r.paid?"done":""}">${esc(dueLabel(r))}</span></td>
+    ${opts.noSupplier?"":`<td><a class="sup" onclick="go('s/'+encodeURIComponent(${JSON.stringify(r.supplier).replace(/"/g,"&quot;")}))">${esc(r.supplier)}</a></td>`}
+    <td class="hide-sm">${esc(r.type_)}</td>
+    <td class="num">${esc(r.number)||"–"}${r.credit?' <span class="pill credit">credit</span>':""}${r.check?' <span class="pill check" title="The processor was unsure of this invoice - check the PDF">check</span>':""}</td>
+    <td class="hide-sm">${fmtD(r.date)}</td>
+    <td class="num">${fmtMoney(r.amt)}</td>
+    <td>${r.pdf?`<a class="pdf" href="${esc(r.pdf)}" target="_blank" rel="noopener">pdf</a>`:""}</td>
+    <td><input type="checkbox" ${r.paid?"checked":""} title="${r.paid?esc((r.pay.reference?"ref "+r.pay.reference+" · ":"")+(r.pay.method||"")+(r.pay.user?" · by "+r.pay.user:"")):"Mark paid"}" onclick="togglePaid(${JSON.stringify(r.key).replace(/"/g,"&quot;")}, this)"></td>
+  </tr>`).join("")}
+  </tbody></table>`;
+}
+function selectAll(keys, on){ keys.forEach(k=>{ if(on) SEL[k]=true; else delete SEL[k]; }); route(); }
+
+/* ================= ROUTING ================= */
+function go(hash){ const cur=location.hash.replace(/^#/,""); if(cur===hash) route(); else location.hash=hash; if(hash===""&&cur==="") route(); }
+function crumb(t){ document.getElementById("crumb").textContent=t||""; }
+function route(){
+  paintWho();
+  const h=decodeURIComponent(location.hash.replace(/^#/,""));
+  document.getElementById("filters").innerHTML="";
+  if(h==="r") renderReports();
+  else if(h==="sup") renderSuppliers();
+  else if(h.startsWith("s/")) renderSupplier(h.slice(2));
+  else renderHome();
+  paintSelbar();
+  window.scrollTo(0,0);
+}
+window.addEventListener("hashchange", route);
+
+function warnings(){ return LOAD_WARN.length?`<div class="err" style="color:var(--amber);border-color:var(--amber)">${LOAD_WARN.map(esc).join("<br>")}</div>`:""; }
+function visibleInv(){ return INV.filter(r=>VIEW.hidden||isTracked(r.supplier)); }
+
+/* ================= HOME ================= */
+function renderHome(){
+  crumb("");
+  const all=visibleInv();
+  const unpaid=all.filter(r=>!r.paid);
+  const sum=rs=>rs.reduce((a,r)=>a+r.amt,0);
+  const over=unpaid.filter(r=>r.state==="overdue"), soon=unpaid.filter(r=>r.state==="soon");
+  const m0=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);
+  const paidMonth=all.filter(r=>r.paid&&r.pay.paid_date&&r.pay.paid_date>=m0);
+
+  const chips=[["unpaid","Unpaid"],["overdue","Overdue"],["soon","Due soon"],["paid","Paid"],["all","All"]];
+  const types=[...new Set(all.map(r=>r.type_))].sort();
+  document.getElementById("filters").innerHTML=
+    chips.map(([k,l])=>`<span class="chip ${VIEW.status===k?"on":""} ${k==="overdue"?"red":""}" onclick="VIEW.status='${k}';route()">${l}</span>`).join("")
+    +`<input type="search" placeholder="Search supplier or invoice no." value="${esc(VIEW.q)}" oninput="VIEW.q=this.value;paintHomeTable()">`
+    +`<select onchange="VIEW.types=this.value?[this.value]:[];route()" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px"><option value="">All types</option>${types.map(t=>`<option ${VIEW.types[0]===t?"selected":""}>${esc(t)}</option>`).join("")}</select>`;
+
+  document.getElementById("app").innerHTML=warnings()+`
+    <div class="statgrid">
+      <div class="stat ${VIEW.status==="overdue"?"on":""}" onclick="VIEW.status='overdue';route()"><div class="v ${over.length?"red":""}">${fmtMoney(sum(over))}</div><div class="k">Overdue · ${over.length}</div></div>
+      <div class="stat ${VIEW.status==="soon"?"on":""}" onclick="VIEW.status='soon';route()"><div class="v ${soon.length?"amber":""}">${fmtMoney(sum(soon))}</div><div class="k">Due within ${DUE_SOON_DAYS} days · ${soon.length}</div></div>
+      <div class="stat ${VIEW.status==="unpaid"?"on":""}" onclick="VIEW.status='unpaid';route()"><div class="v">${fmtMoney(sum(unpaid))}</div><div class="k">Outstanding · ${unpaid.length}</div></div>
+      <div class="stat ${VIEW.status==="paid"?"on":""}" onclick="VIEW.status='paid';route()"><div class="v">${fmtMoney(sum(paidMonth))}</div><div class="k">Paid this month · ${paidMonth.length}</div></div>
+    </div>
+    <div class="card" id="homeTable"></div>
+    <div class="note">Tick invoices to add them up, copy the amount or the supplier's payment details, then mark them paid together. Due dates come from each supplier's terms (Suppliers → edit); anything without saved terms uses ${termsLabel(DEFAULT_TERMS).toLowerCase()}.
+      ${WEBAPP_URL?"":"<br><b>Read-only:</b> WEBAPP_URL is not set, so paid ticks and terms cannot be saved yet."}</div>`;
+  paintHomeTable();
+}
+function paintHomeTable(){
+  const el=document.getElementById("homeTable"); if(!el) return;
+  let rows=visibleInv();
+  if(VIEW.status==="unpaid") rows=rows.filter(r=>!r.paid);
+  else if(VIEW.status==="overdue") rows=rows.filter(r=>r.state==="overdue");
+  else if(VIEW.status==="soon") rows=rows.filter(r=>r.state==="soon");
+  else if(VIEW.status==="paid") rows=rows.filter(r=>r.paid);
+  if(VIEW.types.length) rows=rows.filter(r=>VIEW.types.includes(r.type_));
+  const q=VIEW.q.trim().toLowerCase();
+  if(q) rows=rows.filter(r=>r.supplier.toLowerCase().includes(q)||r.number.toLowerCase().includes(q));
+  const total=rows.reduce((a,r)=>a+r.amt,0);
+  el.innerHTML=`<div class="label">${rows.length} ${rows.length===1?"invoice":"invoices"} · ${fmtMoney(total)}</div>`
+    +invoiceTable(rows,{empty:VIEW.status==="unpaid"?"Nothing outstanding.":"No invoices match."});
+}
+
+/* ================= SUPPLIERS LIST ================= */
+function supplierSummary(){
+  const by={};
+  INV.forEach(r=>{
+    const s=by[r.supplier]||(by[r.supplier]={supplier:r.supplier,balance:0,overdue:0,n:0,unpaid:0,last:null,type:r.type_,tracked:isTracked(r.supplier),terms:termsFor(r.supplier)});
+    s.n++; if(!s.last||r.date>s.last) s.last=r.date;
+    if(!r.paid){ s.balance+=r.amt; s.unpaid++; if(r.state==="overdue") s.overdue+=r.amt; }
+  });
+  /* Suppliers with saved terms but no invoices yet still get a row, so terms can be set
+     up ahead of the first invoice arriving. */
+  Object.values(TERMS).forEach(t=>{ if(t.supplier&&!by[t.supplier]) by[t.supplier]={supplier:t.supplier,balance:0,overdue:0,n:0,unpaid:0,last:null,type:serviceType(t.supplier),tracked:isTracked(t.supplier),terms:termsFor(t.supplier)}; });
+  return Object.values(by);
+}
+function renderSuppliers(){
+  crumb("suppliers");
+  let rows=supplierSummary().filter(s=>VIEW.hidden||s.tracked);
+  const v=s=>({supplier:s.supplier.toLowerCase(),type:s.type.toLowerCase(),balance:s.balance,overdue:s.overdue,last:s.last?s.last.getTime():0,n:s.n})[SUP_SORT.key];
+  rows.sort((a,b)=>{const x=v(a),y=v(b); return x<y?-SUP_SORT.dir:x>y?SUP_SORT.dir:0;});
+  const h=(l,k,c)=>`<th class="sort ${c||""}" onclick="SUP_SORT.key==='${k}'?SUP_SORT.dir=-SUP_SORT.dir:(SUP_SORT.key='${k}',SUP_SORT.dir=${k==="supplier"||k==="type"?1:-1});route()">${l}${SUP_SORT.key===k?(SUP_SORT.dir>0?" ▲":" ▼"):""}</th>`;
+  document.getElementById("filters").innerHTML=`<span class="chip ${VIEW.hidden?"on":""}" onclick="VIEW.hidden=!VIEW.hidden;route()">Show untracked</span><span class="grow"></span><button class="btn small" onclick="editTerms('')">+ Add supplier</button>`;
+  document.getElementById("app").innerHTML=warnings()+`<div class="card">
+    <div class="label">${rows.length} suppliers · ${fmtMoney(rows.reduce((a,s)=>a+s.balance,0))} outstanding</div>
+    <table><thead><tr>${h("Supplier","supplier")}${h("Type","type","hide-sm")}${h("Terms","terms","hide-sm")}${h("Outstanding","balance","num")}${h("Overdue","overdue","num")}${h("Last invoice","last","hide-sm")}<th></th></tr></thead><tbody>
+    ${rows.map(s=>`<tr class="click" onclick="go('s/'+encodeURIComponent(${JSON.stringify(s.supplier).replace(/"/g,"&quot;")}))">
+      <td><b>${esc(s.supplier)}</b>${s.tracked?"":' <span class="pill grey">untracked</span>'}${sendsStatement(s.supplier)?"":' <span class="pill grey" title="No statement - track the balance here">no statement</span>'}</td>
+      <td class="hide-sm">${esc(s.type)}</td>
+      <td class="hide-sm terms">${esc(termsLabel(s.terms))}${s.terms.saved?"":" (default)"}</td>
+      <td class="num">${s.balance?fmtMoney(s.balance):"–"}</td>
+      <td class="num ${s.overdue>0?"up":""}" style="${s.overdue>0?"color:var(--red);font-weight:600":""}">${s.overdue?fmtMoney(s.overdue):"–"}</td>
+      <td class="hide-sm">${fmtD(s.last)}</td>
+      <td class="num"><button class="btn outline small" onclick="event.stopPropagation();editTerms(${JSON.stringify(s.supplier).replace(/"/g,"&quot;")})">edit</button></td>
+    </tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+/* ================= SUPPLIER VIEW ================= */
+function renderSupplier(name){
+  const rows=INV.filter(r=>r.supplier===name);
+  const t=TERMS[norm(name)];
+  if(!rows.length&&!t){ document.getElementById("app").innerHTML=`<a class="back" onclick="go('sup')">Suppliers</a><div class="err">No supplier called "${esc(name)}"</div>`; return; }
+  crumb(name);
+  const unpaid=rows.filter(r=>!r.paid);
+  const balance=unpaid.reduce((a,r)=>a+r.amt,0);
+  const overdue=unpaid.filter(r=>r.state==="overdue").reduce((a,r)=>a+r.amt,0);
+  const terms=termsFor(name), pd=paymentDetails(name), em=remittanceEmail(name);
+  const payments={};
+  rows.filter(r=>r.paid).forEach(r=>{ const k=r.pay.batch||r.pay.ts; (payments[k]=payments[k]||{date:r.pay.paid_date,ref:r.pay.reference,method:r.pay.method,user:r.pay.user,total:0,n:0,rows:[]}); payments[k].total+=r.amt; payments[k].n++; payments[k].rows.push(r); });
+  const payList=Object.values(payments).sort((a,b)=>(b.date||0)-(a.date||0));
+
+  document.getElementById("app").innerHTML=`<a class="back" onclick="go('sup')">Suppliers</a>
+    <div class="row" style="align-items:flex-start;margin-bottom:12px">
+      <div class="grow"><h2>${esc(name)}</h2>
+        <div class="sub">${esc(serviceType(name))} · ${esc(termsLabel(terms))}${terms.saved?"":" (default)"} · ${sendsStatement(name)?"sends statements":"no statement - balance tracked here"}${isTracked(name)?"":" · untracked"}</div>
+        ${em?`<div class="terms">remittance to ${esc(em)}${t&&t.remittance_email?"":" (from invoice emails)"}</div>`:""}
+        ${t&&t.notes?`<div class="note">${esc(t.notes)}</div>`:""}
+      </div>
+      <button class="btn outline small" onclick="editTerms(${JSON.stringify(name).replace(/"/g,"&quot;")})">Edit terms</button>
+    </div>
+    <div class="statgrid">
+      <div class="stat" style="cursor:default"><div class="v ${overdue>0?"red":""}">${fmtMoney(overdue)}</div><div class="k">Overdue</div></div>
+      <div class="stat" style="cursor:default"><div class="v">${fmtMoney(balance)}</div><div class="k">Balance outstanding · ${unpaid.length}</div></div>
+      <div class="stat" style="cursor:default"><div class="v">${fmtMoney(rows.filter(r=>r.date>=addDays(TODAY,-30)).reduce((a,r)=>a+r.amt,0))}</div><div class="k">Invoiced last 30 days</div></div>
+    </div>
+    <div class="card"><div class="row"><span class="label" style="margin:0">Payment details</span><span class="grow"></span>
+      ${pd?`<button class="btn outline small" onclick='copyText(${JSON.stringify(pd)},"Payment details copied")'>Copy</button>`:""}
+      ${balance?`<button class="btn outline small" onclick='copyText(${JSON.stringify(fmtAmt(balance))},"Balance copied")'>Copy balance</button>`:""}</div>
+      ${pd?`<pre class="pay">${esc(pd)}</pre>`:`<div class="note">None saved. Edit terms to add the BSB, account and customer reference so they can be copied from here.</div>`}
+    </div>
+    <div class="card"><div class="label">Invoiced by month</div>${monthChart(rows)}</div>
+    <div class="card"><div class="label">All invoices · ${rows.length}</div>${invoiceTable(rows,{noSupplier:true,empty:"No invoices yet."})}</div>
+    ${payList.length?`<div class="card"><div class="label">Payments · ${payList.length}</div><table><thead><tr><th>Paid</th><th>Reference</th><th class="hide-sm">Method</th><th class="hide-sm">By</th><th class="num">Invoices</th><th class="num">Amount</th><th></th></tr></thead><tbody>
+      ${payList.map(p=>`<tr><td>${fmtD(p.date)}</td><td>${esc(p.ref)||"–"}</td><td class="hide-sm">${esc(p.method)}</td><td class="hide-sm">${esc(p.user)}</td><td class="num">${p.n}</td><td class="num">${fmtMoney(p.total)}</td>
+        <td class="num"><a class="btn outline small" href="${remittanceMailto(name,p.rows,{paid_date:p.date?fmtISO(p.date):"",reference:p.ref,method:p.method})}">Remittance</a></td></tr>`).join("")}
+      </tbody></table></div>`:""}`;
+}
+/* Last 12 months, invoices net of credits. Unpaid share of each month in red so an
+   old month still carrying red is the thing that catches the eye. */
+function monthChart(rows){
+  const months=[]; for(let i=11;i>=0;i--){ const d=new Date(TODAY.getFullYear(),TODAY.getMonth()-i,1); months.push({key:d.getFullYear()+"-"+d.getMonth(),label:["J","F","M","A","M","J","J","A","S","O","N","D"][d.getMonth()],total:0,unpaid:0}); }
+  const idx={}; months.forEach(m=>idx[m.key]=m);
+  rows.forEach(r=>{ const m=idx[r.date.getFullYear()+"-"+r.date.getMonth()]; if(!m) return; m.total+=r.amt; if(!r.paid) m.unpaid+=r.amt; });
+  const max=Math.max(1,...months.map(m=>m.total));
+  const W=600,H=120,pad=22,bw=(W-pad)/12;
+  return `<svg viewBox="0 0 ${W} ${H+18}" width="100%" preserveAspectRatio="none" style="max-height:150px">
+    ${months.map((m,i)=>{ const h=Math.max(0,m.total/max*H), hu=Math.max(0,Math.min(h,m.unpaid/max*H)); const x=pad+i*bw+3;
+      return `<rect x="${x}" y="${H-h}" width="${bw-6}" height="${h}" fill="#111"/><rect x="${x}" y="${H-hu}" width="${bw-6}" height="${hu}" fill="#c8102e"/>
+              <text x="${x+(bw-6)/2}" y="${H+13}" text-anchor="middle">${m.label}</text>${m.total>0?`<text x="${x+(bw-6)/2}" y="${H-h-3}" text-anchor="middle" font-size="9">${Math.round(m.total/1000)>=1?Math.round(m.total/1000)+"k":Math.round(m.total)}</text>`:""}`; }).join("")}
+  </svg>`;
+}
+
+/* ================= TERMS EDITOR ================= */
+function editTerms(name){
+  const t=TERMS[norm(name)]||{};
+  const cur=termsFor(name);
+  const known=[...new Set(INV.map(r=>r.supplier))].sort();
+  openModal(`<h3>${name?"Terms for "+esc(name):"Add a supplier"}</h3>
+    ${name?"":`<div class="field">Supplier name (exactly as it appears on invoices)<input id="tSup" list="supList" placeholder="Reward Hospitality"><datalist id="supList">${known.map(s=>`<option value="${esc(s)}">`).join("")}</datalist></div>`}
+    <div class="two">
+      <div class="field">Service type<select id="tType">${SERVICE_TYPES.map(s=>`<option ${(t.service_type||serviceType(name))===s?"selected":""}>${s}</option>`).join("")}</select></div>
+      <div class="field">Track in this tool<select id="tTracked"><option value="yes" ${isTracked(name)?"selected":""}>Yes</option><option value="no" ${isTracked(name)?"":"selected"}>No - hide</option></select></div>
+      <div class="field">Payment terms<select id="tTerms"><option value="eom" ${cur.type!=="net"?"selected":""}>End of month + days</option><option value="net" ${cur.type==="net"?"selected":""}>Days from invoice date</option></select></div>
+      <div class="field">Days<input id="tDays" type="number" min="0" max="120" value="${cur.days}"></div>
+      <div class="field">Sends statements<select id="tStmt"><option value="yes" ${sendsStatement(name)?"selected":""}>Yes</option><option value="no" ${sendsStatement(name)?"":"selected"}>No - track balance here</option></select></div>
+      <div class="field">Remittance email<input id="tEmail" type="email" value="${esc(t.remittance_email||"")}" placeholder="${esc(name?remittanceEmail(name):"")}"></div>
+    </div>
+    <div class="field">Payment details (BSB, account, customer reference - copied as typed)<textarea id="tPay">${esc(t.payment_details||"")}</textarea></div>
+    <div class="field">Notes (e.g. the terms we actually agreed vs what the statement says)<input id="tNotes" value="${esc(t.notes||"")}"></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn outline" onclick="closeModal()">Cancel</button><button class="btn" id="tGo">Save terms</button></div>`);
+  document.getElementById("tGo").onclick=async()=>{
+    const sup=name||document.getElementById("tSup").value.trim();
+    if(!sup){ toast("Supplier name is needed"); return; }
+    const btn=document.getElementById("tGo"); btn.disabled=true; btn.textContent="Saving…";
+    const v={ supplier:sup, tracked:document.getElementById("tTracked").value, service_type:document.getElementById("tType").value,
+      terms_type:document.getElementById("tTerms").value, terms_days:String(Math.max(0,+document.getElementById("tDays").value||0)),
+      sends_statement:document.getElementById("tStmt").value, payment_details:document.getElementById("tPay").value.trim(),
+      remittance_email:document.getElementById("tEmail").value.trim(), notes:document.getElementById("tNotes").value.trim() };
+    try{ await saveTerms(v); closeModal(); toast("Terms saved"); if(!name) go("s/"+encodeURIComponent(sup)); else route(); }
+    catch(e){ btn.disabled=false; btn.textContent="Save terms"; toast(e.message); }
+  };
+}
+
+/* ================= REPORTS ================= */
+function rptRange(){
+  if(RPT.kind==="free"){ const f=gvizDate(RPT.from), t=gvizDate(RPT.to); return {from:f||new Date(2000,0,1), to:t||TODAY, label:(f?fmtD(f):"…")+" – "+(t?fmtD(t):"…")}; }
+  if(RPT.kind==="week"){ const dow=(TODAY.getDay()+6)%7; const mon=addDays(TODAY,-dow+7*RPT.offset); return {from:mon,to:addDays(mon,6),label:"Week of "+fmtD(mon)}; }
+  if(RPT.kind==="quarter"){ const q=Math.floor(TODAY.getMonth()/3)+RPT.offset; const f=new Date(TODAY.getFullYear(),q*3,1); const t=new Date(TODAY.getFullYear(),q*3+3,0); return {from:f,to:t,label:"Q"+(((q%4)+4)%4+1)+" "+f.getFullYear()}; }
+  const f=new Date(TODAY.getFullYear(),TODAY.getMonth()+RPT.offset,1); const t=new Date(TODAY.getFullYear(),TODAY.getMonth()+RPT.offset+1,0);
+  return {from:f,to:t,label:["January","February","March","April","May","June","July","August","September","October","November","December"][f.getMonth()]+" "+f.getFullYear()};
+}
+function renderReports(){
+  crumb("reports");
+  const R=rptRange();
+  const inRange=d=>d>=R.from&&d<=R.to;
+  const rows=visibleInv().filter(r=>inRange(r.date));
+  const sales=SALES.filter(s=>inRange(s.date)).reduce((a,s)=>a+s.sales,0);
+  const spend=rows.reduce((a,r)=>a+r.amt,0);
+  const byType={}, bySup={};
+  rows.forEach(r=>{ byType[r.type_]=(byType[r.type_]||0)+r.amt; const k=r.type_+"|"+r.supplier; bySup[k]=(bySup[k]||0)+r.amt; });
+  const types=Object.entries(byType).sort((a,b)=>b[1]-a[1]);
+  const max=Math.max(1,...types.map(t=>Math.abs(t[1])));
+  const pct=v=>sales>0?(v/sales*100).toFixed(1)+"%":"–";
+  const kinds=[["week","Week"],["month","Month"],["quarter","Quarter"],["free","Range"]];
+  document.getElementById("filters").innerHTML=
+    kinds.map(([k,l])=>`<span class="chip ${RPT.kind===k?"on":""}" onclick="RPT.kind='${k}';RPT.offset=0;route()">${l}</span>`).join("")
+    +(RPT.kind==="free"?`<input type="date" value="${esc(RPT.from)}" onchange="RPT.from=this.value;route()"><span class="sub">to</span><input type="date" value="${esc(RPT.to)}" onchange="RPT.to=this.value;route()">`
+      :`<span class="chip" onclick="RPT.offset--;route()">‹</span><span class="sub" style="font-weight:600;color:var(--ink)">${esc(R.label)}</span><span class="chip" onclick="RPT.offset++;route()">›</span>`);
+  document.getElementById("app").innerHTML=warnings()+`
+    <div class="statgrid">
+      <div class="stat" style="cursor:default"><div class="v">${fmtMoney(spend)}</div><div class="k">Invoiced · ${rows.length}</div></div>
+      <div class="stat" style="cursor:default"><div class="v">${sales?fmtMoney(sales):"–"}</div><div class="k">Sales revenue</div></div>
+      <div class="stat" style="cursor:default"><div class="v">${pct(spend)}</div><div class="k">Invoiced ÷ sales</div></div>
+    </div>
+    <div class="card"><div class="label">By type · % of sales</div>
+      ${types.length?types.map(([t,v])=>`<div class="bar click" style="cursor:pointer" onclick="const e=document.getElementById('t_${norm(t)}');e.style.display=e.style.display==='none'?'block':'none'">
+          <span class="n"><b>${esc(t)}</b></span><span class="trk"><span class="fill" style="width:${Math.max(0,v)/max*100}%"></span></span><span class="v">${fmtMoney(v)} · ${pct(v)}</span></div>
+        <div id="t_${norm(t)}" style="display:none;margin:0 0 8px 12px;border-left:2px solid var(--line);padding-left:8px">
+          ${Object.entries(bySup).filter(([k])=>k.startsWith(t+"|")).sort((a,b)=>b[1]-a[1]).map(([k,sv])=>`<div class="bar"><span class="n"><a class="sup" onclick="go('s/'+encodeURIComponent(${JSON.stringify(k.split("|")[1]).replace(/"/g,"&quot;")}))">${esc(k.split("|")[1])}</a></span><span class="trk"><span class="fill" style="width:${Math.max(0,sv)/max*100}%;opacity:.55"></span></span><span class="v">${fmtMoney(sv)} · ${pct(sv)}</span></div>`).join("")}
+        </div>`).join(""):'<div id="status">No invoices in this range.</div>'}
+      <div class="note">Dated by invoice date, credits netted off. Sales are company-wide from the POS feed${SALES_CUTOVER?" from "+fmtD(gvizDate(SALES_CUTOVER)):""} and the weekly sales forms before that${sales?"":" - none found for this range"}. Click a type to see its suppliers.</div>
+    </div>`;
+}
+
+/* ================= BOOT ================= */
+loadAll();
+</script>
+</body>
+</html>
