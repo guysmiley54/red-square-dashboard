@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-090318"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-080945"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -483,19 +483,36 @@ async function loadAll(){
        there. If the feed failed or is empty the tab stands alone, so a broken feed
        degrades to the old numbers rather than showing zero sales. */
     const feedLive = Array.isArray(feedDaily) && feedDaily.length>0;
-    const weeklyLive = Array.isArray(weeklyRows) && weeklyRows.length>0;
     const cutover = (feedLive && SALES_CUTOVER) ? gvizDate(SALES_CUTOVER) : null;
-    /* The Sales tab holds the SAME weekly wage figures as the form sheets, dated on
-       week ending. Counting both double-counted wages. When the form sheets load they
-       win outright — they're the source the forms write to — and the tab contributes
-       wages only as a fallback if those sheets are unreachable. */
+    /* The Sales tab and the weekly form sheets are the SAME figures reaching the page by
+       two paths — the tab is fed from the forms, dated on week ending. Verified live on
+       8 Sep 2026: 176 week-rows per venue, zero dollar differences on any of them.
+
+       Wages were already de-duplicated, but with a blanket "if the forms loaded at all,
+       drop every tab wage". Sales had no de-duplication whatsoever, so every pre-cutover
+       week was counted twice — the week of 27/07/2026 read $263,874.38 against a true
+       $131,937.19. From the cutover the tab's sales are zeroed anyway and the feed stands
+       alone, which is why August looked right and everything before it did not.
+
+       Both are now suppressed on a venue+day basis: the tab contributes only where the
+       form sheets do NOT cover that venue on that date. A blanket "forms win" would give
+       the same answer on today's data — the only three venue-weeks the forms do not cover
+       (Luma, weeks ending 31/08, 07/09 and 14/09 2025) are zero in the tab as well, so
+       nothing is currently at stake. It is written per-day anyway because that stops being
+       true the moment one form row is submitted with a venue left blank, and the failure
+       would be a silent under-count rather than an error. Degradation is unchanged: if the
+       form sheets are unreachable the coverage set is empty and the tab stands alone. */
+    const weeklyCover = {};
+    weeklyRows.forEach(w=>{ if(w.date) weeklyCover[(w.venue||"")+"|"+fmtISO(w.date)]=1; });
     SALES=salesRows.map(r=>{
       const d=gvizDate(r.date);
-      const useTabSales = !cutover || !d || d<cutover;
+      const venue=r.venue||"";
+      const covered = !!(d && weeklyCover[venue+"|"+fmtISO(d)]);
+      const postCutover = !!(cutover && d && d>=cutover);
       return {
-        date:d, venue:r.venue||"",
-        sales: useTabSales ? (+String(r.sales||"").replace(/[^0-9.\-]/g,"")||0) : 0,
-        wages: weeklyLive ? 0 : (+String(r.wages||"").replace(/[^0-9.\-]/g,"")||0)
+        date:d, venue,
+        sales: (covered||postCutover) ? 0 : (+String(r.sales||"").replace(/[^0-9.\-]/g,"")||0),
+        wages: covered ? 0 : (+String(r.wages||"").replace(/[^0-9.\-]/g,"")||0)
       };
     }).filter(r=>r.date);
     /* Weekly form data: wages always, sales only before the cutover so the feed
