@@ -122,7 +122,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-072045"; console.log("Invoices " + BUILD_ID);
+const BUILD_ID = "build-073110"; console.log("Invoices " + BUILD_ID);
 { const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
 
 const OPS_SHEET_ID   = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -175,7 +175,10 @@ const PAY_METHODS = ["Bank transfer","BPAY","Direct debit","Card","Cash","Other"
    statement - individual invoices are folded into one line per calendar month, because the
                statement is what actually gets paid. The invoices are still there: they show
                inside the statement, in the supplier view and in Reports. */
-const PAY_MODES = [["invoice","Invoice by invoice"],["statement","Monthly statement"]];
+const PAY_MODES = [["statement","Monthly statement"],["invoice","Invoice by invoice"]];
+/* Most suppliers here are paid off the monthly statement, so that is the default and the
+   invoice-by-invoice suppliers are the exception to flag. Change this if that ever flips. */
+const DEFAULT_PAY_MODE = "statement";
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 /* ================= STATE ================= */
@@ -246,7 +249,7 @@ function payMode(supplier){
   const v=t?String(t.pay_mode||"").toLowerCase():"";
   if(v==="statement"||v==="invoice") return v;
   if(t && String(t.sends_statement||"").toLowerCase()==="no") return "invoice";
-  return "invoice";
+  return DEFAULT_PAY_MODE;
 }
 function payModeLabel(m){ return m==="statement" ? "Monthly statement" : "Invoice by invoice"; }
 function paymentDetails(supplier){ const t=TERMS[norm(supplier)]; return t ? String(t.payment_details||"") : ""; }
@@ -880,7 +883,7 @@ function renderHome(){
     </div>
     <div class="card" id="homeTable"></div>
     <div class="note">Click a line to see it in full. Tick to add lines up, then copy the total, the amount per supplier, or their payment details — shift-click a second tick box to take everything between.
-      Suppliers set to <b>Monthly statement</b> show one line per month instead of every invoice; change that under Suppliers.
+      Suppliers are paid off the <b>monthly statement</b> unless set otherwise, so each line here is one supplier-month — open it to see the invoices behind it. Switch a supplier to invoice-by-invoice under Suppliers.
       ${WEBAPP_URL?"":"<br><b>Read-only:</b> WEBAPP_URL is not set, so paid ticks and terms cannot be saved yet."}</div>`;
   paintHomeTable();
 }
@@ -990,7 +993,7 @@ function renderSupplier(name){
   document.getElementById("app").innerHTML=`<a class="back" onclick="go('sup')">Suppliers</a>
     <div class="row" style="align-items:flex-start;margin-bottom:12px">
       <div class="grow"><h2>${esc(name)}</h2>
-        <div class="sub">${esc(serviceType(name))} · ${esc(termsLabel(terms))}${terms.saved?"":" (default)"} · ${esc(payModeLabel(mode))}${isTracked(name)?"":" · removed from payables"}</div>
+        <div class="sub">${esc(serviceType(name))} · ${esc(termsLabel(terms))}${terms.saved?"":" (default)"} · ${esc(payModeLabel(mode))}${(t&&t.pay_mode)?"":" (default)"}${isTracked(name)?"":" · removed from payables"}</div>
         ${em?`<div class="terms">remittance to ${esc(em)}${t&&t.remittance_email?"":" (from invoice emails)"}</div>`:""}
         ${t&&t.notes?`<div class="note">${esc(t.notes)}</div>`:""}
       </div>
@@ -1043,7 +1046,7 @@ function editTerms(name){
     </div>
     <div class="field">Payment details (BSB, account, customer reference - copied as typed)<textarea id="tPay">${esc(t.payment_details||"")}</textarea></div>
     <div class="field">Notes (e.g. the terms we actually agreed vs what the statement says)<input id="tNotes" value="${esc(t.notes||"")}"></div>
-    <div class="note">On <b>Monthly statement</b> the payables list shows one line per calendar month instead of each invoice. The invoices are still there — inside the statement, in this supplier's page and in Reports.</div>
+    <div class="note">On <b>Monthly statement</b> (the default) the payables list shows one line per calendar month instead of each invoice — the invoices are still there, inside the statement and in Reports. Use <b>Invoice by invoice</b> for suppliers who send no statement and are paid per delivery.</div>
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn outline" onclick="closeModal()">Cancel</button><button class="btn" id="tGo">Save terms</button></div>`);
   document.getElementById("tGo").onclick=async()=>{
     const sup=name||document.getElementById("tSup").value.trim();
