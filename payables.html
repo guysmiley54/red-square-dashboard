@@ -122,7 +122,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-071030"; console.log("Invoices " + BUILD_ID);
+const BUILD_ID = "build-072045"; console.log("Invoices " + BUILD_ID);
 { const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
 
 const OPS_SHEET_ID   = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -170,10 +170,20 @@ const WEEKLY_SOURCES = [
 
 const PAY_METHODS = ["Bank transfer","BPAY","Direct debit","Card","Cash","Other"];
 
+/* How a supplier is paid.
+   invoice   - each invoice is its own payable line (the default)
+   statement - individual invoices are folded into one line per calendar month, because the
+               statement is what actually gets paid. The invoices are still there: they show
+               inside the statement, in the supplier view and in Reports. */
+const PAY_MODES = [["invoice","Invoice by invoice"],["statement","Monthly statement"]];
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
 /* ================= STATE ================= */
 let INV = [], TERMS = {}, PAY = {}, SALES = [], CANON = {}, LOAD_WARN = [];
-let SEL = {};                                   // key -> true (selected for batch)
-let VIEW = { status:"unpaid", q:"", types:[], hidden:false };
+let SEL = {};                                   // payable key -> true (selected for batch)
+let ORDER = [], LAST_SEL = "";                  // rendered order + last checkbox, for shift-click ranges
+let PAYABLES = [];
+let VIEW = { status:"unpaid", q:"", types:[], hidden:false, from:"", to:"" };
 let SORT = { key:"due", dir:1 };
 let SUP_SORT = { key:"balance", dir:-1 };
 let RPT = { kind:"month", offset:0, from:"", to:"" };
@@ -229,7 +239,16 @@ function serviceType(supplier){
   return best?best[0]:"Other";
 }
 function isTracked(supplier){ const t=TERMS[norm(supplier)]; return !(t && String(t.tracked||"").toLowerCase()==="no"); }
-function sendsStatement(supplier){ const t=TERMS[norm(supplier)]; return !(t && String(t.sends_statement||"").toLowerCase()==="no"); }
+function payMode(supplier){
+  const t=TERMS[norm(supplier)];
+  /* sends_statement is the older flag and is still honoured, so terms saved before pay_mode
+     existed keep working rather than silently reverting to invoice-by-invoice. */
+  const v=t?String(t.pay_mode||"").toLowerCase():"";
+  if(v==="statement"||v==="invoice") return v;
+  if(t && String(t.sends_statement||"").toLowerCase()==="no") return "invoice";
+  return "invoice";
+}
+function payModeLabel(m){ return m==="statement" ? "Monthly statement" : "Invoice by invoice"; }
 function paymentDetails(supplier){ const t=TERMS[norm(supplier)]; return t ? String(t.payment_details||"") : ""; }
 function remittanceEmail(supplier){
   const t=TERMS[norm(supplier)];
@@ -265,15 +284,6 @@ function derive(){
     }
   });
 }
-function dueLabel(r){
-  if(r.paid) return "paid "+fmtD(r.pay.paid_date);
-  if(!r.due) return "";
-  const d=daysBetween(TODAY, r.due);
-  if(d===0) return "due today";
-  if(d<0) return (-d)+(d===-1?" day":" days")+" overdue";
-  return "due "+fmtD(r.due);
-}
-
 /* ================= FETCH ================= */
 /* gviz serves the FIRST sheet in the workbook when a tab name does not exist, with HTTP
    200 and no error. So a request for Payments before that tab has been created comes back
@@ -395,7 +405,8 @@ function ingest(inv,cfgRows,payRows,termRows,feedDaily,weeklyRows){
   const raw=inv.map(r=>({
     supplier:String(r.supplier||"").trim(), number:String(r.invoice_number||"").trim(),
     date:gvizDate(r.invoice_date)||gvizDate(r.scanned),
-    total:num_(r.total), gst:num_(r.gst), category:String(r.category||""), type:String(r.type||"invoice").trim(),
+    total:num_(r.total), subtotal:num_(r.subtotal), gst:num_(r.gst), freight:num_(r.freight), cdl:num_(r.cdl),
+    category:String(r.category||""), type:String(r.type||"invoice").trim(),
     status:String(r.status||""), pdf:String(r.pdf_url||"").trim(), src:String(r.source||""), venue:String(r.venue||"")
   })).filter(r=>r.supplier&&r.date&&r.type!=="superseded");
   const variants={};
@@ -528,15 +539,17 @@ function remittanceMailto(supplier, rows, info){
 }
 
 /* ================= PAY DIALOG ================= */
-function openPayDialog(keys){
-  const rows=keys.map(k=>INV.find(r=>r.key===k)).filter(r=>r&&!r.paid);
+function openPayDialog(pkeys){
+  const lines=pkeys.map(pFind).filter(p=>p&&!p.paid);
+  const rows=[]; lines.forEach(p=>p.rows.forEach(r=>{ if(!r.paid) rows.push(r); }));
   if(!rows.length) return;
-  const sups=[...new Set(rows.map(r=>r.supplier))];
+  const sups=[...new Set(lines.map(p=>p.supplier))];
   const total=rows.reduce((a,r)=>a+r.amt,0);
   openModal(`<h3>Mark as paid</h3>
-    <table><thead><tr><th>Supplier</th><th>Invoice</th><th class="hide-sm">Date</th><th class="num">Amount</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr><td>${esc(r.supplier)}</td><td class="num">${esc(r.number)||"–"}</td><td class="hide-sm">${fmtD(r.date)}</td><td class="num">${fmtMoney(r.amt)}</td></tr>`).join("")}
+    <table><thead><tr><th>Supplier</th><th>Line</th><th class="hide-sm">Date</th><th class="num">Amount</th></tr></thead><tbody>
+    ${lines.map(p=>`<tr><td>${esc(p.supplier)}</td><td class="num">${esc(p.label)}${p.kind==="statement"?` <span class="pill grey">${p.n-p.paidN} inv</span>`:""}</td><td class="hide-sm">${fmtD(p.date)}</td><td class="num">${fmtMoney(p.amt)}</td></tr>`).join("")}
     <tr><td colspan="3"><b>Total</b>${sups.length>1?` <span class="pill grey">${sups.length} suppliers</span>`:""}</td><td class="num"><b>${fmtMoney(total)}</b></td></tr></tbody></table>
+    ${sups.length>1?'<div class="note">More than one supplier is selected. They are logged as one batch with the same reference - fine if that matches the transfers you are about to make, otherwise pay them separately.</div>':""}
     <div class="two">
       <div class="field">Paid on<input id="pdDate" type="date" value="${fmtISO(TODAY)}"></div>
       <div class="field">Method<select id="pdMethod">${PAY_METHODS.map(m=>`<option>${m}</option>`).join("")}</select></div>
@@ -550,7 +563,7 @@ function openPayDialog(keys){
                 reference:document.getElementById("pdRef").value.trim(), note:document.getElementById("pdNote").value.trim()};
     try{
       await markPaid(rows.map(r=>r.key), info);
-      rows.forEach(r=>{ delete SEL[r.key]; });
+      pkeys.forEach(k=>{ delete SEL[k]; });
       afterPaid(rows, info);
       route();
     }catch(e){ btn.disabled=false; btn.textContent="Mark as paid"; toast(e.message); }
@@ -569,45 +582,213 @@ function afterPaid(rows, info){
     }).join("")}
     <div class="row" style="justify-content:flex-end;margin-top:6px"><button class="btn" onclick="closeModal()">Done</button></div>`);
 }
-async function togglePaid(key, cb){
-  const r=INV.find(x=>x.key===key); if(!r) return;
-  if(!r.paid){ cb.checked=false; openPayDialog([key]); return; }
-  if(!confirm(`Mark ${r.supplier} ${r.number||fmtMoney(r.amt)} as NOT paid?`)){ cb.checked=true; return; }
-  try{ await markUnpaid(key); toast("Marked unpaid"); route(); }catch(e){ cb.checked=true; toast(e.message); }
+async function togglePaid(pkey, cb){
+  const p=pFind(pkey); if(!p) return;
+  if(!p.paid){ cb.checked=false; openPayDialog([pkey]); return; }
+  const what=p.kind==="statement" ? `${p.supplier} ${p.label} (${p.n} invoices)` : `${p.supplier} ${p.label}`;
+  if(!confirm(`Mark ${what} as NOT paid?`)){ cb.checked=true; return; }
+  try{ for(const r of p.rows) await markUnpaid(r.key); toast("Marked unpaid"); route(); }
+  catch(e){ cb.checked=true; toast(e.message); }
 }
 
-/* ================= SELECTION BAR ================= */
-function toggleSel(key, on){ if(on) SEL[key]=true; else delete SEL[key]; paintSelbar(); document.querySelectorAll(`tr[data-key="${key}"]`).forEach(tr=>tr.classList.toggle("sel",!!on)); }
-function clearSel(){ SEL={}; route(); }
-function selRows(){ return Object.keys(SEL).map(k=>INV.find(r=>r.key===k)).filter(Boolean); }
+/* ================= PAYABLE LINES ================= */
+/* A "payable" is one line on the main page. For most suppliers that is one invoice. For a
+   supplier paid on statement it is one calendar month of invoices, because the statement is
+   the thing that gets paid and the individual invoices are noise on a payables screen.
+   Either way a payable carries the invoice rows behind it, so paying one pays exactly those
+   rows and the detail view can list them. */
+function monthEnd(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0); }
+function monthLabel(d){ return MONTHS[d.getMonth()]+" "+d.getFullYear(); }
+
+function buildPayables(rows){
+  const out=[], stmt={};
+  rows.forEach(r=>{
+    if(payMode(r.supplier)!=="statement"){
+      out.push({ pkey:"i:"+r.key, kind:"invoice", supplier:r.supplier, label:r.number||"(no number)",
+                 date:r.date, due:r.due, total:r.amt, amt:r.amt, rows:[r], n:1, paidN:r.paid?1:0,
+                 paid:r.paid, state:r.state, type_:r.type_, credit:r.credit, check:r.check, pdf:r.pdf,
+                 open:false, inv:r });
+      return;
+    }
+    const k=norm(r.supplier)+"|"+r.date.getFullYear()+"-"+String(r.date.getMonth()).padStart(2,"0");
+    let s=stmt[k];
+    if(!s){
+      const me=monthEnd(r.date);
+      s=stmt[k]={ pkey:"s:"+k, kind:"statement", supplier:r.supplier, label:monthLabel(r.date)+" statement",
+                  date:me, due:dueDate(me, termsFor(r.supplier)), total:0, amt:0, rows:[], n:0, paidN:0,
+                  type_:r.type_, credit:false, check:false, pdf:"", open:me>=TODAY };
+      out.push(s);
+    }
+    s.rows.push(r); s.n++; s.total+=r.amt;
+    if(r.paid) s.paidN++; else s.amt+=r.amt;
+    if(r.check) s.check=true;
+  });
+  out.filter(p=>p.kind==="statement").forEach(s=>{
+    s.paid = s.n>0 && s.paidN===s.n;
+    if(s.paid){
+      s.amt=s.total; s.state="paid";
+      s.paidDate=s.rows.reduce((m,r)=>(r.pay&&r.pay.paid_date&&(!m||r.pay.paid_date>m))?r.pay.paid_date:m, null);
+    }else{
+      const d=daysBetween(TODAY, s.due);
+      /* A month still in progress is never "overdue" - the statement for it has not been
+         issued yet. It is shown so the balance is visible, not so it gets paid today. */
+      s.state = s.open ? "open" : (d<=0 ? "overdue" : (d<=DUE_SOON_DAYS ? "soon" : "open"));
+    }
+    s.date=s.rows.reduce((m,r)=>r.date>m?r.date:m, s.rows[0].date);
+  });
+  return out;
+}
+function pDueLabel(p){
+  if(p.paid) return "paid"+(p.paidDate?" "+fmtD(p.paidDate):(p.inv&&p.inv.pay?" "+fmtD(p.inv.pay.paid_date):""));
+  if(!p.due) return "";
+  const d=daysBetween(TODAY, p.due);
+  if(p.open) return "to "+fmtD(p.due);
+  if(d===0) return "due today";
+  if(d<0) return (-d)+(d===-1?" day":" days")+" overdue";
+  return "due "+fmtD(p.due);
+}
+function pFind(pkey){ return PAYABLES.find(p=>p.pkey===pkey); }
+
+/* ================= SELECTION ================= */
+function selRows(){
+  const out=[];
+  Object.keys(SEL).forEach(k=>{ const p=pFind(k); if(p) p.rows.forEach(r=>{ if(!r.paid) out.push(r); }); });
+  return out;
+}
+function selPayables(){ return Object.keys(SEL).map(pFind).filter(Boolean); }
+function setSel(pkey, on){
+  if(on) SEL[pkey]=true; else delete SEL[pkey];
+  document.querySelectorAll('tr[data-p="'+pkey+'"]').forEach(tr=>tr.classList.toggle("sel", !!on));
+  document.querySelectorAll('input[data-p="'+pkey+'"]').forEach(cb=>{ cb.checked=!!on; });
+}
+/* Shift-click selects the run between the last box clicked and this one, in the order the
+   table is currently sorted. Checkboxes do not do this natively, so the click handler reads
+   event.shiftKey and walks ORDER, which is rebuilt on every render. */
+function selClick(e, el){
+  const pkey=el.dataset.p, on=el.checked;
+  if(e.shiftKey && LAST_SEL && LAST_SEL!==pkey){
+    const a=ORDER.indexOf(LAST_SEL), b=ORDER.indexOf(pkey);
+    if(a>-1&&b>-1){ for(let i=Math.min(a,b); i<=Math.max(a,b); i++) setSel(ORDER[i], on); }
+    else setSel(pkey, on);
+  } else setSel(pkey, on);
+  LAST_SEL=pkey;
+  paintSelbar();
+}
+function selectAll(keys, on){ keys.forEach(k=>setSel(k,on)); LAST_SEL=""; paintSelbar(); }
+function clearSel(){ SEL={}; LAST_SEL=""; route(); }
+
+/* Per-supplier sums, which is what actually gets typed into internet banking. */
+function selBySupplier(){
+  const by={};
+  selPayables().forEach(p=>{
+    if(p.paid) return;
+    const b=by[p.supplier]||(by[p.supplier]={supplier:p.supplier, amt:0, n:0, lines:[]});
+    b.amt+=p.amt; b.n+=p.rows.filter(r=>!r.paid).length; b.lines.push(p);
+  });
+  return Object.values(by).sort((a,b)=>b.amt-a.amt);
+}
 function paintSelbar(){
   const bar=document.getElementById("selbar");
-  const rows=selRows();
-  if(!rows.length){ bar.className=""; bar.innerHTML=""; return; }
-  const total=rows.reduce((a,r)=>a+r.amt,0);
-  const sups=[...new Set(rows.map(r=>r.supplier))];
+  const sups=selBySupplier();
+  if(!sups.length){ bar.className=""; bar.innerHTML=""; LAST_SEL=LAST_SEL; return; }
+  const total=sups.reduce((a,s)=>a+s.amt,0);
+  const n=sups.reduce((a,s)=>a+s.n,0);
   const one=sups.length===1;
-  const pd=one?paymentDetails(sups[0]):"";
+  const pd=one?paymentDetails(sups[0].supplier):"";
   bar.className="on";
-  bar.innerHTML=`<span class="t">${fmtMoney(total)}</span><span class="s">${rows.length} selected · ${one?esc(sups[0]):sups.length+" suppliers"}</span>
+  bar.innerHTML=`<span class="t">${fmtMoney(total)}</span><span class="s">${n} ${n===1?"invoice":"invoices"} · ${one?esc(sups[0].supplier):sups.length+" suppliers"}</span>
     <span class="grow"></span>
-    <button class="btn" onclick='copyText(${JSON.stringify(fmtAmt(total))},"Amount copied")'>Copy amount</button>
-    <button class="btn" ${pd?"":"disabled"} title="${pd?"":(one?"No payment details saved for this supplier yet":"Select one supplier to copy their payment details")}" onclick='copyText(${JSON.stringify(pd)},"Payment details copied")'>Copy payment details</button>
-    <button class="btn pay" onclick='openPayDialog(Object.keys(SEL))'>Mark as paid</button>
+    <button class="btn" onclick='copyText(${JSON.stringify(fmtAmt(total))},"Total copied")'>Copy total</button>
+    <button class="btn" onclick="openBreakdown()">Amount per supplier</button>
+    ${one?`<button class="btn" ${pd?"":"disabled"} title="${pd?"":"No payment details saved for this supplier yet"}" onclick='copyText(${JSON.stringify(pd)},"Payment details copied")'>Copy payment details</button>`:""}
+    <button class="btn pay" onclick="openPayDialog(Object.keys(SEL))">Mark as paid</button>
     <button class="btn ghost" onclick="clearSel()">Clear</button>`;
+}
+/* One row per supplier: the figure to pay, their payment details, and a copy button for each,
+   so a run of transfers is copy-paste-copy-paste rather than mental arithmetic. */
+function openBreakdown(){
+  const sups=selBySupplier();
+  const total=sups.reduce((a,s)=>a+s.amt,0);
+  openModal(`<h3>Amount per supplier</h3>
+    <table><thead><tr><th>Supplier</th><th class="num">Invoices</th><th class="num">Amount</th><th></th></tr></thead><tbody>
+    ${sups.map(s=>{
+      const pd=paymentDetails(s.supplier);
+      return `<tr><td><b>${esc(s.supplier)}</b>${pd?`<div class="terms">${esc(pd.split("\\n")[0])}${pd.indexOf("\\n")>-1?" …":""}</div>`:'<div class="terms">no payment details saved</div>'}</td>
+        <td class="num">${s.n}</td><td class="num"><b>${fmtMoney(s.amt)}</b></td>
+        <td class="num"><button class="btn outline small" onclick='copyText(${JSON.stringify(fmtAmt(s.amt))},${JSON.stringify(s.supplier+" copied")})'>Copy $</button>
+        ${pd?`<button class="btn outline small" onclick='copyText(${JSON.stringify(pd)},"Payment details copied")'>Details</button>`:""}</td></tr>`;
+    }).join("")}
+    <tr><td colspan="2"><b>Total</b></td><td class="num"><b>${fmtMoney(total)}</b></td><td class="num"><button class="btn outline small" onclick='copyText(${JSON.stringify(fmtAmt(total))},"Total copied")'>Copy $</button></td></tr>
+    </tbody></table>
+    <div class="row" style="justify-content:flex-end"><button class="btn" onclick="closeModal()">Done</button></div>`);
+}
+
+/* ================= DETAIL ================= */
+function openDetail(pkey){
+  const p=pFind(pkey); if(!p) return;
+  if(p.kind==="invoice") return openInvoice(p.rows[0].key, "");
+  const r=p.rows.slice().sort((a,b)=>a.date-b.date);
+  const terms=termsFor(p.supplier), pd=paymentDetails(p.supplier);
+  openModal(`<h3>${esc(p.supplier)}</h3>
+    <div class="sub" style="margin-bottom:10px">${esc(p.label)} · ${esc(termsLabel(terms))} · ${pDueLabel(p)}${p.open?' <span class="pill grey">still accruing</span>':""}</div>
+    <div class="statgrid" style="grid-template-columns:1fr 1fr">
+      <div class="stat" style="cursor:default"><div class="v">${fmtMoney(p.amt)}</div><div class="k">${p.paid?"Paid":"To pay"}</div></div>
+      <div class="stat" style="cursor:default"><div class="v">${fmtMoney(p.total)}</div><div class="k">Invoiced · ${p.n}${p.paidN&&!p.paid?" · "+p.paidN+" already paid":""}</div></div>
+    </div>
+    <table><thead><tr><th>Invoice</th><th class="hide-sm">Date</th><th class="num">Amount</th><th></th><th>Paid</th></tr></thead><tbody>
+    ${r.map(x=>`<tr class="click ${x.paid?"paid":""}" onclick="openInvoice(${JSON.stringify(x.key).replace(/"/g,"&quot;")},${JSON.stringify(pkey).replace(/"/g,"&quot;")})">
+      <td class="num">${esc(x.number)||"–"}${x.credit?' <span class="pill credit">credit</span>':""}${x.check?' <span class="pill check">check</span>':""}</td>
+      <td class="hide-sm">${fmtD(x.date)}</td><td class="num">${fmtMoney(x.amt)}</td>
+      <td>${x.pdf?`<a class="pdf" href="${esc(x.pdf)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">pdf</a>`:""}</td>
+      <td>${x.paid?"✓":""}</td></tr>`).join("")}
+    </tbody></table>
+    ${pd?`<pre class="pay">${esc(pd)}</pre>`:""}
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn outline" onclick='copyText(${JSON.stringify(fmtAmt(p.amt))},"Amount copied")'>Copy ${fmtMoney(p.amt)}</button>
+      <button class="btn outline" onclick="closeModal();go('s/'+encodeURIComponent(${JSON.stringify(p.supplier).replace(/"/g,"&quot;")}))">Supplier</button>
+      ${p.paid?"":`<button class="btn" onclick="closeModal();openPayDialog([${JSON.stringify(pkey).replace(/"/g,"&quot;")}])">Mark as paid</button>`}
+      <button class="btn outline" onclick="closeModal()">Close</button></div>`);
+}
+function openInvoice(key, backPkey){
+  const r=INV.find(x=>x.key===key); if(!r) return;
+  const terms=termsFor(r.supplier), pd=paymentDetails(r.supplier);
+  const rowsHtml=[
+    ["Supplier", esc(r.supplier)],
+    ["Invoice number", esc(r.number)||"–"],
+    ["Invoice date", fmtD(r.date)],
+    ["Due", (r.due?fmtD(r.due):"–")+" · "+esc(termsLabel(terms))+(terms.saved?"":" (default)")],
+    ["Type", esc(r.type_)+(r.credit?" · credit note":"")],
+    ["Category on invoice", esc(r.category)||"–"],
+    ["Venue", esc(r.venue)||"–"],
+    r.subtotal?["Subtotal", fmtMoney(r.credit?-Math.abs(r.subtotal):r.subtotal)]:null,
+    r.gst?["GST", fmtMoney(r.credit?-Math.abs(r.gst):r.gst)]:null,
+    r.freight?["Freight", fmtMoney(r.freight)]:null,
+    ["Total", "<b>"+fmtMoney(r.amt)+"</b>"],
+    r.check?["Processor flag", '<span class="pill check">check</span> the reader was unsure - compare against the PDF']:null,
+    r.paid?["Paid", fmtD(r.pay.paid_date)+(r.pay.reference?" · ref "+esc(r.pay.reference):"")+(r.pay.method?" · "+esc(r.pay.method):"")+(r.pay.user?" · marked by "+esc(r.pay.user):"")]:null,
+    r.pay&&r.pay.note?["Note", esc(r.pay.note)]:null
+  ].filter(Boolean);
+  openModal(`<h3>${esc(r.supplier)} ${esc(r.number)}</h3>
+    <table><tbody>${rowsHtml.map(([k,v])=>`<tr><td style="color:var(--dim);width:40%">${k}</td><td>${v}</td></tr>`).join("")}</tbody></table>
+    ${pd?`<div class="label" style="margin-top:10px">Payment details</div><pre class="pay">${esc(pd)}</pre>`:""}
+    <div class="row" style="justify-content:flex-end">
+      ${backPkey?`<button class="btn outline" onclick="openDetail(${JSON.stringify(backPkey).replace(/"/g,"&quot;")})">← Statement</button>`:""}
+      ${r.pdf?`<a class="btn outline" href="${esc(r.pdf)}" target="_blank" rel="noopener">Open PDF</a>`:""}
+      <button class="btn outline" onclick='copyText(${JSON.stringify(fmtAmt(r.amt))},"Amount copied")'>Copy ${fmtMoney(r.amt)}</button>
+      <button class="btn outline" onclick="closeModal()">Close</button></div>`);
 }
 
 /* ================= TABLE ================= */
 function sortBy(rows, key, dir){
-  const v=r=>{
+  const v=p=>{
     switch(key){
-      case "due": return r.paid ? 9e15 : (r.due?r.due.getTime():8e15);
-      case "date": return r.date.getTime();
-      case "amount": return r.amt;
-      case "supplier": return r.supplier.toLowerCase();
-      case "type": return r.type_.toLowerCase();
-      case "number": return r.number.toLowerCase();
-      case "paid": return r.paid?1:0;
+      case "due": return p.paid ? 9e15 : (p.due?p.due.getTime():8e15);
+      case "date": return p.date.getTime();
+      case "amount": return p.amt;
+      case "supplier": return p.supplier.toLowerCase();
+      case "type": return p.type_.toLowerCase();
+      case "number": return p.label.toLowerCase();
+      case "paid": return p.paid?1:0;
       default: return 0;
     }
   };
@@ -618,29 +799,31 @@ function th(label, key, cls){
   return `<th class="sort ${cls||""}" onclick="setSort('${key}')">${label}${on?(SORT.dir>0?" ▲":" ▼"):""}</th>`;
 }
 function setSort(key){ if(SORT.key===key) SORT.dir=-SORT.dir; else { SORT.key=key; SORT.dir=key==="amount"||key==="date"?-1:1; } route(); }
-function invoiceTable(rows, opts){
+
+function payableTable(list, opts){
   opts=opts||{};
-  if(!rows.length) return `<div id="status">${esc(opts.empty||"Nothing here.")}</div>`;
-  const sorted=sortBy(rows, SORT.key, SORT.dir);
-  const allSel=sorted.filter(r=>!r.paid).every(r=>SEL[r.key]) && sorted.some(r=>!r.paid);
+  if(!list.length) return `<div id="status">${esc(opts.empty||"Nothing here.")}</div>`;
+  const sorted=sortBy(list, SORT.key, SORT.dir);
+  ORDER=sorted.filter(p=>!p.paid).map(p=>p.pkey);
+  const unpaidKeys=ORDER.slice();
+  const allSel=unpaidKeys.length>0 && unpaidKeys.every(k=>SEL[k]);
   return `<table><thead><tr>
-    <th><input type="checkbox" ${allSel?"checked":""} title="Select all unpaid" onclick="selectAll(${JSON.stringify(sorted.filter(r=>!r.paid).map(r=>r.key)).replace(/"/g,"&quot;")}, this.checked)"></th>
-    ${th("Due","due")}${opts.noSupplier?"":th("Supplier","supplier")}${th("Type","type","hide-sm")}${th("Invoice","number")}${th("Date","date","hide-sm")}${th("Amount","amount","num")}<th>PDF</th>${th("Paid","paid")}
+    <th><input type="checkbox" ${allSel?"checked":""} title="Select all unpaid" onclick="selectAll(${JSON.stringify(unpaidKeys).replace(/"/g,"&quot;")}, this.checked)"></th>
+    ${th("Due","due")}${opts.noSupplier?"":th("Supplier","supplier")}${th("Type","type","hide-sm")}${th("Invoice","number")}${th("Date","date","hide-sm")}${th("Amount","amount","num")}<th></th>${th("Paid","paid")}
   </tr></thead><tbody>
-  ${sorted.map(r=>`<tr data-key="${esc(r.key)}" class="${r.paid?"paid":""} ${SEL[r.key]?"sel":""}">
-    <td>${r.paid?"":`<input type="checkbox" ${SEL[r.key]?"checked":""} onclick="toggleSel(${JSON.stringify(r.key).replace(/"/g,"&quot;")}, this.checked)">`}</td>
-    <td><span class="due ${r.state==="overdue"?"over":r.state==="soon"?"soon":r.paid?"done":""}">${esc(dueLabel(r))}</span></td>
-    ${opts.noSupplier?"":`<td><a class="sup" onclick="go('s/'+encodeURIComponent(${JSON.stringify(r.supplier).replace(/"/g,"&quot;")}))">${esc(r.supplier)}</a></td>`}
-    <td class="hide-sm">${esc(r.type_)}</td>
-    <td class="num">${esc(r.number)||"–"}${r.credit?' <span class="pill credit">credit</span>':""}${r.check?' <span class="pill check" title="The processor was unsure of this invoice - check the PDF">check</span>':""}</td>
-    <td class="hide-sm">${fmtD(r.date)}</td>
-    <td class="num">${fmtMoney(r.amt)}</td>
-    <td>${r.pdf?`<a class="pdf" href="${esc(r.pdf)}" target="_blank" rel="noopener">pdf</a>`:""}</td>
-    <td><input type="checkbox" ${r.paid?"checked":""} title="${r.paid?esc((r.pay.reference?"ref "+r.pay.reference+" · ":"")+(r.pay.method||"")+(r.pay.user?" · by "+r.pay.user:"")):"Mark paid"}" onclick="togglePaid(${JSON.stringify(r.key).replace(/"/g,"&quot;")}, this)"></td>
+  ${sorted.map(p=>`<tr data-p="${esc(p.pkey)}" class="click ${p.paid?"paid":""} ${SEL[p.pkey]?"sel":""}" onclick="if(!event.target.closest('input,a,button')) openDetail(${JSON.stringify(p.pkey).replace(/"/g,"&quot;")})">
+    <td>${p.paid?"":`<input type="checkbox" data-p="${esc(p.pkey)}" ${SEL[p.pkey]?"checked":""} onclick="selClick(event,this)" title="Shift-click to select a run">`}</td>
+    <td><span class="due ${p.state==="overdue"?"over":p.state==="soon"?"soon":p.paid?"done":""}">${esc(pDueLabel(p))}</span></td>
+    ${opts.noSupplier?"":`<td><a class="sup" onclick="event.stopPropagation();go('s/'+encodeURIComponent(${JSON.stringify(p.supplier).replace(/"/g,"&quot;")}))">${esc(p.supplier)}</a></td>`}
+    <td class="hide-sm">${esc(p.type_)}</td>
+    <td class="num">${esc(p.label)}${p.kind==="statement"?` <span class="pill grey">${p.n} inv</span>`:""}${p.credit?' <span class="pill credit">credit</span>':""}${p.check?' <span class="pill check" title="The processor was unsure - check the PDF">check</span>':""}${p.open?' <span class="pill grey">accruing</span>':""}</td>
+    <td class="hide-sm">${fmtD(p.date)}</td>
+    <td class="num">${fmtMoney(p.amt)}</td>
+    <td>${p.kind==="invoice"&&p.pdf?`<a class="pdf" href="${esc(p.pdf)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">pdf</a>`:""}</td>
+    <td><input type="checkbox" ${p.paid?"checked":""} title="${p.paid?"Untick to reverse":"Mark paid"}" onclick="event.stopPropagation();togglePaid(${JSON.stringify(p.pkey).replace(/"/g,"&quot;")}, this)"></td>
   </tr>`).join("")}
   </tbody></table>`;
 }
-function selectAll(keys, on){ keys.forEach(k=>{ if(on) SEL[k]=true; else delete SEL[k]; }); route(); }
 
 /* ================= ROUTING ================= */
 function go(hash){ const cur=location.hash.replace(/^#/,""); if(cur===hash) route(); else location.hash=hash; if(hash===""&&cur==="") route(); }
@@ -662,19 +845,29 @@ function warnings(){ return LOAD_WARN.length?`<div class="err" style="color:var(
 function visibleInv(){ return INV.filter(r=>VIEW.hidden||isTracked(r.supplier)); }
 
 /* ================= HOME ================= */
+function dateFiltered(){
+  const f=VIEW.from?gvizDate(VIEW.from):null, t=VIEW.to?gvizDate(VIEW.to):null;
+  return visibleInv().filter(r=>(!f||r.date>=f)&&(!t||r.date<=t));
+}
 function renderHome(){
   crumb("");
-  const all=visibleInv();
-  const unpaid=all.filter(r=>!r.paid);
-  const sum=rs=>rs.reduce((a,r)=>a+r.amt,0);
-  const over=unpaid.filter(r=>r.state==="overdue"), soon=unpaid.filter(r=>r.state==="soon");
+  /* Payables are built from the date-filtered invoices, so narrowing the range narrows a
+     statement to the invoices inside it - which is what you want when paying part of a month. */
+  PAYABLES=buildPayables(dateFiltered());
+  const unpaid=PAYABLES.filter(p=>!p.paid);
+  const sum=ps=>ps.reduce((a,p)=>a+p.amt,0);
+  const over=unpaid.filter(p=>p.state==="overdue"), soon=unpaid.filter(p=>p.state==="soon");
   const m0=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);
-  const paidMonth=all.filter(r=>r.paid&&r.pay.paid_date&&r.pay.paid_date>=m0);
+  const paidMonth=dateFiltered().filter(r=>r.paid&&r.pay.paid_date&&r.pay.paid_date>=m0);
 
   const chips=[["unpaid","Unpaid"],["overdue","Overdue"],["soon","Due soon"],["paid","Paid"],["all","All"]];
-  const types=[...new Set(all.map(r=>r.type_))].sort();
+  const types=[...new Set(PAYABLES.map(p=>p.type_))].sort();
+  const ranged=VIEW.from||VIEW.to;
   document.getElementById("filters").innerHTML=
     chips.map(([k,l])=>`<span class="chip ${VIEW.status===k?"on":""} ${k==="overdue"?"red":""}" onclick="VIEW.status='${k}';route()">${l}</span>`).join("")
+    +`<input type="date" title="Invoices dated from" value="${esc(VIEW.from)}" onchange="VIEW.from=this.value;route()">`
+    +`<span class="sub">to</span><input type="date" title="Invoices dated to" value="${esc(VIEW.to)}" onchange="VIEW.to=this.value;route()">`
+    +(ranged?`<span class="clear" onclick="VIEW.from='';VIEW.to='';route()">clear dates</span>`:"")
     +`<input type="search" placeholder="Search supplier or invoice no." value="${esc(VIEW.q)}" oninput="VIEW.q=this.value;paintHomeTable()">`
     +`<select onchange="VIEW.types=this.value?[this.value]:[];route()" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px"><option value="">All types</option>${types.map(t=>`<option ${VIEW.types[0]===t?"selected":""}>${esc(t)}</option>`).join("")}</select>`;
 
@@ -683,61 +876,100 @@ function renderHome(){
       <div class="stat ${VIEW.status==="overdue"?"on":""}" onclick="VIEW.status='overdue';route()"><div class="v ${over.length?"red":""}">${fmtMoney(sum(over))}</div><div class="k">Overdue · ${over.length}</div></div>
       <div class="stat ${VIEW.status==="soon"?"on":""}" onclick="VIEW.status='soon';route()"><div class="v ${soon.length?"amber":""}">${fmtMoney(sum(soon))}</div><div class="k">Due within ${DUE_SOON_DAYS} days · ${soon.length}</div></div>
       <div class="stat ${VIEW.status==="unpaid"?"on":""}" onclick="VIEW.status='unpaid';route()"><div class="v">${fmtMoney(sum(unpaid))}</div><div class="k">Outstanding · ${unpaid.length}</div></div>
-      <div class="stat ${VIEW.status==="paid"?"on":""}" onclick="VIEW.status='paid';route()"><div class="v">${fmtMoney(sum(paidMonth))}</div><div class="k">Paid this month · ${paidMonth.length}</div></div>
+      <div class="stat ${VIEW.status==="paid"?"on":""}" onclick="VIEW.status='paid';route()"><div class="v">${fmtMoney(paidMonth.reduce((a,r)=>a+r.amt,0))}</div><div class="k">Paid this month · ${paidMonth.length}</div></div>
     </div>
     <div class="card" id="homeTable"></div>
-    <div class="note">Tick invoices to add them up, copy the amount or the supplier's payment details, then mark them paid together. Due dates come from each supplier's terms (Suppliers → edit); anything without saved terms uses ${termsLabel(DEFAULT_TERMS).toLowerCase()}.
+    <div class="note">Click a line to see it in full. Tick to add lines up, then copy the total, the amount per supplier, or their payment details — shift-click a second tick box to take everything between.
+      Suppliers set to <b>Monthly statement</b> show one line per month instead of every invoice; change that under Suppliers.
       ${WEBAPP_URL?"":"<br><b>Read-only:</b> WEBAPP_URL is not set, so paid ticks and terms cannot be saved yet."}</div>`;
   paintHomeTable();
 }
 function paintHomeTable(){
   const el=document.getElementById("homeTable"); if(!el) return;
-  let rows=visibleInv();
-  if(VIEW.status==="unpaid") rows=rows.filter(r=>!r.paid);
-  else if(VIEW.status==="overdue") rows=rows.filter(r=>r.state==="overdue");
-  else if(VIEW.status==="soon") rows=rows.filter(r=>r.state==="soon");
-  else if(VIEW.status==="paid") rows=rows.filter(r=>r.paid);
-  if(VIEW.types.length) rows=rows.filter(r=>VIEW.types.includes(r.type_));
+  let list=PAYABLES;
+  if(VIEW.status==="unpaid") list=list.filter(p=>!p.paid);
+  else if(VIEW.status==="overdue") list=list.filter(p=>p.state==="overdue");
+  else if(VIEW.status==="soon") list=list.filter(p=>p.state==="soon");
+  else if(VIEW.status==="paid") list=list.filter(p=>p.paid);
+  if(VIEW.types.length) list=list.filter(p=>VIEW.types.includes(p.type_));
   const q=VIEW.q.trim().toLowerCase();
-  if(q) rows=rows.filter(r=>r.supplier.toLowerCase().includes(q)||r.number.toLowerCase().includes(q));
-  const total=rows.reduce((a,r)=>a+r.amt,0);
-  el.innerHTML=`<div class="label">${rows.length} ${rows.length===1?"invoice":"invoices"} · ${fmtMoney(total)}</div>`
-    +invoiceTable(rows,{empty:VIEW.status==="unpaid"?"Nothing outstanding.":"No invoices match."});
+  if(q) list=list.filter(p=>p.supplier.toLowerCase().includes(q)||p.label.toLowerCase().includes(q)||p.rows.some(r=>r.number.toLowerCase().includes(q)));
+  const total=list.reduce((a,p)=>a+p.amt,0);
+  const nInv=list.reduce((a,p)=>a+p.n,0);
+  el.innerHTML=`<div class="label">${list.length} ${list.length===1?"line":"lines"}${nInv!==list.length?" · "+nInv+" invoices":""} · ${fmtMoney(total)}</div>`
+    +payableTable(list,{empty:VIEW.status==="unpaid"?"Nothing outstanding.":"No invoices match."});
 }
 
 /* ================= SUPPLIERS LIST ================= */
+/* Merge with what is already saved before writing, so a one-click change to pay mode or a
+   removal cannot blank payment details someone typed in earlier. Where nothing is saved yet
+   the current effective values are used - not the sheet's blanks, which would silently turn
+   end-of-month + 7 into end-of-month + 0. */
+function termsSnapshot(supplier){
+  const t=TERMS[norm(supplier)]||{}, cur=termsFor(supplier);
+  return { supplier:supplier, tracked:isTracked(supplier)?"yes":"no", service_type:serviceType(supplier),
+           terms_type:cur.type, terms_days:String(cur.days), pay_mode:payMode(supplier),
+           sends_statement:payMode(supplier)==="statement"?"yes":"no",
+           payment_details:String(t.payment_details||""), remittance_email:String(t.remittance_email||""),
+           notes:String(t.notes||"") };
+}
+async function patchTerms(supplier, changes){
+  const v=Object.assign(termsSnapshot(supplier), changes);
+  await saveTerms(v);
+}
+async function setPayMode(supplier, mode){
+  try{ await patchTerms(supplier,{pay_mode:mode, sends_statement:mode==="statement"?"yes":"no"}); toast(payModeLabel(mode)); route(); }
+  catch(e){ toast(e.message); }
+}
+/* "Remove" does not delete anything. The invoices stay in the sheet and in Reports; the
+   supplier just stops appearing as something to pay. Reversible from Show removed. */
+async function removeSupplier(supplier, remove){
+  if(remove && !confirm(`Remove ${supplier} from the payables list?\n\nIts invoices stay in the sheet and in Reports - they just stop showing as bills to pay. You can put it back from "Show removed".`)) return;
+  try{ await patchTerms(supplier,{tracked:remove?"no":"yes"}); toast(remove?"Removed":"Restored"); route(); }
+  catch(e){ toast(e.message); }
+}
 function supplierSummary(){
   const by={};
   INV.forEach(r=>{
-    const s=by[r.supplier]||(by[r.supplier]={supplier:r.supplier,balance:0,overdue:0,n:0,unpaid:0,last:null,type:r.type_,tracked:isTracked(r.supplier),terms:termsFor(r.supplier)});
+    const s=by[r.supplier]||(by[r.supplier]={supplier:r.supplier,balance:0,overdue:0,n:0,unpaid:0,last:null,type:r.type_,tracked:isTracked(r.supplier),terms:termsFor(r.supplier),mode:payMode(r.supplier)});
     s.n++; if(!s.last||r.date>s.last) s.last=r.date;
-    if(!r.paid){ s.balance+=r.amt; s.unpaid++; if(r.state==="overdue") s.overdue+=r.amt; }
+    if(!r.paid){ s.balance+=r.amt; s.unpaid++; }
   });
-  /* Suppliers with saved terms but no invoices yet still get a row, so terms can be set
-     up ahead of the first invoice arriving. */
-  Object.values(TERMS).forEach(t=>{ if(t.supplier&&!by[t.supplier]) by[t.supplier]={supplier:t.supplier,balance:0,overdue:0,n:0,unpaid:0,last:null,type:serviceType(t.supplier),tracked:isTracked(t.supplier),terms:termsFor(t.supplier)}; });
+  /* Overdue is read off the payable lines, not the invoices, so a statement supplier is only
+     overdue once the statement itself is - not on the day its earliest invoice would have been. */
+  buildPayables(INV).forEach(p=>{ if(!p.paid&&p.state==="overdue"&&by[p.supplier]) by[p.supplier].overdue+=p.amt; });
+  Object.values(TERMS).forEach(t=>{ if(t.supplier&&!by[t.supplier]) by[t.supplier]={supplier:t.supplier,balance:0,overdue:0,n:0,unpaid:0,last:null,type:serviceType(t.supplier),tracked:isTracked(t.supplier),terms:termsFor(t.supplier),mode:payMode(t.supplier)}; });
   return Object.values(by);
 }
 function renderSuppliers(){
   crumb("suppliers");
-  let rows=supplierSummary().filter(s=>VIEW.hidden||s.tracked);
+  const all=supplierSummary();
+  const removed=all.filter(s=>!s.tracked);
+  let rows=all.filter(s=>VIEW.hidden?!s.tracked:s.tracked);
   const v=s=>({supplier:s.supplier.toLowerCase(),type:s.type.toLowerCase(),balance:s.balance,overdue:s.overdue,last:s.last?s.last.getTime():0,n:s.n})[SUP_SORT.key];
   rows.sort((a,b)=>{const x=v(a),y=v(b); return x<y?-SUP_SORT.dir:x>y?SUP_SORT.dir:0;});
   const h=(l,k,c)=>`<th class="sort ${c||""}" onclick="SUP_SORT.key==='${k}'?SUP_SORT.dir=-SUP_SORT.dir:(SUP_SORT.key='${k}',SUP_SORT.dir=${k==="supplier"||k==="type"?1:-1});route()">${l}${SUP_SORT.key===k?(SUP_SORT.dir>0?" ▲":" ▼"):""}</th>`;
-  document.getElementById("filters").innerHTML=`<span class="chip ${VIEW.hidden?"on":""}" onclick="VIEW.hidden=!VIEW.hidden;route()">Show untracked</span><span class="grow"></span><button class="btn small" onclick="editTerms('')">+ Add supplier</button>`;
+  document.getElementById("filters").innerHTML=
+    `<span class="chip ${VIEW.hidden?"on":""}" onclick="VIEW.hidden=!VIEW.hidden;route()">${VIEW.hidden?"Showing removed":"Show removed"+(removed.length?" ("+removed.length+")":"")}</span>`
+    +`<span class="grow"></span><button class="btn small" onclick="editTerms('')">+ Add supplier</button>`;
   document.getElementById("app").innerHTML=warnings()+`<div class="card">
-    <div class="label">${rows.length} suppliers · ${fmtMoney(rows.reduce((a,s)=>a+s.balance,0))} outstanding</div>
-    <table><thead><tr>${h("Supplier","supplier")}${h("Type","type","hide-sm")}${h("Terms","terms","hide-sm")}${h("Outstanding","balance","num")}${h("Overdue","overdue","num")}${h("Last invoice","last","hide-sm")}<th></th></tr></thead><tbody>
+    <div class="label">${rows.length} ${VIEW.hidden?"removed":"suppliers"} · ${fmtMoney(rows.reduce((a,s)=>a+s.balance,0))} outstanding</div>
+    <table><thead><tr>${h("Supplier","supplier")}${h("Type","type","hide-sm")}<th class="hide-sm">Paid as</th>${h("Terms","terms","hide-sm")}${h("Outstanding","balance","num")}${h("Overdue","overdue","num")}${h("Last invoice","last","hide-sm")}<th></th></tr></thead><tbody>
     ${rows.map(s=>`<tr class="click" onclick="go('s/'+encodeURIComponent(${JSON.stringify(s.supplier).replace(/"/g,"&quot;")}))">
-      <td><b>${esc(s.supplier)}</b>${s.tracked?"":' <span class="pill grey">untracked</span>'}${sendsStatement(s.supplier)?"":' <span class="pill grey" title="No statement - track the balance here">no statement</span>'}</td>
+      <td><b>${esc(s.supplier)}</b>${s.n?"":' <span class="pill grey">no invoices yet</span>'}</td>
       <td class="hide-sm">${esc(s.type)}</td>
+      <td class="hide-sm"><span class="tgl ${s.mode==="statement"?"on":""}" title="Switch between paying invoice by invoice and paying the monthly statement" onclick="event.stopPropagation();setPayMode(${JSON.stringify(s.supplier).replace(/"/g,"&quot;")},'${s.mode==="statement"?"invoice":"statement"}')">${s.mode==="statement"?"Statement":"Invoices"}</span></td>
       <td class="hide-sm terms">${esc(termsLabel(s.terms))}${s.terms.saved?"":" (default)"}</td>
       <td class="num">${s.balance?fmtMoney(s.balance):"–"}</td>
-      <td class="num ${s.overdue>0?"up":""}" style="${s.overdue>0?"color:var(--red);font-weight:600":""}">${s.overdue?fmtMoney(s.overdue):"–"}</td>
+      <td class="num" style="${s.overdue>0?"color:var(--red);font-weight:600":""}">${s.overdue?fmtMoney(s.overdue):"–"}</td>
       <td class="hide-sm">${fmtD(s.last)}</td>
-      <td class="num"><button class="btn outline small" onclick="event.stopPropagation();editTerms(${JSON.stringify(s.supplier).replace(/"/g,"&quot;")})">edit</button></td>
+      <td class="num"><button class="btn outline small" onclick="event.stopPropagation();editTerms(${JSON.stringify(s.supplier).replace(/"/g,"&quot;")})">edit</button>
+        <button class="btn outline small" title="${s.tracked?"Not one of ours - hide it":"Put it back"}" onclick="event.stopPropagation();removeSupplier(${JSON.stringify(s.supplier).replace(/"/g,"&quot;")},${s.tracked?"true":"false"})">${s.tracked?"remove":"restore"}</button></td>
     </tr>`).join("")}
-    </tbody></table></div>`;
+    </tbody></table>
+    ${rows.length?"":`<div id="status">${VIEW.hidden?"Nothing has been removed.":"No suppliers."}</div>`}
+    <div class="note">${VIEW.hidden?"Removed suppliers keep their invoices — they are only hidden from the payables list and the supplier list.":"Removing a supplier hides it from payables without deleting anything. Use it for whatever the invoice reader has picked up that is not a supplier."}</div>
+  </div>`;
 }
 
 /* ================= SUPPLIER VIEW ================= */
@@ -746,10 +978,11 @@ function renderSupplier(name){
   const t=TERMS[norm(name)];
   if(!rows.length&&!t){ document.getElementById("app").innerHTML=`<a class="back" onclick="go('sup')">Suppliers</a><div class="err">No supplier called "${esc(name)}"</div>`; return; }
   crumb(name);
-  const unpaid=rows.filter(r=>!r.paid);
-  const balance=unpaid.reduce((a,r)=>a+r.amt,0);
-  const overdue=unpaid.filter(r=>r.state==="overdue").reduce((a,r)=>a+r.amt,0);
-  const terms=termsFor(name), pd=paymentDetails(name), em=remittanceEmail(name);
+  PAYABLES=buildPayables(rows);
+  const unpaid=PAYABLES.filter(p=>!p.paid);
+  const balance=unpaid.reduce((a,p)=>a+p.amt,0);
+  const overdue=unpaid.filter(p=>p.state==="overdue").reduce((a,p)=>a+p.amt,0);
+  const terms=termsFor(name), pd=paymentDetails(name), em=remittanceEmail(name), mode=payMode(name);
   const payments={};
   rows.filter(r=>r.paid).forEach(r=>{ const k=r.pay.batch||r.pay.ts; (payments[k]=payments[k]||{date:r.pay.paid_date,ref:r.pay.reference,method:r.pay.method,user:r.pay.user,total:0,n:0,rows:[]}); payments[k].total+=r.amt; payments[k].n++; payments[k].rows.push(r); });
   const payList=Object.values(payments).sort((a,b)=>(b.date||0)-(a.date||0));
@@ -757,7 +990,7 @@ function renderSupplier(name){
   document.getElementById("app").innerHTML=`<a class="back" onclick="go('sup')">Suppliers</a>
     <div class="row" style="align-items:flex-start;margin-bottom:12px">
       <div class="grow"><h2>${esc(name)}</h2>
-        <div class="sub">${esc(serviceType(name))} · ${esc(termsLabel(terms))}${terms.saved?"":" (default)"} · ${sendsStatement(name)?"sends statements":"no statement - balance tracked here"}${isTracked(name)?"":" · untracked"}</div>
+        <div class="sub">${esc(serviceType(name))} · ${esc(termsLabel(terms))}${terms.saved?"":" (default)"} · ${esc(payModeLabel(mode))}${isTracked(name)?"":" · removed from payables"}</div>
         ${em?`<div class="terms">remittance to ${esc(em)}${t&&t.remittance_email?"":" (from invoice emails)"}</div>`:""}
         ${t&&t.notes?`<div class="note">${esc(t.notes)}</div>`:""}
       </div>
@@ -765,7 +998,7 @@ function renderSupplier(name){
     </div>
     <div class="statgrid">
       <div class="stat" style="cursor:default"><div class="v ${overdue>0?"red":""}">${fmtMoney(overdue)}</div><div class="k">Overdue</div></div>
-      <div class="stat" style="cursor:default"><div class="v">${fmtMoney(balance)}</div><div class="k">Balance outstanding · ${unpaid.length}</div></div>
+      <div class="stat" style="cursor:default"><div class="v">${fmtMoney(balance)}</div><div class="k">Balance outstanding · ${rows.filter(r=>!r.paid).length}</div></div>
       <div class="stat" style="cursor:default"><div class="v">${fmtMoney(rows.filter(r=>r.date>=addDays(TODAY,-30)).reduce((a,r)=>a+r.amt,0))}</div><div class="k">Invoiced last 30 days</div></div>
     </div>
     <div class="card"><div class="row"><span class="label" style="margin:0">Payment details</span><span class="grow"></span>
@@ -774,14 +1007,12 @@ function renderSupplier(name){
       ${pd?`<pre class="pay">${esc(pd)}</pre>`:`<div class="note">None saved. Edit terms to add the BSB, account and customer reference so they can be copied from here.</div>`}
     </div>
     <div class="card"><div class="label">Invoiced by month</div>${monthChart(rows)}</div>
-    <div class="card"><div class="label">All invoices · ${rows.length}</div>${invoiceTable(rows,{noSupplier:true,empty:"No invoices yet."})}</div>
-    ${payList.length?`<div class="card"><div class="label">Payments · ${payList.length}</div><table><thead><tr><th>Paid</th><th>Reference</th><th class="hide-sm">Method</th><th class="hide-sm">By</th><th class="num">Invoices</th><th class="num">Amount</th><th></th></tr></thead><tbody>
+    <div class="card"><div class="label">${mode==="statement"?"Statements":"Invoices"} · ${PAYABLES.length}${mode==="statement"?" ("+rows.length+" invoices)":""}</div>${payableTable(PAYABLES,{noSupplier:true,empty:"No invoices yet."})}</div>
+    ${payList.length?`<div class="card"><div class="label">Payments · ${payList.length}</div><table><thead><tr><th>Paid</th><th>Reference</th><th class="hide-sm">Method</th><th class="hide-sm">Marked by</th><th class="num">Invoices</th><th class="num">Amount</th><th></th></tr></thead><tbody>
       ${payList.map(p=>`<tr><td>${fmtD(p.date)}</td><td>${esc(p.ref)||"–"}</td><td class="hide-sm">${esc(p.method)}</td><td class="hide-sm">${esc(p.user)}</td><td class="num">${p.n}</td><td class="num">${fmtMoney(p.total)}</td>
         <td class="num"><a class="btn outline small" href="${remittanceMailto(name,p.rows,{paid_date:p.date?fmtISO(p.date):"",reference:p.ref,method:p.method})}">Remittance</a></td></tr>`).join("")}
       </tbody></table></div>`:""}`;
 }
-/* Last 12 months, invoices net of credits. Unpaid share of each month in red so an
-   old month still carrying red is the thing that catches the eye. */
 function monthChart(rows){
   const months=[]; for(let i=11;i>=0;i--){ const d=new Date(TODAY.getFullYear(),TODAY.getMonth()-i,1); months.push({key:d.getFullYear()+"-"+d.getMonth(),label:["J","F","M","A","M","J","J","A","S","O","N","D"][d.getMonth()],total:0,unpaid:0}); }
   const idx={}; months.forEach(m=>idx[m.key]=m);
@@ -798,28 +1029,30 @@ function monthChart(rows){
 /* ================= TERMS EDITOR ================= */
 function editTerms(name){
   const t=TERMS[norm(name)]||{};
-  const cur=termsFor(name);
+  const cur=termsFor(name), mode=name?payMode(name):"invoice";
   const known=[...new Set(INV.map(r=>r.supplier))].sort();
   openModal(`<h3>${name?"Terms for "+esc(name):"Add a supplier"}</h3>
     ${name?"":`<div class="field">Supplier name (exactly as it appears on invoices)<input id="tSup" list="supList" placeholder="Reward Hospitality"><datalist id="supList">${known.map(s=>`<option value="${esc(s)}">`).join("")}</datalist></div>`}
     <div class="two">
-      <div class="field">Service type<select id="tType">${SERVICE_TYPES.map(s=>`<option ${(t.service_type||serviceType(name))===s?"selected":""}>${s}</option>`).join("")}</select></div>
-      <div class="field">Track in this tool<select id="tTracked"><option value="yes" ${isTracked(name)?"selected":""}>Yes</option><option value="no" ${isTracked(name)?"":"selected"}>No - hide</option></select></div>
+      <div class="field">Service type<select id="tType">${SERVICE_TYPES.map(x=>`<option ${(t.service_type||serviceType(name))===x?"selected":""}>${x}</option>`).join("")}</select></div>
+      <div class="field">Paid as<select id="tMode">${PAY_MODES.map(([v,l])=>`<option value="${v}" ${mode===v?"selected":""}>${l}</option>`).join("")}</select></div>
       <div class="field">Payment terms<select id="tTerms"><option value="eom" ${cur.type!=="net"?"selected":""}>End of month + days</option><option value="net" ${cur.type==="net"?"selected":""}>Days from invoice date</option></select></div>
       <div class="field">Days<input id="tDays" type="number" min="0" max="120" value="${cur.days}"></div>
-      <div class="field">Sends statements<select id="tStmt"><option value="yes" ${sendsStatement(name)?"selected":""}>Yes</option><option value="no" ${sendsStatement(name)?"":"selected"}>No - track balance here</option></select></div>
+      <div class="field">Show in payables<select id="tTracked"><option value="yes" ${isTracked(name)?"selected":""}>Yes</option><option value="no" ${isTracked(name)?"":"selected"}>No - not one of ours</option></select></div>
       <div class="field">Remittance email<input id="tEmail" type="email" value="${esc(t.remittance_email||"")}" placeholder="${esc(name?remittanceEmail(name):"")}"></div>
     </div>
     <div class="field">Payment details (BSB, account, customer reference - copied as typed)<textarea id="tPay">${esc(t.payment_details||"")}</textarea></div>
     <div class="field">Notes (e.g. the terms we actually agreed vs what the statement says)<input id="tNotes" value="${esc(t.notes||"")}"></div>
-    <div class="row" style="justify-content:flex-end"><button class="btn outline" onclick="closeModal()">Cancel</button><button class="btn" id="tGo">Save terms</button></div>`);
+    <div class="note">On <b>Monthly statement</b> the payables list shows one line per calendar month instead of each invoice. The invoices are still there — inside the statement, in this supplier's page and in Reports.</div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn outline" onclick="closeModal()">Cancel</button><button class="btn" id="tGo">Save terms</button></div>`);
   document.getElementById("tGo").onclick=async()=>{
     const sup=name||document.getElementById("tSup").value.trim();
     if(!sup){ toast("Supplier name is needed"); return; }
     const btn=document.getElementById("tGo"); btn.disabled=true; btn.textContent="Saving…";
+    const m=document.getElementById("tMode").value;
     const v={ supplier:sup, tracked:document.getElementById("tTracked").value, service_type:document.getElementById("tType").value,
       terms_type:document.getElementById("tTerms").value, terms_days:String(Math.max(0,+document.getElementById("tDays").value||0)),
-      sends_statement:document.getElementById("tStmt").value, payment_details:document.getElementById("tPay").value.trim(),
+      pay_mode:m, sends_statement:m==="statement"?"yes":"no", payment_details:document.getElementById("tPay").value.trim(),
       remittance_email:document.getElementById("tEmail").value.trim(), notes:document.getElementById("tNotes").value.trim() };
     try{ await saveTerms(v); closeModal(); toast("Terms saved"); if(!name) go("s/"+encodeURIComponent(sup)); else route(); }
     catch(e){ btn.disabled=false; btn.textContent="Save terms"; toast(e.message); }
