@@ -122,7 +122,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-073820"; console.log("Invoices " + BUILD_ID);
+const BUILD_ID = "build-114500"; console.log("Invoices " + BUILD_ID);
 { const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
 
 const OPS_SHEET_ID   = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -176,6 +176,40 @@ const PAY_METHODS = ["Bank transfer","BPAY","Direct debit","Card","Cash","Other"
                statement is what actually gets paid. The invoices are still there: they show
                inside the statement, in the supplier view and in Reports. */
 const PAY_MODES = [["statement","Monthly statement"],["invoice","Invoice by invoice"]];
+
+/* Everything invoiced on or before a supplier's paid-through date is treated as settled.
+   Michaela has been paying these suppliers for years without this tool, so the Payments tab
+   knows nothing about eight months of transfers that did happen; without a starting line the
+   dashboard shows a backlog that was paid long ago.
+
+   Dates below are derived from the bank export Jan-Sep 2026. Seven are read from the reference
+   she typed on the transfer ("July Red Square", "24/7 -10/8 RDSQRE") and are exact. The rest
+   are inferred as the month before her most recent payment, which is what every dated
+   reference in that file shows her doing - close, but worth checking against a statement
+   before relying on it. Any of them can be corrected per supplier under Edit terms. */
+const OPENING_POSITION = [
+  ["AB Refridgeration","2026-08-31"],                     // paid 2026-09-07 $893.22 "1211 RD SQRE"
+  ["BDD Australia Pty Ltd","2026-07-31"],                 // paid 2026-08-26 $5,766.88 BPAY
+  ["Bidfood Hobart","2026-08-31"],                        // paid 2026-09-01 $1,828.40 BPAY
+  ["Cripps Nubake Pty Ltd","2026-07-31"],                 // paid 2026-08-14 "red005 June july"
+  ["David Johnstone & Associates Pty Ltd","2026-06-30"],  // paid 2026-07-20 "Luma June"
+  ["Doppio Foods Pty Ltd","2026-07-31"],                  // paid 2026-08-28 "July Red Square"
+  ["Fresh Cut (TAS) Pty Ltd","2026-07-31"],               // paid 2026-08-17 $6,049.60
+  ["Freshline Tasmania","2026-08-31"],                    // paid 2026-09-07 $1,370.94
+  ["Juicy Isle Pty Ltd","2026-07-31"],                    // paid 2026-09-01 "June July RDSQRE"
+  ["Manna Bakehouse","2026-08-31"],                       // paid 2026-09-03, both venues
+  ["Nichols Poultry P/L","2026-08-31"],                   // paid 2026-09-04 $2,531.90
+  ["Onepac | Tas-Isle Trading","2026-07-31"],             // paid 2026-09-04 "July Red Square"
+  ["PFD Food Services Pty Ltd","2026-07-31"],             // paid 2026-08-26 BPAY
+  ["Reward Hospitality","2026-07-31"],                    // paid 2026-08-27 $1,623.38
+  ["Savour Foods","2026-08-31"],                          // paid 2026-09-02 $5,084.08
+  ["Scooter's Electrical Services Pty Ltd","2026-06-30"], // paid 2026-07-24 $476.60
+  ["Scottsdale Pork","2026-07-31"],                       // paid 2026-08-17 $1,866.26
+  ["Southern Cookies","2026-07-31"],                      // paid 2026-08-10 $1,842.50
+  ["Southern Foodservice Pty Ltd","2026-08-10"],          // paid 2026-09-07 "24/7 -10/8 RDSQRE"
+  ["Supagas Pty Limited","2026-07-31"],                   // paid 2026-08-27 BPAY
+  ["Valhalla Ice Cream","2026-07-31"]                     // paid 2026-08-10 "July Red Square"
+];
 /* Most suppliers here are paid off the monthly statement, so that is the default and the
    invoice-by-invoice suppliers are the exception to flag. Change this if that ever flips. */
 const DEFAULT_PAY_MODE = "statement";
@@ -252,6 +286,14 @@ function payMode(supplier){
   return DEFAULT_PAY_MODE;
 }
 function payModeLabel(m){ return m==="statement" ? "Monthly statement" : "Invoice by invoice"; }
+/* A saved value always wins over the seeded one, so correcting a supplier sticks. */
+function paidThrough(supplier){
+  const t=TERMS[norm(supplier)];
+  if(t && t.paid_through) return gvizDate(t.paid_through);
+  const seed=OPENING_POSITION.find(p=>norm(p[0])===norm(supplier));
+  return seed?gvizDate(seed[1]):null;
+}
+function paidThroughSaved(supplier){ const t=TERMS[norm(supplier)]; return !!(t&&t.paid_through); }
 function paymentDetails(supplier){ const t=TERMS[norm(supplier)]; return t ? String(t.payment_details||"") : ""; }
 function remittanceEmail(supplier){
   const t=TERMS[norm(supplier)];
@@ -276,10 +318,15 @@ function derive(){
   INV.forEach(r=>{
     r.due=dueDate(r.date, termsFor(r.supplier));
     const p=PAY[r.key];
-    r.paid=!!(p && p.action==="pay");
-    r.pay=r.paid?p:null;
+    const pt=paidThrough(r.supplier);
+    /* Settled before the tool was in use. Treated as paid so it never shows as owing, but
+       flagged separately so it is obvious the tick came from the bank, not from Michaela. */
+    r.closed=!!(pt && r.date<=pt && !p);
+    r.paid=!!(p && p.action==="pay") || r.closed;
+    r.pay=(p&&p.action==="pay")?p:null;
     r.type_=serviceType(r.supplier);
-    if(r.paid) r.state="paid";
+    if(r.closed) r.state="closed";
+    else if(r.paid) r.state="paid";
     else if(!r.due) r.state="open";
     else{
       const d=daysBetween(TODAY, r.due);      // negative = overdue
@@ -623,7 +670,7 @@ function buildPayables(rows){
     if(payMode(r.supplier)!=="statement"){
       out.push({ pkey:"i:"+r.key, kind:"invoice", supplier:r.supplier, label:r.number||"(no number)",
                  date:r.date, due:r.due, total:r.amt, amt:r.amt, rows:[r], n:1, paidN:r.paid?1:0,
-                 paid:r.paid, state:r.state, type_:r.type_, credit:r.credit, check:r.check, pdf:r.pdf,
+                 paid:r.paid, closed:r.closed, state:r.state, type_:r.type_, credit:r.credit, check:r.check, pdf:r.pdf,
                  open:false, inv:r });
       return;
     }
@@ -638,12 +685,14 @@ function buildPayables(rows){
     }
     s.rows.push(r); s.n++; s.total+=r.amt;
     if(r.paid) s.paidN++; else s.amt+=r.amt;
+    if(r.closed) s.closedN=(s.closedN||0)+1;
     if(r.check) s.check=true;
   });
   out.filter(p=>p.kind==="statement").forEach(s=>{
     s.paid = s.n>0 && s.paidN===s.n;
+    s.closed = s.n>0 && (s.closedN||0)===s.n;
     if(s.paid){
-      s.amt=s.total; s.state="paid";
+      s.amt=s.total; s.state=s.closed?"closed":"paid";
       s.paidDate=s.rows.reduce((m,r)=>(r.pay&&r.pay.paid_date&&(!m||r.pay.paid_date>m))?r.pay.paid_date:m, null);
     }else{
       const d=daysBetween(TODAY, s.due);
@@ -656,6 +705,7 @@ function buildPayables(rows){
   return out;
 }
 function pDueLabel(p){
+  if(p.closed) return "settled";
   if(p.paid) return "paid"+(p.paidDate?" "+fmtD(p.paidDate):(p.inv&&p.inv.pay?" "+fmtD(p.inv.pay.paid_date):""));
   if(!p.due) return "";
   const d=daysBetween(TODAY, p.due);
@@ -698,7 +748,7 @@ function clearSel(){ SEL={}; LAST_SEL=""; route(); }
 function selBySupplier(){
   const by={};
   selPayables().forEach(p=>{
-    if(p.paid) return;
+    if(p.paid||p.closed) return;
     const b=by[p.supplier]||(by[p.supplier]={supplier:p.supplier, amt:0, n:0, lines:[]});
     b.amt+=p.amt; b.n+=p.rows.filter(r=>!r.paid).length; b.lines.push(p);
   });
@@ -782,7 +832,7 @@ function openInvoice(key, backPkey){
     r.freight?["Freight", fmtMoney(r.freight)]:null,
     ["Total", "<b>"+fmtMoney(r.amt)+"</b>"],
     r.check?["Processor flag", '<span class="pill check">check</span> the reader was unsure - compare against the PDF']:null,
-    r.paid?["Paid", fmtD(r.pay.paid_date)+(r.pay.reference?" · ref "+esc(r.pay.reference):"")+(r.pay.method?" · "+esc(r.pay.method):"")+(r.pay.user?" · marked by "+esc(r.pay.user):"")]:null,
+    (r.paid&&r.pay)?["Paid", fmtD(r.pay.paid_date)+(r.pay.reference?" · ref "+esc(r.pay.reference):"")+(r.pay.method?" · "+esc(r.pay.method):"")+(r.pay.user?" · marked by "+esc(r.pay.user):"")]:null,
     r.pay&&r.pay.note?["Note", esc(r.pay.note)]:null
   ].filter(Boolean);
   openModal(`<h3>${esc(r.supplier)} ${esc(r.number)}</h3>
@@ -875,9 +925,9 @@ function renderHome(){
   const sum=ps=>ps.reduce((a,p)=>a+p.amt,0);
   const over=unpaid.filter(p=>p.state==="overdue"), soon=unpaid.filter(p=>p.state==="soon");
   const m0=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);
-  const paidMonth=dateFiltered().filter(r=>r.paid&&r.pay.paid_date&&r.pay.paid_date>=m0);
+  const paidMonth=dateFiltered().filter(r=>r.paid&&r.pay&&r.pay.paid_date&&r.pay.paid_date>=m0);
 
-  const chips=[["unpaid","Unpaid"],["overdue","Overdue"],["soon","Due soon"],["paid","Paid"],["all","All"]];
+  const chips=[["unpaid","Unpaid"],["overdue","Overdue"],["soon","Due soon"],["paid","Paid"],["settled","Settled"],["all","All"]];
   const types=[...new Set(PAYABLES.map(p=>p.type_))].sort();
   const ranged=VIEW.from||VIEW.to;
   document.getElementById("filters").innerHTML=
@@ -907,7 +957,9 @@ function paintHomeTable(){
   if(VIEW.status==="unpaid") list=list.filter(p=>!p.paid);
   else if(VIEW.status==="overdue") list=list.filter(p=>p.state==="overdue");
   else if(VIEW.status==="soon") list=list.filter(p=>p.state==="soon");
-  else if(VIEW.status==="paid") list=list.filter(p=>p.paid);
+  else if(VIEW.status==="paid") list=list.filter(p=>p.paid&&!p.closed);
+  else if(VIEW.status==="settled") list=list.filter(p=>p.closed);
+  if(VIEW.status!=="settled"&&VIEW.status!=="all") list=list.filter(p=>!p.closed);
   if(VIEW.types.length) list=list.filter(p=>VIEW.types.includes(p.type_));
   const q=VIEW.q.trim().toLowerCase();
   if(q) list=list.filter(p=>p.supplier.toLowerCase().includes(q)||p.label.toLowerCase().includes(q)||p.rows.some(r=>r.number.toLowerCase().includes(q)));
@@ -928,7 +980,8 @@ function termsSnapshot(supplier){
            terms_type:cur.type, terms_days:String(cur.days), pay_mode:payMode(supplier),
            sends_statement:payMode(supplier)==="statement"?"yes":"no",
            payment_details:String(t.payment_details||""), remittance_email:String(t.remittance_email||""),
-           notes:String(t.notes||"") };
+           notes:String(t.notes||""),
+           paid_through:(paidThrough(supplier)?fmtISO(paidThrough(supplier)):"") };
 }
 async function patchTerms(supplier, changes){
   const v=Object.assign(termsSnapshot(supplier), changes);
@@ -1001,13 +1054,14 @@ function renderSupplier(name){
   const overdue=unpaid.filter(p=>p.state==="overdue").reduce((a,p)=>a+p.amt,0);
   const terms=termsFor(name), pd=paymentDetails(name), em=remittanceEmail(name), mode=payMode(name);
   const payments={};
-  rows.filter(r=>r.paid).forEach(r=>{ const k=r.pay.batch||r.pay.ts; (payments[k]=payments[k]||{date:r.pay.paid_date,ref:r.pay.reference,method:r.pay.method,user:r.pay.user,total:0,n:0,rows:[]}); payments[k].total+=r.amt; payments[k].n++; payments[k].rows.push(r); });
+  rows.filter(r=>r.paid&&r.pay).forEach(r=>{ const k=r.pay.batch||r.pay.ts; (payments[k]=payments[k]||{date:r.pay.paid_date,ref:r.pay.reference,method:r.pay.method,user:r.pay.user,total:0,n:0,rows:[]}); payments[k].total+=r.amt; payments[k].n++; payments[k].rows.push(r); });
   const payList=Object.values(payments).sort((a,b)=>(b.date||0)-(a.date||0));
 
   document.getElementById("app").innerHTML=`<a class="back" onclick="go('sup')">Suppliers</a>
     <div class="row" style="align-items:flex-start;margin-bottom:12px">
       <div class="grow"><h2>${esc(name)}</h2>
         <div class="sub">${esc(serviceType(name))} · ${esc(termsLabel(terms))}${terms.saved?"":" (default)"} · ${esc(payModeLabel(mode))}${(t&&t.pay_mode)?"":" (default)"}${isTracked(name)?"":" · removed from payables"}</div>
+        ${paidThrough(name)?`<div class="terms">settled up to ${fmtD(paidThrough(name))}${paidThroughSaved(name)?"":" (from the bank feed, not yet confirmed)"}</div>`:""}
         ${em?`<div class="terms">remittance to ${esc(em)}${t&&t.remittance_email?"":" (from invoice emails)"}</div>`:""}
         ${t&&t.notes?`<div class="note">${esc(t.notes)}</div>`:""}
       </div>
@@ -1057,6 +1111,7 @@ function editTerms(name){
       <div class="field">Days<input id="tDays" type="number" min="0" max="120" value="${cur.days}"></div>
       <div class="field">Show in payables<select id="tTracked"><option value="yes" ${isTracked(name)?"selected":""}>Yes</option><option value="no" ${isTracked(name)?"":"selected"}>No - not one of ours</option></select></div>
       <div class="field">Remittance email<input id="tEmail" type="email" value="${esc(t.remittance_email||"")}" placeholder="${esc(name?remittanceEmail(name):"")}"></div>
+      <div class="field">Paid up to (everything invoiced on or before this date is settled)<input id="tPaid" type="date" value="${name&&paidThrough(name)?fmtISO(paidThrough(name)):""}"></div>
     </div>
     <div class="field">Payment details (BSB, account, customer reference - copied as typed)<textarea id="tPay">${esc(t.payment_details||"")}</textarea></div>
     <div class="field">Notes (e.g. the terms we actually agreed vs what the statement says)<input id="tNotes" value="${esc(t.notes||"")}"></div>
@@ -1070,7 +1125,8 @@ function editTerms(name){
     const v={ supplier:sup, tracked:document.getElementById("tTracked").value, service_type:document.getElementById("tType").value,
       terms_type:document.getElementById("tTerms").value, terms_days:String(Math.max(0,+document.getElementById("tDays").value||0)),
       pay_mode:m, sends_statement:m==="statement"?"yes":"no", payment_details:document.getElementById("tPay").value.trim(),
-      remittance_email:document.getElementById("tEmail").value.trim(), notes:document.getElementById("tNotes").value.trim() };
+      remittance_email:document.getElementById("tEmail").value.trim(), notes:document.getElementById("tNotes").value.trim(),
+      paid_through:document.getElementById("tPaid").value };
     try{ await saveTerms(v); closeModal(); toast("Terms saved"); if(!name) go("s/"+encodeURIComponent(sup)); else route(); }
     catch(e){ btn.disabled=false; btn.textContent="Save terms"; toast(e.message); }
   };
