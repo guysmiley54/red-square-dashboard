@@ -122,7 +122,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-131000"; console.log("Invoices " + BUILD_ID);
+const BUILD_ID = "build-141500"; console.log("Invoices " + BUILD_ID);
 { const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
 
 const OPS_SHEET_ID   = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -223,6 +223,47 @@ const OPENING_POSITION = [
 /* Most suppliers here are paid off the monthly statement, so that is the default and the
    invoice-by-invoice suppliers are the exception to flag. Change this if that ever flips. */
 const DEFAULT_PAY_MODE = "statement";
+
+/* Not suppliers. The invoice reader picks up anything with an amount on it - a vehicle
+   purchase, a bed, our own trading name on a customer receipt, an Osko payment notification.
+   These are dropped at load, so they never reach the payables list, the supplier list or the
+   overdue total. Reports still work off the same INV array, so removing something here takes
+   it out of spend reporting too - which is right for a car, wrong for a real supplier. Add a
+   name only when it is genuinely not an operating cost. */
+const NOT_SUPPLIERS = [
+  "Osko",                                  // payment notification, not a bill
+  "Red Square Cafe LUMA",                  // ourselves
+  "Motors Tas Pty Ltd",                    // vehicle purchase, $47,000 one-off
+  "A.H. Beard Pty Ltd",                    // furniture
+  "Australian Therapeutic Proteins Pty Ltd",
+  "Harvey Norman AV/IT Moonah",
+  "RIS Safety"
+];
+
+/* What the bank feed actually shows for each supplier, Jan-Sep 2026. Defaults were making
+   every supplier look like end-of-month + 7 on a monthly statement, which matches almost none
+   of them: Southern is paid fortnightly on an invoice-date range, Manna and Cripps are paid
+   per venue, and the printed terms on the statements we have range from 7 to 30 days.
+   A saved value in SupplierTerms beats all of this. */
+const SUPPLIER_PROFILE = {
+  // paid on an invoice-date range, not a month - she types the range on the transfer
+  "Southern Foodservice Pty Ltd": { mode:"invoice", type:"eom", days:7,  cadence:"fortnightly, by invoice date range" },
+  "Manna Bakehouse":              { mode:"invoice", type:"eom", days:7,  cadence:"fortnightly, split per venue" },
+  "Cripps Nubake Pty Ltd":        { mode:"invoice", type:"eom", days:7,  cadence:"monthly, split per venue" },
+  // statement suppliers, terms read off their own statements where we have one
+  "Bidfood Hobart":               { mode:"statement", type:"eom", days:30, cadence:"BPAY monthly (statement says M30, month end + 30)" },
+  "Asahi Beverages Pty Ltd":      { mode:"statement", type:"eom", days:28, cadence:"monthly (statement due 28th)" },
+  "Savour Foods":                 { mode:"statement", type:"net", days:14, cadence:"monthly (invoices due 14 days)" },
+  "Scottsdale Pork":              { mode:"statement", type:"net", days:7,  cadence:"monthly (invoices due 7 days)" },
+  "PFD Food Services Pty Ltd":    { mode:"statement", type:"eom", days:7,  cadence:"BPAY monthly" },
+  "BDD Australia Pty Ltd":        { mode:"statement", type:"eom", days:7,  cadence:"BPAY, roughly fortnightly" },
+  "Supagas Pty Limited":          { mode:"statement", type:"eom", days:7,  cadence:"BPAY monthly" },
+  "Veolia Environmental Services (Australia) Pty Ltd": { mode:"statement", type:"eom", days:30, cadence:"BPAY monthly (statement due 30 Sep)" },
+  "Shell Energy Retail Pty Ltd":  { mode:"statement", type:"eom", days:7,  cadence:"direct debit - nothing to pay manually" },
+  "Doppio Foods Pty Ltd":         { mode:"statement", type:"eom", days:7,  cadence:"monthly" },
+  "Onepac | Tas-Isle Trading":    { mode:"statement", type:"eom", days:7,  cadence:"monthly" }
+};
+function profile(supplier){ return SUPPLIER_PROFILE[supplier] || null; }
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 /* ================= STATE ================= */
@@ -271,6 +312,8 @@ function dueDate(invDate, terms){
 function termsFor(supplier){
   const t=TERMS[norm(supplier)];
   if(t && t.terms_type) return { type:t.terms_type, days:+t.terms_days||0, saved:true };
+  const p=profile(supplier);
+  if(p) return { type:p.type, days:p.days, saved:false, fromProfile:true };
   return Object.assign({saved:false}, DEFAULT_TERMS);
 }
 function termsLabel(t){
@@ -293,7 +336,8 @@ function payMode(supplier){
   const v=t?String(t.pay_mode||"").toLowerCase():"";
   if(v==="statement"||v==="invoice") return v;
   if(t && String(t.sends_statement||"").toLowerCase()==="no") return "invoice";
-  return DEFAULT_PAY_MODE;
+  const p=profile(supplier);
+  return p ? p.mode : DEFAULT_PAY_MODE;
 }
 function payModeLabel(m){ return m==="statement" ? "Monthly statement" : "Invoice by invoice"; }
 /* A saved value always wins over the seeded one, so correcting a supplier sticks. */
@@ -480,6 +524,9 @@ function ingest(inv,cfgRows,payRows,termRows,feedDaily,weeklyRows){
     category:String(r.category||""), type:String(r.type||"invoice").trim(),
     status:String(r.status||""), pdf:String(r.pdf_url||"").trim(), src:String(r.source||""), venue:String(r.venue||"")
   })).filter(r=>r.supplier&&r.date&&r.type!=="superseded");
+  /* Dropped here, not filtered in the view, so they cannot reappear in a total, a chart or a
+     supplier count anywhere in the page. */
+  const notSup={}; NOT_SUPPLIERS.forEach(n=>notSup[norm(n)]=true);
   const variants={};
   raw.forEach(r=>{const k=norm(r.supplier);(variants[k]=variants[k]||{})[r.supplier]=(variants[k][r.supplier]||0)+1;});
   CANON={};
@@ -487,6 +534,8 @@ function ingest(inv,cfgRows,payRows,termRows,feedDaily,weeklyRows){
   TERMS_MERGE={};
   cfgRows.forEach(r=>{ const k=norm(r.supplier), m=String(r.merge_into||"").trim(); if(k&&m) TERMS_MERGE[k]=m; });
   raw.forEach(r=>{ r.supplier=canonName(r.supplier); });
+  const dropped=raw.filter(r=>notSup[norm(r.supplier)]).length;
+  if(dropped) console.log("dropped "+dropped+" rows from NOT_SUPPLIERS");
 
   /* Credit notes arrive with an inconsistent sign (44 of 49 negative, 5 positive as at
      7 Sep 2026). Force them negative so a balance is always invoices minus credits. */
@@ -500,7 +549,7 @@ function ingest(inv,cfgRows,payRows,termRows,feedDaily,weeklyRows){
      the first, flag the rest so they are visible but never counted. */
   const seen={};
   raw.forEach(r=>{ r.dup=!!seen[r.key]; seen[r.key]=true; });
-  INV=raw.filter(r=>!r.dup);
+  INV=raw.filter(r=>!r.dup && !notSup[norm(r.supplier)]);
 
   /* Latest row wins, per supplier. Supplier names in the log are whatever the dashboard
      called them at the time; canonicalise again so a later merge does not orphan them. */
@@ -643,7 +692,17 @@ function openPayDialog(pkeys){
   const lines=pkeys.map(pFind).filter(p=>p&&!p.paid);
   const rows=[]; lines.forEach(p=>p.rows.forEach(r=>{ if(!r.paid) rows.push(r); }));
   if(!rows.length) return;
-  const sups=[...new Set(lines.map(p=>p.supplier))];
+  openPayRows(rows, lines, pkeys);
+}
+/* Takes the invoices directly, so a part-month selection and a whole statement go through the
+   same path and log the same way. */
+function openPayRows(rows, lines, pkeys){
+  lines=lines||[]; pkeys=pkeys||[];
+  const sups=[...new Set(rows.map(r=>r.supplier))];
+  if(!lines.length){
+    /* Selected invoice by invoice: show them individually rather than as a line. */
+    lines=rows.map(r=>({supplier:r.supplier, label:r.number||"(no number)", kind:"invoice", n:1, paidN:0, date:r.date, amt:r.amt}));
+  }
   const total=rows.reduce((a,r)=>a+r.amt,0);
   openModal(`<h3>Mark as paid</h3>
     <table><thead><tr><th>Supplier</th><th>Line</th><th class="hide-sm">Date</th><th class="num">Amount</th></tr></thead><tbody>
@@ -664,6 +723,7 @@ function openPayDialog(pkeys){
     try{
       await markPaid(rows.map(r=>r.key), info);
       pkeys.forEach(k=>{ delete SEL[k]; });
+      DSEL={};
       afterPaid(rows, info);
       route();
     }catch(e){ btn.disabled=false; btn.textContent="Mark as paid"; toast(e.message); }
@@ -827,30 +887,70 @@ function openBreakdown(){
 }
 
 /* ================= DETAIL ================= */
+/* Invoice-level selection inside a statement. She does not always pay a whole month: Southern
+   is paid on an invoice-date range, and part-months happen everywhere when something arrives
+   late. Ticking rows here gives the exact figure to type into the bank, and pays only those
+   invoices. Kept separate from the main-page selection, which works on whole lines. */
+let DSEL = {};
+function dselTotal(){ return Object.keys(DSEL).map(k=>INV.find(r=>r.key===k)).filter(Boolean).reduce((a,r)=>a+r.amt,0); }
+function dselToggle(key,on){ if(on) DSEL[key]=true; else delete DSEL[key]; paintDsel(); }
+function dselRange(pkey){
+  const p=pFind(pkey); if(!p) return;
+  const f=document.getElementById("dFrom").value, t=document.getElementById("dTo").value;
+  DSEL={};
+  p.rows.forEach(r=>{ if(r.paid) return; const d=fmtISO(r.date);
+    if((!f||d>=f)&&(!t||d<=t)) DSEL[r.key]=true; });
+  document.querySelectorAll('input[data-d]').forEach(cb=>{ cb.checked=!!DSEL[cb.dataset.d]; });
+  paintDsel();
+}
+function paintDsel(){
+  const all=document.getElementById("dTotal");
+  if(!all) return;                       // the statement dialog is not open
+  const n=Object.keys(DSEL).length, tot=dselTotal();
+  all.textContent=n?`${n} selected · ${fmtMoney(tot)}`:"none selected";
+  document.querySelectorAll(".dselact").forEach(b=>{ b.disabled=!n; });
+  document.querySelectorAll("tr[data-drow]").forEach(tr=>tr.classList.toggle("sel",!!DSEL[tr.dataset.drow]));
+}
 function openDetail(pkey){
   const p=pFind(pkey); if(!p) return;
   if(p.kind==="invoice") return openInvoice(p.rows[0].key, "");
+  DSEL={};
   const r=p.rows.slice().sort((a,b)=>a.date-b.date);
-  const terms=termsFor(p.supplier), pd=paymentDetails(p.supplier);
+  const unpaid=r.filter(x=>!x.paid);
+  const terms=termsFor(p.supplier), pd=paymentDetails(p.supplier), prof=profile(p.supplier);
+  const first=unpaid.length?fmtISO(unpaid[0].date):"", last=unpaid.length?fmtISO(unpaid[unpaid.length-1].date):"";
   openModal(`<h3>${esc(p.supplier)}</h3>
-    <div class="sub" style="margin-bottom:10px">${esc(p.label)} · ${esc(termsLabel(terms))} · ${pDueLabel(p)}${p.open?' <span class="pill grey">still accruing</span>':""}</div>
-    <div class="statgrid" style="grid-template-columns:1fr 1fr">
-      <div class="stat" style="cursor:default"><div class="v">${fmtMoney(p.amt)}</div><div class="k">${p.paid?"Paid":"To pay"}</div></div>
-      <div class="stat" style="cursor:default"><div class="v">${fmtMoney(p.total)}</div><div class="k">Invoiced · ${p.n}${p.paidN&&!p.paid?" · "+p.paidN+" already paid":""}</div></div>
+    <div class="sub" style="margin-bottom:8px">${esc(p.label)} · ${esc(termsLabel(terms))} · ${pDueLabel(p)}${p.open?' <span class="pill grey">still accruing</span>':""}</div>
+    ${prof?`<div class="terms" style="margin-bottom:8px">${esc(prof.cadence)}</div>`:""}
+    <div class="row" style="margin-bottom:8px">
+      <span class="sub">Pay invoices dated</span>
+      <input type="date" id="dFrom" value="${first}"><span class="sub">to</span><input type="date" id="dTo" value="${last}">
+      <button class="btn outline small" onclick="dselRange(${JSON.stringify(pkey).replace(/"/g,"&quot;")})">Select range</button>
+      <span class="grow"></span><span class="terms" id="dTotal">none selected</span>
     </div>
-    <table><thead><tr><th>Invoice</th><th class="hide-sm">Date</th><th class="num">Amount</th><th></th><th>Paid</th></tr></thead><tbody>
-    ${r.map(x=>`<tr class="click ${x.paid?"paid":""}" onclick="openInvoice(${JSON.stringify(x.key).replace(/"/g,"&quot;")},${JSON.stringify(pkey).replace(/"/g,"&quot;")})">
-      <td class="num">${esc(x.number)||"–"}${x.credit?' <span class="pill credit">credit</span>':""}${x.check?' <span class="pill check">check</span>':""}</td>
+    <table><thead><tr><th></th><th>Invoice</th><th class="hide-sm">Date</th><th class="num">Amount</th><th></th><th>Paid</th></tr></thead><tbody>
+    ${r.map(x=>`<tr data-drow="${esc(x.key)}" class="${x.paid?"paid":""}">
+      <td>${x.paid?"":`<input type="checkbox" data-d="${esc(x.key)}" onclick="dselToggle(${JSON.stringify(x.key).replace(/"/g,"&quot;")},this.checked)">`}</td>
+      <td class="num"><a class="sup" onclick="openInvoice(${JSON.stringify(x.key).replace(/"/g,"&quot;")},${JSON.stringify(pkey).replace(/"/g,"&quot;")})">${esc(x.number)||"–"}</a>${x.credit?' <span class="pill credit">credit</span>':""}${x.check?' <span class="pill check">check</span>':""}</td>
       <td class="hide-sm">${fmtD(x.date)}</td><td class="num">${fmtMoney(x.amt)}</td>
-      <td>${x.pdf?`<a class="pdf" href="${esc(x.pdf)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">pdf</a>`:""}</td>
-      <td>${x.paid?"✓":""}</td></tr>`).join("")}
+      <td>${x.pdf?`<a class="pdf" href="${esc(x.pdf)}" target="_blank" rel="noopener">pdf</a>`:""}</td>
+      <td>${x.paid?(x.closed?"settled":"✓"):""}</td></tr>`).join("")}
+    <tr><td></td><td colspan="2"><b>${p.paid?"Paid":"Outstanding"}</b> · ${unpaid.length} of ${p.n}</td><td class="num"><b>${fmtMoney(p.amt)}</b></td><td colspan="2"></td></tr>
     </tbody></table>
     ${pd?`<pre class="pay">${esc(pd)}</pre>`:""}
     <div class="row" style="justify-content:flex-end">
+      <button class="btn outline dselact" disabled onclick='copyText(fmtAmt(dselTotal()),"Selected total copied")'>Copy selected</button>
       <button class="btn outline" onclick='copyText(${JSON.stringify(fmtAmt(p.amt))},"Amount copied")'>Copy ${fmtMoney(p.amt)}</button>
       <button class="btn outline" onclick="closeModal();go('s/'+encodeURIComponent(${JSON.stringify(p.supplier).replace(/"/g,"&quot;")}))">Supplier</button>
-      ${p.paid?"":`<button class="btn" onclick="closeModal();openPayDialog([${JSON.stringify(pkey).replace(/"/g,"&quot;")}])">Mark as paid</button>`}
+      ${p.paid?"":`<button class="btn dselact" disabled onclick="payInvoices(Object.keys(DSEL))">Pay selected</button>`}
       <button class="btn outline" onclick="closeModal()">Close</button></div>`);
+  paintDsel();
+}
+/* Pays an arbitrary set of invoices rather than whole payable lines - the part-month case. */
+function payInvoices(keys){
+  const rows=keys.map(k=>INV.find(r=>r.key===k)).filter(r=>r&&!r.paid);
+  if(!rows.length) return;
+  openPayRows(rows);
 }
 function openInvoice(key, backPkey){
   const r=INV.find(x=>x.key===key); if(!r) return;
@@ -1084,7 +1184,11 @@ function renderSupplier(name){
   const t=TERMS[norm(name)];
   if(!rows.length&&!t){ document.getElementById("app").innerHTML=`<a class="back" onclick="go('sup')">Suppliers</a><div class="err">No supplier called "${esc(name)}"</div>`; return; }
   crumb(name);
-  PAYABLES=buildPayables(rows);
+  /* The date range applies here too, so a supplier can be narrowed to the span she is about
+     to pay - which for Southern is how every payment in eight months was made. */
+  const rFrom=VIEW.from?gvizDate(VIEW.from):null, rTo=VIEW.to?gvizDate(VIEW.to):null;
+  const inRange=rows.filter(r=>(!rFrom||r.date>=rFrom)&&(!rTo||r.date<=rTo));
+  PAYABLES=buildPayables(inRange);
   const unpaid=PAYABLES.filter(p=>!p.paid);
   const balance=unpaid.reduce((a,p)=>a+p.amt,0);
   const overdue=unpaid.filter(p=>p.state==="overdue").reduce((a,p)=>a+p.amt,0);
@@ -1097,6 +1201,7 @@ function renderSupplier(name){
     <div class="row" style="align-items:flex-start;margin-bottom:12px">
       <div class="grow"><h2>${esc(name)}</h2>
         <div class="sub">${esc(serviceType(name))} · ${esc(termsLabel(terms))}${terms.saved?"":" (default)"} · ${esc(payModeLabel(mode))}${(t&&t.pay_mode)?"":" (default)"}${isTracked(name)?"":" · removed from payables"}</div>
+        ${profile(name)?`<div class="terms">${esc(profile(name).cadence)}</div>`:""}
         ${paidThrough(name)?`<div class="terms">settled up to ${fmtD(paidThrough(name))}${paidThroughSaved(name)?"":" (from the bank feed, not yet confirmed)"}</div>`:""}
         ${em?`<div class="terms">remittance to ${esc(em)}${t&&t.remittance_email?"":" (from invoice emails)"}</div>`:""}
         ${t&&t.notes?`<div class="note">${esc(t.notes)}</div>`:""}
@@ -1107,6 +1212,7 @@ function renderSupplier(name){
       <div class="stat" style="cursor:default"><div class="v ${overdue>0?"red":""}">${fmtMoney(overdue)}</div><div class="k">Overdue</div></div>
       <div class="stat" style="cursor:default"><div class="v">${fmtMoney(balance)}</div><div class="k">Balance outstanding · ${rows.filter(r=>!r.paid).length}</div></div>
       <div class="stat" style="cursor:default"><div class="v">${fmtMoney(rows.filter(r=>r.date>=addDays(TODAY,-30)).reduce((a,r)=>a+r.amt,0))}</div><div class="k">Invoiced last 30 days</div></div>
+      ${(VIEW.from||VIEW.to)?`<div class="stat" style="cursor:default"><div class="v">${fmtMoney(PAYABLES.filter(p=>!p.paid).reduce((a,p)=>a+p.amt,0))}</div><div class="k">In the selected range</div></div>`:""}
     </div>
     <div class="card"><div class="row"><span class="label" style="margin:0">Payment details</span><span class="grow"></span>
       ${pd?`<button class="btn outline small" onclick='copyText(${JSON.stringify(pd)},"Payment details copied")'>Copy</button>`:""}
@@ -1114,7 +1220,14 @@ function renderSupplier(name){
       ${pd?`<pre class="pay">${esc(pd)}</pre>`:`<div class="note">None saved. Edit terms to add the BSB, account and customer reference so they can be copied from here.</div>`}
     </div>
     <div class="card"><div class="label">Invoiced by month</div>${monthChart(rows)}</div>
-    <div class="card"><div class="label">${mode==="statement"?"Statements":"Invoices"} · ${PAYABLES.length}${mode==="statement"?" ("+rows.length+" invoices)":""}</div>${payableTable(PAYABLES,{noSupplier:true,empty:"No invoices yet."})}</div>
+    <div class="card"><div class="row" style="margin-bottom:8px">
+        <span class="label" style="margin:0">${mode==="statement"?"Statements":"Invoices"} · ${PAYABLES.length}${mode==="statement"?" ("+rows.length+" invoices)":""}</span>
+        <span class="grow"></span>
+        <span class="sub">dated</span><input type="date" id="sFrom" value="${esc(VIEW.from)}"><span class="sub">to</span><input type="date" id="sTo" value="${esc(VIEW.to)}">
+        <button class="btn outline small" onclick="VIEW.from=document.getElementById('sFrom').value;VIEW.to=document.getElementById('sTo').value;route()">Apply</button>
+        ${(VIEW.from||VIEW.to)?`<button class="btn outline small" onclick="VIEW.from='';VIEW.to='';route()">clear</button>`:""}
+      </div>
+      ${payableTable(PAYABLES,{noSupplier:true,empty:"No invoices in this range."})}</div>
     ${payList.length?`<div class="card"><div class="label">Payments · ${payList.length}</div><table><thead><tr><th>Paid</th><th>Reference</th><th class="hide-sm">Method</th><th class="hide-sm">Marked by</th><th class="num">Invoices</th><th class="num">Amount</th><th></th></tr></thead><tbody>
       ${payList.map(p=>`<tr><td>${fmtD(p.date)}</td><td>${esc(p.ref)||"–"}</td><td class="hide-sm">${esc(p.method)}</td><td class="hide-sm">${esc(p.user)}</td><td class="num">${p.n}</td><td class="num">${fmtMoney(p.total)}</td>
         <td class="num"><a class="btn outline small" href="${remittanceMailto(name,p.rows,{paid_date:p.date?fmtISO(p.date):"",reference:p.ref,method:p.method})}">Remittance</a></td></tr>`).join("")}
