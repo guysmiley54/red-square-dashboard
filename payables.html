@@ -122,7 +122,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-114500"; console.log("Invoices " + BUILD_ID);
+const BUILD_ID = "build-131000"; console.log("Invoices " + BUILD_ID);
 { const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
 
 const OPS_SHEET_ID   = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -135,6 +135,16 @@ const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzlsFvzcu8nqVkOL5S1q
 
 const COMPANY_NAME = "Red Square";
 const SIGNOFF_NAME = "";               // blank = the name entered at "Who is this?"
+/* Appended under the sender's name on remittance emails. Suppliers deal with the legal
+   entity, so it needs to say who B & G Fitness is in their ledger. */
+const SIGNOFF_BLOCK = ["B & G Fitness Pty Ltd", "Red Square Cafe | Luma Kitchen",
+                       "accounts@redsquarecafe.com.au"];
+
+/* Addresses that are relays, robots or our own, never the supplier's accounts contact.
+   Invoice emails arrive via Xero, NetSuite and similar, so the From header is usually a
+   no-reply relay - sending remittance there goes nowhere. */
+const EMAIL_BLOCK = /(^|@)(no-?reply|donotreply|do-not-reply|notifications?|mailer|bounce|postmaster|messaging-service|support|info|sales)@|@(post\.xero\.com|sent-via\.netsuite\.com|mail\.|em\.|sendgrid|mailgun|amazonses|bounces?\.)/i;
+const OUR_DOMAINS = /redsquarecafe|beckitt|bgfitness|lumakitchen/i;
 
 /* Terms used for any supplier that has none saved. Adrian: "we pay most invoices at the
    end of the month + 7 days". So an invoice dated 31 Aug is due 7 Sep; one dated 1 Sep is
@@ -298,14 +308,25 @@ function paymentDetails(supplier){ const t=TERMS[norm(supplier)]; return t ? Str
 function remittanceEmail(supplier){
   const t=TERMS[norm(supplier)];
   if(t && t.remittance_email) return String(t.remittance_email).trim();
-  /* Fall back to the most common real mailbox seen on this supplier's invoice emails. */
+  /* Guessed from the invoice emails, and only when the guess is defensible. Sending remittance
+     to a relay like messaging-service@post.xero.com is worse than sending none, so anything
+     that is a robot, a relay or one of ours is discarded outright rather than down-weighted.
+     What remains has to look like it belongs to this supplier: the domain must share a
+     recognisable chunk of their name. If nothing qualifies, return nothing and let the UI say
+     so - a blank prompts someone to fill it in, a wrong address just fails silently. */
+  const key=norm(supplier).replace(/(ptyltd|pty|ltd|limited|australia|tas|tasmania|the|group|pl)/g,"");
   const tally={};
   INV.filter(r=>r.supplier===supplier).forEach(r=>{
     parseEmails(r.src).forEach(e=>{
       e=e.toLowerCase();
-      if(/redsquarecafe|beckitt/.test(e)) return;
-      const w=/sent-via|noreply|no-reply|donotreply/.test(e)?1:10;
-      tally[e]=(tally[e]||0)+w;
+      if(OUR_DOMAINS.test(e) || EMAIL_BLOCK.test(e)) return;
+      const dom=norm(e.split("@")[1]||"");
+      let score=0;
+      for(let L=Math.min(key.length,dom.length); L>=4; L--){
+        if(key.length>=L && dom.indexOf(key.slice(0,L))>-1){ score=L; break; }
+      }
+      if(!score) return;                       // domain does not resemble the supplier
+      tally[e]=(tally[e]||0)+score;
     });
   });
   const best=Object.entries(tally).sort((a,b)=>b[1]-a[1])[0];
@@ -587,18 +608,33 @@ function closeModal(){
 }
 
 /* ================= REMITTANCE ================= */
+/* Deliberately not column-aligned. Mail clients render this as rich text in a proportional
+   font, so space padding that looks tidy here arrives ragged at the other end. Each line
+   stands on its own instead. */
 function remittanceText(supplier, rows, info){
   const id=identity()||{};
   const total=rows.reduce((a,r)=>a+r.amt,0);
-  const w=Math.max(10, ...rows.map(r=>r.number.length));
-  const lines=rows.map(r=>(r.credit?"Credit  ":"Invoice ")+r.number.padEnd(w)+"  "+fmtD(r.date).padEnd(10)+"  "+fmtMoney(r.amt).padStart(12));
-  return `Remittance advice from ${COMPANY_NAME}\n\nTo: ${supplier}\nPayment date: ${fmtD(gvizDate(info.paid_date)||TODAY)}`
-    +(info.reference?`\nReference: ${info.reference}`:"")+(info.method?`\nMethod: ${info.method}`:"")
-    +`\n\n${lines.join("\n")}\n${"".padEnd(w+8)}  Total paid  ${fmtMoney(total).padStart(12)}\n\nThanks,\n${SIGNOFF_NAME||id.user||COMPANY_NAME}`;
+  const paid=fmtD(gvizDate(info.paid_date)||TODAY);
+  const lines=rows.map(r=>{
+    const what=(r.credit?"Credit note ":"Invoice ")+(r.number||"(no number)");
+    return `${what} dated ${fmtD(r.date)} - ${fmtMoney(r.amt)}`;
+  });
+  const many=rows.length>1;
+  return `Hello,\n\n`
+    +`Please find remittance advice for a payment made to you by ${COMPANY_NAME} on ${paid}.\n\n`
+    +lines.join("\n")
+    +(many?`\n\nTotal paid: ${fmtMoney(total)}`:``)
+    +(info.reference?`\n\nThis will appear on your statement as "${info.reference}".`:``)
+    +(info.method?`\nPaid by ${info.method.toLowerCase()}.`:``)
+    +`\n\nPlease let us know if anything does not match your records.\n\n`
+    +`Kind regards,\n${SIGNOFF_NAME||id.user||COMPANY_NAME}\n`
+    +SIGNOFF_BLOCK.join("\n");
 }
 function remittanceMailto(supplier, rows, info){
   const to=remittanceEmail(supplier);
-  const subject=`Remittance advice - ${COMPANY_NAME} - ${fmtD(gvizDate(info.paid_date)||TODAY)}`;
+  /* Their own reference in the subject means it can be matched without opening the mail. */
+  const one=rows.length===1&&rows[0].number?` - invoice ${rows[0].number}`:``;
+  const subject=`Remittance advice${one} - ${COMPANY_NAME} - ${fmtD(gvizDate(info.paid_date)||TODAY)}`;
   return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(remittanceText(supplier,rows,info))}`;
 }
 
