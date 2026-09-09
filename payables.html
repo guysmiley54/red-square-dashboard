@@ -122,7 +122,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-090900"; console.log("Invoices " + BUILD_ID);
+const BUILD_ID = "build-091645"; console.log("Invoices " + BUILD_ID);
 { const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
 
 const OPS_SHEET_ID   = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -192,33 +192,75 @@ const PAY_MODES = [["statement","Monthly statement"],["invoice","Invoice by invo
    knows nothing about eight months of transfers that did happen; without a starting line the
    dashboard shows a backlog that was paid long ago.
 
-   Dates below are derived from the bank export Jan-Sep 2026. Seven are read from the reference
-   she typed on the transfer ("July Red Square", "24/7 -10/8 RDSQRE") and are exact. The rest
-   are inferred as the month before her most recent payment, which is what every dated
-   reference in that file shows her doing - close, but worth checking against a statement
-   before relying on it. Any of them can be corrected per supplier under Edit terms. */
+   REBUILT 9 Sep 2026 against the full bank export (3,318 transactions, 2 Jan - 8 Sep 2026,
+   1,533 debits). The previous list covered 21 suppliers and left TEN with no opening position
+   at all, so their entire captured history read as owing - $46,343.93 of it, including
+   $22,644.59 of Asahi and $12,757.62 of Veolia that the bank shows were paid on time.
+
+   Per-INVOICE reconciliation was attempted and abandoned, deliberately. Invoice capture does
+   not start until June 2026 (8 invoices before it, 322 in June alone) while the bank runs from
+   January, and even inside the overlap the captured set is a few per cent short of what was
+   paid: Doppio's June invoices total $32,468.80 against a 30 July payment of $33,441.48. No
+   contiguous run of captured invoices will ever sum to a real payment, so amount-matching
+   produced 11 hits out of 232 and every "match" beyond that would have been a guess dressed
+   as evidence. Paid-through dates are what this seed needs and what the bank can actually
+   support, so that is what is here.
+
+   Each date below is marked for how it was derived:
+     [ref]   the month or span Michaela typed on the transfer. Exact.
+     [cycle] the month before her most recent payment. Every dated reference in the export
+             shows her paying month M during month M+1, so this follows her own pattern -
+             but it is inference, not evidence.
+   Bank spellings differ from invoice spellings and cost two suppliers their match on the
+   first pass: Asahi pays as "Schweppes", Onepac as "Tas Isle", Freshline as "Fresh Line",
+   ALM as a "METCASH TRADING" direct debit. Any date can be corrected per supplier under
+   Edit terms, which beats this list. */
 const OPENING_POSITION = [
-  ["AB Refridgeration","2026-08-31"],                     // paid 2026-09-07 $893.22 "1211 RD SQRE"
-  ["BDD Australia Pty Ltd","2026-07-31"],                 // paid 2026-08-26 $5,766.88 BPAY
-  ["Bidfood Hobart","2026-08-31"],                        // paid 2026-09-01 $1,828.40 BPAY
-  ["Cripps Nubake Pty Ltd","2026-07-31"],                 // paid 2026-08-14 "red005 June july"
-  ["David Johnstone & Associates Pty Ltd","2026-06-30"],  // paid 2026-07-20 "Luma June"
-  ["Doppio Foods Pty Ltd","2026-07-31"],                  // paid 2026-08-28 "July Red Square"
-  ["Fresh Cut (TAS) Pty Ltd","2026-07-31"],               // paid 2026-08-17 $6,049.60
-  ["Freshline Tasmania","2026-08-31"],                    // paid 2026-09-07 $1,370.94
-  ["Juicy Isle Pty Ltd","2026-07-31"],                    // paid 2026-09-01 "June July RDSQRE"
-  ["Manna Bakehouse","2026-08-31"],                       // paid 2026-09-03, both venues
-  ["Nichols Poultry P/L","2026-08-31"],                   // paid 2026-09-04 $2,531.90
-  ["Onepac | Tas-Isle Trading","2026-07-31"],             // paid 2026-09-04 "July Red Square"
-  ["PFD Food Services Pty Ltd","2026-07-31"],             // paid 2026-08-26 BPAY
-  ["Reward Hospitality","2026-07-31"],                    // paid 2026-08-27 $1,623.38
-  ["Savour Foods","2026-08-31"],                          // paid 2026-09-02 $5,084.08
-  ["Scooter's Electrical Services Pty Ltd","2026-06-30"], // paid 2026-07-24 $476.60
-  ["Scottsdale Pork","2026-07-31"],                       // paid 2026-08-17 $1,866.26
-  ["Southern Cookies","2026-07-31"],                      // paid 2026-08-10 $1,842.50
-  ["Southern Foodservice Pty Ltd","2026-08-10"],          // paid 2026-09-07 "24/7 -10/8 RDSQRE"
-  ["Supagas Pty Limited","2026-07-31"],                   // paid 2026-08-27 BPAY
-  ["Valhalla Ice Cream","2026-07-31"]                     // paid 2026-08-10 "July Red Square"
+  ["AB Refridgeration","2026-08-31"],                     // [cycle] paid 2026-09-07 $893.22 "1211 RD SQRE"
+  ["ALM","2026-08-31"],                                   // [cycle] NEW. No payee called ALM exists in the bank;
+                                                          //   settled by the weekly "METCASH TRADING" direct debit,
+                                                          //   last 2026-09-04. Least certain line here - confirm.
+  ["Asahi Beverages Pty Ltd","2026-07-31"],               // [ref] NEW. Pays as SCHWEPPES: 2026-08-27 $6,271.18
+                                                          //   "July Red Square". Was showing $22,644.59 owing.
+  ["BDD Australia Pty Ltd","2026-07-31"],                 // [cycle] paid 2026-08-26 $5,766.88 BPAY
+  ["Bidfood Hobart","2026-08-31"],                        // [cycle] paid 2026-09-01 $1,828.40 BPAY
+  ["BKQ P/L ATF BKQ Family Trust trading as Morgans Liquor Merchants","2026-07-31"],
+                                                          // [cycle] NEW. 2026-08-17 $181.14, exactly the amount
+                                                          //   showing 33 days overdue. Prior ref "April RDSQRE".
+  ["Cripps Nubake Pty Ltd","2026-07-31"],                 // [ref] paid 2026-08-14 "red005 June july"
+  ["David Johnstone & Associates Pty Ltd","2026-06-30"],  // [ref] paid 2026-07-20 "Luma June"
+  ["Doppio Foods Pty Ltd","2026-07-31"],                  // [ref] paid 2026-08-28 "July Red Square"
+  ["Fresh Cut (TAS) Pty Ltd","2026-07-31"],               // [cycle] paid 2026-08-17 $6,049.60
+  ["Freshline Tasmania","2026-08-31"],                    // [cycle] pays as "FRESH LINE": 2026-09-07 $1,370.94
+  ["Juicy Isle Pty Ltd","2026-07-31"],                    // [ref] paid 2026-09-01 "June July RDSQRE"
+  ["LIPSCOMBE LARDER ESPRESSO & PATISSERIE","2026-05-31"],// [cycle] NEW. Last payment 2026-06-29 $580.70. The
+                                                          //   $55.95 from 6 Jun looks genuinely unpaid.
+  ["Manna Bakehouse","2026-08-31"],                       // [cycle] paid 2026-09-03, both venues
+  ["Metcash","2026-08-31"],                               // [cycle] NEW. Weekly direct debit; 2026-09-04 $338.64
+                                                          //   is exactly the August statement on screen.
+  ["Nichols Poultry P/L","2026-08-31"],                   // [cycle] paid 2026-09-04 $2,531.90
+  ["Onepac | Tas-Isle Trading","2026-07-31"],             // [ref] pays as "Tas Isle": 2026-09-04 $14,247.09
+                                                          //   "July Red Square"
+  ["PFD Food Services Pty Ltd","2026-07-31"],             // [cycle] paid 2026-08-26 BPAY
+  ["Reward Hospitality","2026-07-31"],                    // [cycle] paid 2026-08-27 $1,623.38
+  ["Savour Foods","2026-08-31"],                          // [cycle] paid 2026-09-02 $5,084.08
+  ["Scooter's Electrical Services Pty Ltd","2026-06-30"], // [cycle] paid 2026-07-24 $476.60
+  ["Scottsdale Pork","2026-07-31"],                       // [cycle] paid 2026-08-17 $1,866.26
+  ["Southern Cookies","2026-07-31"],                      // [cycle] paid 2026-08-10 $1,842.50
+  ["Southern Foodservice Pty Ltd","2026-08-10"],          // [ref] paid 2026-09-07 "24/7 -10/8 RDSQRE"
+  ["Supagas Pty Limited","2026-07-31"],                   // [cycle] paid 2026-08-27 BPAY
+  ["Valhalla Ice Cream","2026-07-31"],                    // [ref] paid 2026-08-10 "July Red Square"
+  ["Veolia Environmental Services (Australia) Pty Ltd","2026-07-31"]
+                                                          // [cycle] NEW. BPAY 2026-07-28 $3,285.68 and 2026-08-27
+                                                          //   $3,181.86 are exactly the June and July statements
+                                                          //   showing 41 and 10 days overdue.
+  /* DELIBERATELY ABSENT - the bank says these are genuinely unpaid, so no opening line:
+     Shell Energy Retail  - last paid 2026-02-16. NOTHING since, and no other energy retailer
+                            appears in the account, so the "direct debit - nothing to pay
+                            manually" note in SUPPLIER_PROFILE is wrong. $4,294.15 outstanding.
+     CMF (Victoria)       - $51.80 from August, no payment to any matching payee.
+     Prana Chai           - one PencilPay debit 2026-08-18 $148.59 against an invoice showing
+                            $189.16. Amounts disagree; left owing rather than guessed away. */
 ];
 /* Most suppliers here are paid off the monthly statement, so that is the default and the
    invoice-by-invoice suppliers are the exception to flag. Change this if that ever flips. */
@@ -860,6 +902,52 @@ function selClick(e, el){
   paintSelbar();
 }
 function selectAll(keys, on){ keys.forEach(k=>setSel(k,on)); LAST_SEL=""; paintSelbar(); }
+
+/* ---- Sweep: pay a supplier forward one span at a time --------------------------------
+   Michaela pays the invoice-by-invoice suppliers by INVOICE DATE SPAN and types the span on
+   the transfer ("24/7 -10/8 RDSQRE"). The sweep opens the next unpaid span for a supplier -
+   the day after they are settled to, for a week - then widens or narrows it a week at a time
+   until the total matches what she means to send.
+
+   It works on invoice date, not due date and not delivery week, and it spans both venues:
+   Cripps and Manna bill per venue and are paid in one transfer each cycle, so splitting them
+   would break the very suppliers this is for.
+
+   Statement-mode suppliers are excluded. Their list is already one line per month, so a date
+   sweep would select the same thing the month line already selects, only less clearly. */
+function sweepStart_(name){
+  const pt=paidThrough(name);
+  if(pt) return addDays(pt,1);
+  const un=INV.filter(r=>r.supplier===name&&!r.paid).map(r=>r.date).sort((a,b)=>a-b);
+  return un.length?un[0]:TODAY;
+}
+function sweepOpen(name){
+  const from=sweepStart_(name);
+  VIEW.from=fmtISO(from); VIEW.to=fmtISO(addDays(from,6));
+  route();
+}
+/* Nudge the END of the window. The start is where the supplier is settled to, so moving it
+   would either skip invoices or re-select paid ones - only the far end is a real choice. */
+function sweepNudge(days){
+  if(!VIEW.to) return;
+  const to=addDays(gvizDate(VIEW.to), days);
+  if(VIEW.from && to<gvizDate(VIEW.from)) return;   // never invert the window
+  VIEW.to=fmtISO(to);
+  route();
+}
+function sweepSelect(){
+  const keys=PAYABLES.filter(p=>!p.paid&&!p.closed).map(p=>p.pkey);
+  if(!keys.length){ toast("Nothing unpaid in that range"); return; }
+  selectAll(keys, true);
+}
+/* The reference she types, in her own format: "24/7 -10/8 RDSQRE". Built from the window
+   rather than typed again, so the transfer says exactly what was selected. */
+function sweepRef(){
+  if(!VIEW.from||!VIEW.to) return "";
+  const f=gvizDate(VIEW.from), t=gvizDate(VIEW.to);
+  const d=x=>x.getDate()+"/"+(x.getMonth()+1);
+  return d(f)+" -"+d(t)+" RDSQRE";
+}
 function clearSel(){ SEL={}; LAST_SEL=""; route(); }
 
 /* Per-supplier sums, which is what actually gets typed into internet banking. */
@@ -1248,7 +1336,19 @@ function renderSupplier(name){
         <span class="sub">dated</span><input type="date" id="sFrom" value="${esc(VIEW.from)}"><span class="sub">to</span><input type="date" id="sTo" value="${esc(VIEW.to)}">
         <button class="btn outline small" onclick="VIEW.from=document.getElementById('sFrom').value;VIEW.to=document.getElementById('sTo').value;route()">Apply</button>
         ${(VIEW.from||VIEW.to)?`<button class="btn outline small" onclick="VIEW.from='';VIEW.to='';route()">clear</button>`:""}
+        ${mode!=="statement"?`<button class="btn outline small" title="Open the next unpaid week of invoice dates, starting the day after this supplier is settled to" onclick="sweepOpen(${JSON.stringify(name).replace(/"/g,"&quot;")})">Sweep</button>`:""}
       </div>
+      ${(mode!=="statement"&&VIEW.from&&VIEW.to)?`<div class="row" style="margin-bottom:8px;gap:8px;flex-wrap:wrap;align-items:center">
+        <span class="sub">sweep</span>
+        <button class="btn outline small" title="Pull the end of the window back one week" onclick="sweepNudge(-7)">&minus;1 week</button>
+        <button class="btn outline small" title="Push the end of the window out one week" onclick="sweepNudge(7)">+1 week</button>
+        <span class="sub">${esc(fmtD(gvizDate(VIEW.from)))} &ndash; ${esc(fmtD(gvizDate(VIEW.to)))}</span>
+        <b>${fmtMoney(unpaid.reduce((a,p)=>a+p.amt,0))}</b>
+        <span class="sub">· ${unpaid.length} unpaid</span>
+        <span class="grow"></span>
+        <button class="btn small" onclick="sweepSelect()">Select all in range</button>
+        <button class="btn outline small" title="The reference to type on the transfer" onclick='copyText(sweepRef(),"Reference copied")'>${esc(sweepRef())}</button>
+      </div>`:""}
       ${payableTable(PAYABLES,{noSupplier:true,empty:"No invoices in this range."})}</div>
     ${payList.length?`<div class="card"><div class="label">Payments · ${payList.length}</div><table><thead><tr><th>Paid</th><th>Reference</th><th class="hide-sm">Method</th><th class="hide-sm">Marked by</th><th class="num">Invoices</th><th class="num">Amount</th><th></th></tr></thead><tbody>
       ${payList.map(p=>`<tr><td>${fmtD(p.date)}</td><td>${esc(p.ref)||"–"}</td><td class="hide-sm">${esc(p.method)}</td><td class="hide-sm">${esc(p.user)}</td><td class="num">${p.n}</td><td class="num">${fmtMoney(p.total)}</td>
