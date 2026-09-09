@@ -122,7 +122,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-141500"; console.log("Invoices " + BUILD_ID);
+const BUILD_ID = "build-090900"; console.log("Invoices " + BUILD_ID);
 { const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
 
 const OPS_SHEET_ID   = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -230,14 +230,27 @@ const DEFAULT_PAY_MODE = "statement";
    overdue total. Reports still work off the same INV array, so removing something here takes
    it out of spend reporting too - which is right for a car, wrong for a real supplier. Add a
    name only when it is genuinely not an operating cost. */
+/* Match is on norm() of the CANONICAL name — lowercased, non-alphanumerics stripped —
+   so an entry must equal the whole supplier string as the sheet actually spells it, not a
+   readable short form. "RIS Safety" normalises to rissafety, the sheet says RISSAFETY PTY
+   LTD which normalises to rissafetyptyltd, and that entry therefore did nothing at all for
+   as long as it was here. Its $4,125 stayed in the totals. Copy the name from the sheet;
+   the load-time warning below now catches the next one of these. */
 const NOT_SUPPLIERS = [
   "Osko",                                  // payment notification, not a bill
   "Red Square Cafe LUMA",                  // ourselves
   "Motors Tas Pty Ltd",                    // vehicle purchase, $47,000 one-off
-  "A.H. Beard Pty Ltd",                    // furniture
-  "Australian Therapeutic Proteins Pty Ltd",
+  "A.H. Beard Pty Ltd",                    // furniture — arrived as a remittance advice
+  "Australian Therapeutic Proteins Pty Ltd", // remittance advice
   "Harvey Norman AV/IT Moonah",
-  "RIS Safety"
+  "RISSAFETY PTY LTD",                     // was "RIS Safety" and never matched. Remittance advice, $4,125
+  /* Remittance advices the reader booked as bills — someone telling us THEY have paid.
+     Each of these three names has exactly one row in Invoices and that row is the
+     remittance, so nothing real is lost by dropping the name outright. Verified against
+     the live Invoices tab on 9 Sep 2026. If any of them ever sends a genuine invoice this
+     list will silently swallow it, which is the trade being made. */
+  "COCA-COLA EUROPACIFIC PARTNERS AUSTRALIA PTY LTD", // REM_ADV2138525.pdf, $9,142.22, booked as Beverage
+  "SD Packaging"                           // Remittance Advice ... 27Jun2026.pdf, $1,705.00, booked as Packaging
 ];
 
 /* What the bank feed actually shows for each supplier, Jan-Sep 2026. Defaults were making
@@ -536,6 +549,15 @@ function ingest(inv,cfgRows,payRows,termRows,feedDaily,weeklyRows){
   raw.forEach(r=>{ r.supplier=canonName(r.supplier); });
   const dropped=raw.filter(r=>notSup[norm(r.supplier)]).length;
   if(dropped) console.log("dropped "+dropped+" rows from NOT_SUPPLIERS");
+  /* A NOT_SUPPLIERS entry that matches nothing is indistinguishable from one that is
+     working — the page looks identical either way, and the money stays in the totals.
+     That is exactly how "RIS Safety" sat here doing nothing. Checked after canonName so a
+     merge rule counts as a match. A miss is not always a bug (a name can be listed before
+     its first invoice arrives), so this warns rather than throws. */
+  const hit={}; raw.forEach(r=>{ hit[norm(r.supplier)]=true; });
+  const deadEntries=NOT_SUPPLIERS.filter(n=>!hit[norm(n)]);
+  if(deadEntries.length) console.warn("NOT_SUPPLIERS entries matching no invoice: "
+    +deadEntries.join(", ")+" - check the spelling against the Invoices tab, these are not filtering anything.");
 
   /* Credit notes arrive with an inconsistent sign (44 of 49 negative, 5 positive as at
      7 Sep 2026). Force them negative so a balance is always invoices minus credits. */
