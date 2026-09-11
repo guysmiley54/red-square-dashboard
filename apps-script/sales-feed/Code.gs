@@ -1817,7 +1817,7 @@ function dpResolveSalary_(sheets) {
 /**
  * Allocate salaried pay across the days worked.
  *
- * BASIS, confirmed against Xero payslips (Ravi Thapa, Pawan Shrestha):
+ * BASIS, confirmed against Xero payslips for two salaried staff:
  *   payslip total = annual / 52          e.g. 75000/52 = 1442.31  exact
  *   payslip rate  = annual / 52 / 38     e.g. 37.955466           exact
  *   payslip hours = 38.0000 FLAT - payroll pays 38 hours regardless of what the timesheet
