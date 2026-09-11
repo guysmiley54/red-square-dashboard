@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<style>
+  :root{
+    --ink:#141414; --paper:#f7f6f3; --card:#ffffff; --line:#e4e2dc;
+    --dim:#6b6862; --accent:#c8102e; --accent-ink:#fff; --ok:#1a7f4b; --err:#c8102e;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--paper); color:var(--ink);
+    font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; padding:0 0 40px;
+  }
+  header{
+    background:var(--ink); color:#fff; padding:18px 20px;
+    display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5;
+  }
+  header .dot{width:14px;height:14px;background:var(--accent);border-radius:3px;flex:none}
+  header h1{font-size:17px;margin:0;font-weight:600;letter-spacing:.2px}
+  header .sub{font-size:12px;color:#b8b6b0;margin-left:auto}
+  .wrap{max-width:520px;margin:0 auto;padding:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  label{display:block;font-size:13px;font-weight:600;color:var(--dim);margin:0 0 6px;text-transform:uppercase;letter-spacing:.4px}
+  .field{margin-bottom:18px}
+  input,select{
+    width:100%;font-size:17px;padding:13px 14px;border:1.5px solid var(--line);
+    border-radius:10px;background:#fff;color:var(--ink);appearance:none;-webkit-appearance:none;
+  }
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%236b6862' stroke-width='1.6' fill='none'/></svg>");background-repeat:no-repeat;background-position:right 14px center;padding-right:38px}
+  .amt-wrap{position:relative}
+  .amt-wrap span{position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:17px;color:var(--dim)}
+  .amt-wrap input{padding-left:28px}
+  .venues{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .venues.cats{grid-template-columns:1fr 1fr 1fr 1fr}
+  .venues button{
+    font-size:13px;font-weight:600;padding:12px 6px;border:1.5px solid var(--line);
+    border-radius:10px;background:#fff;color:var(--ink);cursor:pointer;line-height:1.2;
+  }
+  .venues button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .new-row{display:flex;gap:8px;margin-top:8px}
+  .new-row input{flex:1}
+  .new-row button{flex:none;padding:0 14px;font-size:14px;font-weight:600;border:1.5px solid var(--line);border-radius:10px;background:#fff;cursor:pointer}
+  .linkbtn{background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;padding:6px 0;cursor:pointer}
+  .submit{
+    width:100%;font-size:17px;font-weight:700;padding:16px;border:none;border-radius:12px;
+    background:var(--accent);color:var(--accent-ink);cursor:pointer;margin-top:4px;
+  }
+  .submit:disabled{opacity:.5}
+  .msg{margin-top:14px;padding:12px 14px;border-radius:10px;font-size:14px;display:none}
+  .msg.err{display:block;background:#fdecee;color:var(--err);border:1px solid #f5c6cd}
+  .msg.ok{display:block;background:#e9f6ee;color:var(--ok);border:1px solid #bfe3cc}
+  .recent{margin-top:22px;font-size:13px;color:var(--dim)}
+  .recent b{color:var(--ink)}
+  .loading{opacity:.5;pointer-events:none}
+</style>
+</head>
+<body>
+  <header>
+    <div class="dot"></div>
+    <h1>Log a purchase</h1>
+    <div class="sub">Red Square</div>
+  </header>
+
+  <div class="wrap">
+    <div class="card" id="card">
+      <div class="field">
+        <label for="date">Date</label>
+        <input type="date" id="date">
+      </div>
+
+      <div class="field">
+        <label>Venue</label>
+        <div class="venues" id="venues"></div>
+      </div>
+
+      <div class="field">
+        <label for="shop">Shop</label>
+        <input type="text" id="shop" list="shopList" placeholder="Type or pick a shop" autocomplete="off">
+        <datalist id="shopList"></datalist>
+      </div>
+
+      <div class="field">
+        <label for="amount">Amount</label>
+        <div class="amt-wrap">
+          <span>$</span>
+          <input type="text" id="amount" inputmode="decimal" placeholder="0.00" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Category</label>
+        <div class="venues cats" id="cats"></div>
+      </div>
+
+      <div class="field">
+        <label for="person">Entered by</label>
+        <input type="text" id="person" list="personList" placeholder="Type or pick your name" autocomplete="off">
+        <datalist id="personList"></datalist>
+      </div>
+
+      <button class="submit" id="submit" onclick="submit()">Save purchase</button>
+      <div class="msg" id="msg"></div>
+    </div>
+
+    <div class="recent" id="recent"></div>
+  </div>
+
+<script>
+  var selectedVenue = "";
+  var selectedCat = "";
+  var lastPerson = "";
+  var lastCat = "";
+
+  // Prefill today's date (local).
+  (function(){
+    var d = new Date();
+    var iso = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+    document.getElementById("date").value = iso;
+  })();
+
+  // Shared builder for the venue and category button rows.
+  function buildBtns(boxId, list, label, onPick, current){
+    var box = document.getElementById(boxId);
+    box.innerHTML = "";
+    list.forEach(function(v){
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = label(v); b.dataset.full = v;
+      if (v === current) b.classList.add("on");
+      b.onclick = function(){
+        onPick(v);
+        Array.prototype.forEach.call(box.children, function(c){ c.classList.toggle("on", c===b); });
+      };
+      box.appendChild(b);
+    });
+  }
+  function buildVenues(list){
+    buildBtns("venues", list, shortName, function(v){ selectedVenue = v; }, selectedVenue);
+  }
+  function buildCats(list){
+    buildBtns("cats", list, function(c){ return c; }, function(c){ selectedCat = c; }, selectedCat);
+  }
+  function shortName(v){ return v.replace("Red Square ","RS ").replace("Luma Kitchen","Luma"); }
+
+  // Fill a datalist so the input offers previous values as you type, while staying
+  // fully typeable for anything new.
+  function fillList(listId, values){
+    var dl = document.getElementById(listId);
+    dl.innerHTML = "";
+    values.forEach(function(v){ dl.appendChild(new Option(v, v)); });
+  }
+
+  function load(){
+    google.script.run.withSuccessHandler(function(o){
+      buildVenues(o.venues);
+      buildCats(o.categories||[]);
+      fillList("shopList", o.shops);
+      fillList("personList", o.people);
+      if (lastPerson && !document.getElementById("person").value){
+        document.getElementById("person").value = lastPerson;
+      }
+    }).getOptions();
+  }
+
+  function msg(text, kind){
+    var m = document.getElementById("msg");
+    m.textContent = text; m.className = "msg " + kind;
+  }
+
+  function submit(){
+    var form = {
+      date: document.getElementById("date").value,
+      shop: document.getElementById("shop").value.trim(),
+      venue: selectedVenue,
+      amount: document.getElementById("amount").value,
+      category: selectedCat,
+      enteredBy: document.getElementById("person").value.trim()
+    };
+    // Client-side check for a faster response; server validates again.
+    if (!form.date) return msg("Pick a date.","err");
+    if (!form.shop) return msg("Enter the shop.","err");
+    if (!form.venue) return msg("Tap a venue.","err");
+    var amt = Number(String(form.amount).replace(/^\$/,"").replace(/,/g,""));
+    if (!isFinite(amt) || amt <= 0) return msg("Enter an amount over $0.","err");
+    if (!form.category) return msg("Tap a category.","err");
+    if (!form.enteredBy) return msg("Enter your name.","err");
+
+    var btn = document.getElementById("submit");
+    btn.disabled = true; btn.textContent = "Saving\u2026";
+    document.getElementById("card").classList.add("loading");
+    msg("","");
+
+    google.script.run
+      .withSuccessHandler(function(res){
+        document.getElementById("card").classList.remove("loading");
+        btn.disabled = false; btn.textContent = "Save purchase";
+        if (!res.ok){ msg(res.error || "Couldn't save.","err"); return; }
+        lastPerson = res.enteredBy;
+        lastCat = res.category;
+        msg("Saved: $" + res.amount.toFixed(2) + " at " + res.shop + " (" + shortName(res.venue) + ", " + res.category + ")","ok");
+        document.getElementById("recent").innerHTML =
+          "Last saved: <b>$" + res.amount.toFixed(2) + "</b> at <b>" + res.shop + "</b>, " + shortName(res.venue) + " · " + res.category + ".";
+        // Reset the money and shop fields; keep date/venue/person for fast repeat entry.
+        document.getElementById("amount").value = "";
+        document.getElementById("shop").value = "";
+        load(); // refresh suggestions so a just-added shop/person appears next time
+      })
+      .withFailureHandler(function(err){
+        document.getElementById("card").classList.remove("loading");
+        btn.disabled = false; btn.textContent = "Save purchase";
+        msg("Network error - try again. (" + (err && err.message ? err.message : err) + ")","err");
+      })
+      .addPurchase(form);
+  }
+
+  load();
+</script>
+</body>
+</html>
