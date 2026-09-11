@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-080945"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-111940"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -172,8 +172,11 @@ function supGroup(name){ const c=CFG[norm(name)]; return (c&&c.group)||"Ungroupe
 // category ("Smallgoods", "Dairy"), a whitelist would silently drop it out of COGS and
 // you'd get a wrong number that looks plausible. This way it lands in COGS by default
 // and shows up in the "unmapped" note so it can be mapped properly.
+// "waste management" is the SupplierConfig group Veolia carries. It was missing, so on
+// 11 Sep 2026 $12,757.62 of bin collection sat inside COGS on the live dashboard.
 const NON_COGS=new Set(["cleaning","equipment","repairs","maintenance","utilities","energy",
-  "overheads","admin","insurance","rent","subscriptions","freight","waste","misc","other"]);
+  "overheads","admin","insurance","rent","subscriptions","freight","waste","misc","other",
+  "waste management","gas","electricity","repairs & maintenance","repairs and maintenance"]);
 // Groups we already know about — anything outside this is flagged, not hidden.
 const KNOWN_GROUPS=new Set(["food","beverage","packaging","coffee",...NON_COGS]);
 // Split spend into COGS vs excluded, and collect anything unrecognised.
@@ -192,6 +195,17 @@ function cogsSplit(byGroup){
 // fall back to the row's own category so they still count toward the right bucket
 // rather than dropping into "Ungrouped". Manual purchases carry their entry-form category.
 function rowGroup(r){ const g=supGroup(r.supplier); return g!=="Ungrouped"?g:(r.category||"Ungrouped"); }
+// True if this row is a non-COGS bill (rent, energy, waste, repairs...). Same exclusion
+// list the COGS card and the forecast use, so all three agree on what cost of goods is.
+function isNonCogs(r){ return NON_COGS.has(String(rowGroup(r)||"").trim().toLowerCase()); }
+// Home-page visibility of those bills. Default HIDDEN: the front page is for purchasing,
+// and a rent invoice otherwise sits at the top of the supplier list every month and buries
+// the food spend. Persisted per browser; try/catch for the same reason as fcHidden -
+// Safari private mode throws on localStorage.
+const NONCOGS_KEY = "se_show_noncogs";
+function nonCogsShown(){ try{ return localStorage.getItem(NONCOGS_KEY)==="1"; }catch(e){ return false; } }
+function setNonCogsShown(v){ try{ localStorage.setItem(NONCOGS_KEY, v?"1":"0"); }catch(e){} }
+function toggleNonCogs(){ setNonCogsShown(!nonCogsShown()); renderFilters(); route(); }
 function supActive(name){ const c=CFG[norm(name)]; return c?c.active:true; }
 
 const norm = s => String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
@@ -231,6 +245,18 @@ function inScope(venue,date){
   return true;
 }
 function scopedInv(){ return INV.filter(r=>supActive(r.supplier)&&inScope(r.venue,r.date)); }
+// Home-page rows: scopedInv minus non-COGS bills unless the toggle is on. Deliberately NOT
+// folded into scopedInv(): Reports feeds cogsSplit(), and hiding the excluded rows there
+// would make it report $0 excluded while looking perfectly healthy.
+function scopedInvHome(){
+  const rows = scopedInv();
+  return nonCogsShown() ? rows : rows.filter(r=>!isNonCogs(r));
+}
+// What the toggle is holding back, for the chip. Hidden money should not be invisible money.
+function nonCogsHidden(){
+  const rows = scopedInv().filter(isNonCogs);
+  return { n: rows.length, total: rows.reduce((a,r)=>a+(+r.total||0),0) };
+}
 // Venue filter only, ignoring the date range — for figures that must mean the same thing
 // no matter which window you're viewing through (90-day average, price-change history).
 function venueOk(v){ return !FILTER.venues.length || FILTER.venues.indexOf(v)!==-1; }
@@ -698,8 +724,23 @@ function renderFilters(){
     <input type="date" id="fFrom" value="${FILTER.from}" onchange="setRange()">
     <span style="color:var(--dim);font-size:12px">→</span>
     <input type="date" id="fTo" value="${FILTER.to}" onchange="setRange()">
+    <span style="color:var(--line)">|</span>
+    ${nonCogsChip()}
     ${(FILTER.from||FILTER.to||FILTER.venues.length||FILTER.presetKind)?`<span class="clear" onclick="clearFilter()">clear</span>`:""}
   `;
+}
+/* Chip for the non-COGS toggle. Shows the withheld amount while the bills are hidden.
+   Guarded on INV because renderFilters runs once before the first fetch resolves. */
+function nonCogsChip(){
+  const on = nonCogsShown();
+  let label = on ? "Non-COGS shown" : "Non-COGS hidden";
+  if(!on && typeof INV!=="undefined" && INV && INV.length){
+    const h = nonCogsHidden();
+    if(h.n) label = `Non-COGS hidden (${h.n} &middot; ${money(h.total)})`;
+  }
+  return `<span class="chip ${on?"on":""}" onclick="toggleNonCogs()" `
+    + `title="Rent, energy, waste, repairs, equipment and other bills that aren't cost of goods. `
+    + `Front page only - Reports always shows everything.">${label}</span>`;
 }
 function fmtISO(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function setPreset(kind){
@@ -1732,7 +1773,7 @@ function crumb(t){ document.getElementById("crumb").textContent=t||""; }
 /* ================= HOME ================= */
 function renderHome(){
   crumb("");
-  const inv=scopedInv();
+  const inv=scopedInvHome();
   const ranged=FILTER.from||FILTER.to;
   const window30=r=>ranged?true:r.date>=Date.now()-30*864e5;
   const bySupplier={};
