@@ -1648,92 +1648,521 @@ function processDeputy() {
   try { processDeputy_(); } finally { lock.releaseLock(); }
 }
 
+/* ======================================================================================
+ * SALARIED STAFF COSTING
+ *
+ * Deputy leaves Timesheet.Cost at 0 for salaried people - it never allocates a salary to a
+ * particular shift. But the figure is not hidden: EmployeeAgreement carries AnnualSalary,
+ * and the pay rule behind it carries the same number. inspectDeputySalary() found the rate
+ * sitting in TimesheetPayReturn.PayReturnDetail as 32.4519 = $67,500 / 2080.
+ *
+ * We do NOT use that hourly rate. Deputy costs a salaried shift at annual/2080 x hours,
+ * which means a manager who works 48 hours "costs" more than one who works 40. The business
+ * pays the same either way. So salary is treated as a FIXED WEEKLY cost, spread across the
+ * shifts actually worked - the week total always equals annual/52, while the shape across
+ * venues and across the day still follows where the person really was.
+ *
+ * Consequence worth knowing: this will NOT match Deputy's own wage report for anyone who
+ * does not work exactly 40 hours. At 48 hours on $67,500, Deputy says $1,557.69 and this
+ * says $1,298.08. Ours is the P&L number; Deputy's is hours x a derived rate.
+ * ==================================================================================== */
+
+DP.SALARY_TAB = "SalaryStaff";   // optional override tab in BG Sales Data
+DP.SALARY_DAYS = 5;              // working days a salaried week is divided into
+DP.SALARY_HOURS_PER_DAY = 7.6;   // 5 x 7.6 = the 38.0000 hours the payslips show
+
+/* ---- small date helpers. Mon-Sun weeks, to match the ImPOS staff reports, so a wage
+   week and a sales week are the same week. UTC arithmetic only - these are date labels,
+   not instants, and local DST would shift them. ---------------------------------------- */
+function dpWeekStart_(ymd) {
+  var d = new Date(ymd + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));   // Mon->0 ... Sun->6
+  return d.toISOString().slice(0, 10);
+}
+function dpAddDays_(ymd, n) {
+  var d = new Date(ymd + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function dpDayDiff_(a, b) {
+  return Math.round((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 864e5);
+}
+/** Match names loosely. "Bianca  Toledo" and "bianca-toledo" are the same person; without
+ *  this the override tab silently matches nothing and the person costs 0. */
+function dpNameKey_(s) {
+  return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/* ---- the override tab ---------------------------------------------------------------
+   Columns: employee | annual_salary | effective_from | effective_to | notes
+   employee may be a Deputy employee id OR a display name. Optional tab - absent is fine,
+   and normal once Deputy resolves everyone by itself.                                  */
+function dpSalaryOverrides_() {
+  var out = [];
+  var ss = SpreadsheetApp.openById(SF.SPREADSHEET_ID);
+  var sh = ss.getSheetByName(DP.SALARY_TAB);
+  if (!sh || sh.getLastRow() < 2) return out;
+  var vals = sh.getDataRange().getValues();
+  var head = (vals.shift() || []).map(function (h) { return String(h).trim().toLowerCase(); });
+  var iE = head.indexOf("employee"), iA = head.indexOf("annual_salary"),
+      iF = head.indexOf("effective_from"), iT = head.indexOf("effective_to"),
+      iD = head.indexOf("days_per_week");
+  if (iE < 0 || iA < 0) {
+    Logger.log("SalaryStaff: need at least 'employee' and 'annual_salary' columns - ignoring tab.");
+    return out;
+  }
+  function ymd(v) {
+    if (!v) return "";
+    if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    return String(v).trim().slice(0, 10);
+  }
+  vals.forEach(function (r) {
+    var who = String(r[iE] == null ? "" : r[iE]).trim();
+    var ann = Number(String(r[iA]).replace(/[$,\s]/g, ""));
+    if (!who || !(ann > 0)) return;
+    // days_per_week overrides the five-day default for part-time salaried staff. Without
+    // it, a four-day salaried employee is billed 80% of their salary every single week.
+    var dpw = iD < 0 ? 0 : Number(r[iD]);
+    out.push({ id: /^\d+$/.test(who) ? Number(who) : null, key: dpNameKey_(who),
+               annual: ann, days: (dpw > 0 && dpw <= 7) ? dpw : DP.SALARY_DAYS,
+               from: iF < 0 ? "" : ymd(r[iF]), to: iT < 0 ? "" : ymd(r[iT]) });
+  });
+  return out;
+}
+
+/**
+ * Work out an annual salary for every uncosted timesheet.
+ *
+ * Keyed on EmployeeAgreement, not employee: a pay rise creates a NEW agreement, so keying
+ * this way makes rises apply from the right date without anyone maintaining a table.
+ *
+ * VERIFIED against this install (inspectDeputyPayRules, 14-day window):
+ *   - EmployeeAgreement.AnnualSalary is null for EVERY agreement. The figure always lives
+ *     on the pay rule. The agreement branch below is kept as a cheap first look in case
+ *     that ever changes, but it does not currently fire.
+ *   - SalaryPayRule is a clean discriminator here: 0 of the 44 agreements Deputy is
+ *     already costing carry one, and all 16 that do resolve to a RemunerationType 2 rule
+ *     with a real AnnualSalary. It is still checked against RemunerationType rather than
+ *     trusted on its name - "has a pay rule attached" and "is salaried" are different
+ *     claims, and only today's data makes them coincide.
+ *   - Do NOT derive from rule.HourlyRate. Across the 11 rules in use the implied divisor
+ *     is 2080 on seven of them, 2085.7 on three and 1981.4 on one, so the same salary
+ *     yields different hourly figures depending which rule someone sits on. AnnualSalary
+ *     is the stated number and the only consistent one.
+ *   - BaseRate is useless as a discriminator here: null on 21 of 22 uncosted staff AND on
+ *     roughly half the known-hourly ones. An earlier draft classified on it and wrongly
+ *     labelled people salaried.
+ *
+ * Returns { byAgreement: {agId: {annual, source}} }. An agreement that resolves to nothing
+ * is left out deliberately - those are hourly staff awaiting payroll export, and giving
+ * one of them a salary is the only genuinely damaging mistake available here.
+ */
+function dpResolveSalary_(sheets) {
+  var byAgreement = {};
+  var agIds = [], seen = {};
+  sheets.forEach(function (s) {
+    if (Number(s.Cost)) return;                       // already costed - nothing to do
+    var a = s.EmployeeAgreement;
+    if (a && !seen[a]) { seen[a] = 1; agIds.push(a); }
+  });
+  if (!agIds.length) return { byAgreement: byAgreement };
+
+  // 1. the agreements themselves
+  var ags = {};
+  for (var i = 0; i < agIds.length; i += 100) {
+    try {
+      var batch = dpPost_("/resource/EmployeeAgreement/QUERY", {
+        search: { s1: { field: "Id", data: agIds.slice(i, i + 100), type: "in" } }, max: 200 });
+      (batch || []).forEach(function (a) { ags[a.Id] = a; });
+    } catch (e) { Logger.log("EmployeeAgreement lookup failed for a batch: " + e); }
+  }
+
+  // 2. the pay rules behind any agreement whose AnnualSalary is blank
+  var ruleIds = [], seenR = {};
+  agIds.forEach(function (id) {
+    var a = ags[id]; if (!a) return;
+    if (Number(a.AnnualSalary) > 0) return;
+    var r = Number(a.SalaryPayRule);
+    if (r > 0 && !seenR[r]) { seenR[r] = 1; ruleIds.push(r); }
+  });
+  var rules = {};
+  for (var j = 0; j < ruleIds.length; j += 100) {
+    try {
+      var rb = dpPost_("/resource/PayRules/QUERY", {
+        search: { s1: { field: "Id", data: ruleIds.slice(j, j + 100), type: "in" } }, max: 200 });
+      (rb || []).forEach(function (r) { rules[r.Id] = r; });
+    } catch (e) { Logger.log("PayRules lookup failed for a batch: " + e); }
+  }
+
+  agIds.forEach(function (id) {
+    var a = ags[id];
+    if (!a) return;
+    if (Number(a.AnnualSalary) > 0) {
+      byAgreement[id] = { annual: Number(a.AnnualSalary), source: "agreement" };
+      return;
+    }
+    var rule = rules[Number(a.SalaryPayRule)];
+    // RemunerationType 2 is the salaried marker - every salary rule on this install shows
+    // it. Requiring it means an hourly rule attached to an agreement later cannot quietly
+    // turn a casual into a salaried employee. We read AnnualSalary, not the PayTitle
+    // string: "Annual Salary $67,500.00" is a label someone can rename in the Deputy UI,
+    // and costing must not depend on it.
+    if (rule && Number(rule.RemunerationType) === 2 && Number(rule.AnnualSalary) > 0) {
+      byAgreement[id] = { annual: Number(rule.AnnualSalary), source: "payrule" };
+    }
+  });
+  return { byAgreement: byAgreement };
+}
+
+/**
+ * Allocate salaried pay across the days worked.
+ *
+ * BASIS, confirmed against Xero payslips (Ravi Thapa, Pawan Shrestha):
+ *   payslip total = annual / 52          e.g. 75000/52 = 1442.31  exact
+ *   payslip rate  = annual / 52 / 38     e.g. 37.955466           exact
+ *   payslip hours = 38.0000 FLAT - payroll pays 38 hours regardless of what the timesheet
+ *                   says, so actual hours worked never change what the business pays.
+ *
+ * So salary is divided into FIVE EQUAL DAYS per week - annual/260 per working day - and
+ * each day's amount lands on the venue and area of that day's timesheet. Within a day that
+ * spans two venues it splits by hours, because that is the only thing distinguishing them.
+ *
+ * Deliberately NOT hours x rate. Most of these staff work well over 38 hours; charging by
+ * hours overstated the fortnight by $2,927 (7%) across the 16, and by 28% on one person.
+ * Deputy's own PayRules.HourlyRate is also unusable - it divides by 2080, not 1976, so it
+ * disagrees with the payslip on every single rule.
+ *
+ * DIVISOR - two cases, because they are genuinely different questions:
+ *
+ *   FINISHED week -> divide by the days actually worked. The week then totals annual/52
+ *     exactly, whatever the person's pattern. A four-day salaried employee needs no
+ *     configuration; a six-day week bills salary rather than 120% of it, which is right
+ *     because the business does not pay more for the sixth day. Self-correcting, so it
+ *     cannot silently drift the way a hand-maintained expected-days figure would.
+ *
+ *   OPEN week (not yet ended) -> divide by the CONTRACTED days, default five. Dividing by
+ *     days-so-far would hand a full week's salary to the first three days of the week and
+ *     then walk it back each day. Being slightly off mid-week is harmless; it resolves the
+ *     moment the week closes.
+ *
+ * days_per_week on the SalaryStaff tab therefore only affects the current week's accrual
+ * and the contracted rate shown on screen - never a finished week's total. It is a nicety,
+ * not a load-bearing setting, which is the point: nothing breaks if nobody maintains it.
+ *
+ * rows : DeputyShifts rows, mutated in place. r[7] hours, r[8] cost, r[9] costed, r[10] rate
+ * ann  : parallel array, annual salary per row (0 = not salaried)
+ * who  : parallel array, stable person key
+ * dpw  : parallel array, contracted working days per week (5 unless overridden on the
+ *        SalaryStaff tab - a four-day salaried employee divided by five loses 20% a week)
+ */
+function dpAllocateSalary_(rows, ann, who, dpw, winFrom, winTo, today) {
+  var rep = { people: {}, days: 0, total: 0, overrode: [], oddWeeks: [], openWeeks: [] };
+  var perDay = {}, weekDays = {};
+
+  // Total hours each salaried person worked on each date, so a day split across two venues
+  // can be divided between them.
+  rows.forEach(function (r, i) {
+    if (!(ann[i] > 0)) return;
+    var dk = who[i] + "|" + r[0];
+    perDay[dk] = (perDay[dk] || 0) + (Number(r[7]) || 0);
+    var wk = who[i] + "|" + dpWeekStart_(r[0]);
+    (weekDays[wk] = weekDays[wk] || { __dpw: dpw[i] || DP.SALARY_DAYS })[r[0]] = 1;
+    // Leave is excluded from this warning on purpose: 6 of 8 leave lines already carry a
+    // Deputy cost, and a salaried person's leave being replaced by their salary is correct,
+    // not suspicious. Warning on it would bury the real signal in noise.
+    if (Number(r[8]) > 0 && r[2] !== "leave") rep.overrode.push({ who: r[4], day: r[0], had: Number(r[8]) });
+  });
+
+  // Resolve each person-week's divisor before allocating anything.
+  var divisor = {};
+  Object.keys(weekDays).forEach(function (k) {
+    var wk = k.split("|").slice(1).join("|");
+    var worked = Object.keys(weekDays[k]).length - 1;             // less __dpw
+    divisor[k] = (dpAddDays_(wk, 6) <= today) ? Math.max(worked, 1) : weekDays[k].__dpw;
+  });
+
+  var counted = {};
+  rows.forEach(function (r, i) {
+    if (!(ann[i] > 0)) return;
+    var wkKey = who[i] + "|" + dpWeekStart_(r[0]);
+    var days = divisor[wkKey] || dpw[i] || DP.SALARY_DAYS;
+    var dayAmt = ann[i] / 52 / days;
+    var dk = who[i] + "|" + r[0];
+    var share = perDay[dk] ? (Number(r[7]) || 0) / perDay[dk] : 1;
+    r[8] = Math.round(dayAmt * share * 100) / 100;
+    r[9] = "salary";
+    // The contractual rate from the payslip, not cost/hours. A 7.5h day would otherwise
+    // derive $38.46 and a 8.5h day $33.94 for someone paid a flat $37.955466.
+    // The CONTRACTED rate, not the allocation divisor - this is the payslip figure, and it
+    // should not wobble because someone picked up an extra shift.
+    r[10] = Math.round(ann[i] / 52 / ((dpw[i] || DP.SALARY_DAYS) * DP.SALARY_HOURS_PER_DAY) * 10000) / 10000;
+    rep.total += r[8];
+    rep.people[who[i]] = r[4];
+    if (!counted[dk]) { counted[dk] = 1; rep.days++; }
+  });
+  /* $288.4615 rounded five times comes to $1,442.30, a cent under the payslip's $1,442.31.
+     Trivial in itself, but the whole basis for this method is that it reconciles to the
+     payslip exactly, and a reconciliation that is out by a cent invites doubt about the
+     rest. Push the rounding remainder onto the last row of each person-week. */
+  var wkRows = {};
+  rows.forEach(function (r, i) {
+    if (!(ann[i] > 0)) return;
+    var k = who[i] + "|" + dpWeekStart_(r[0]);
+    (wkRows[k] = wkRows[k] || { idx: [], days: {}, annual: ann[i],
+                                dpw: dpw[i] || DP.SALARY_DAYS }).idx.push(i);
+    wkRows[k].days[r[0]] = 1;
+  });
+  Object.keys(wkRows).forEach(function (k) {
+    var b = wkRows[k];
+    var d = divisor[k] || b.dpw;
+    var want = Math.round(b.annual / 52 / d * Object.keys(b.days).length * 100) / 100;
+    var got = 0;
+    b.idx.forEach(function (i) { got += rows[i][8]; });
+    var diff = Math.round((want - got) * 100) / 100;
+    if (diff) {
+      var last = b.idx[b.idx.length - 1];
+      rows[last][8] = Math.round((rows[last][8] + diff) * 100) / 100;
+      rep.total += diff;
+    }
+  });
+  rep.total = Math.round(rep.total * 100) / 100;
+
+  /* Weeks that are not five days. Only a week that has not FINISHED gets suppressed - an
+     earlier version skipped any week containing today, which on a Sunday run hid a week
+     that was actually complete and left short days invisible. A finished week reports; an
+     unfinished one is listed separately so nothing is silently absent. */
+  Object.keys(weekDays).forEach(function (k) {
+    var wk = k.split("|").slice(1).join("|"), nd = Object.keys(weekDays[k]).length - 1;
+    if (nd === weekDays[k].__dpw) return;
+    var finished = dpAddDays_(wk, 6) <= today;
+    (finished ? rep.oddWeeks : rep.openWeeks).push({
+      who: k.split("|")[0], week: wk, days: nd,
+      pct: Math.round(nd / weekDays[k].__dpw * 100) });
+  });
+  return rep;
+}
+
+/* ======================================================================================
+ * REPLACEMENT processDeputy_  — replaces the existing one in Code.gs.
+ * Changes are marked [NEW]; everything else is as it was.
+ * ==================================================================================== */
 function processDeputy_() {
   var tz = Session.getScriptTimeZone();
   var to = new Date(), from = new Date(to.getTime() - DP.LOOKBACK_DAYS * 864e5);
-  var f = Utilities.formatDate(from, tz, "yyyy-MM-dd"), t = Utilities.formatDate(to, tz, "yyyy-MM-dd");
+  var today = Utilities.formatDate(to, tz, "yyyy-MM-dd");
+
+  /* [NEW] Snap the start back to a Monday. Salary is allocated per Mon-Sun week by
+     dividing across the hours PRESENT IN THE DATA, so a window that starts mid-week makes
+     that week's whole salary land on whatever days happen to be inside it. Costs up to six
+     extra days of pull and removes the entire class of error. Do not "optimise" this back
+     to a plain 14-day window. */
+  var f = dpWeekStart_(Utilities.formatDate(from, tz, "yyyy-MM-dd"));
+  var t = today;
 
   var sheets = dpPost_("/resource/Timesheet/QUERY", {
     search: { s1: { field: "Date", data: f, type: "ge" },
               s2: { field: "Date", data: t, type: "le" } },
     join: ["OperationalUnitObject", "EmployeeObject"],
-    max: 500
+    max: 1000
   });
   if (!sheets || !sheets.length) { Logger.log("No timesheets " + f + " to " + t + "."); return; }
+  sheets.sort(function (a, b) { return String(a.Date) < String(b.Date) ? -1 : 1; });
 
-  // Cost sometimes lives on the timesheet and sometimes only on TimesheetPayReturn. Fetch
-  // the pay lines for anything missing it and sum them - one timesheet can have several
-  // (ordinary, overtime, penalty), and the total is what matters here.
+  // Cost sometimes lives on the timesheet and sometimes only on TimesheetPayReturn.
   var needCost = sheets.filter(function (s) { return !s.Cost; }).map(function (s) { return s.Id; });
   var payByTs = {};
   for (var i = 0; i < needCost.length; i += 100) {
-    var batch = needCost.slice(i, i + 100);
     try {
       var pay = dpPost_("/resource/TimesheetPayReturn/QUERY", {
-        search: { s1: { field: "Timesheet", data: batch, type: "in" } }, max: 500
-      });
+        search: { s1: { field: "Timesheet", data: needCost.slice(i, i + 100), type: "in" } }, max: 500 });
       (pay || []).forEach(function (p) {
         payByTs[p.Timesheet] = (payByTs[p.Timesheet] || 0) + (Number(p.Cost) || 0);
       });
     } catch (e) { Logger.log("Pay lookup failed for a batch (cost will be 0): " + e); }
   }
 
-  var rows = [], skipped = 0, unknown = {};
+  var salary = dpResolveSalary_(sheets);              // [NEW]
+  var overrides = dpSalaryOverrides_();               // [NEW]
+
+  /** [NEW] Override tab first (a human correcting Deputy, same as Overrides beats the POS),
+   *  then Deputy's own figure. Returns 0 for anyone not salaried. */
+  function annualFor(s, day) {
+    var name = dpNameKey_((s.EmployeeObject && s.EmployeeObject.DisplayName) || "");
+    for (var k = 0; k < overrides.length; k++) {
+      var o = overrides[k];
+      if (o.id != null ? o.id !== Number(s.Employee) : o.key !== name) continue;
+      if (o.from && day < o.from) continue;
+      if (o.to && day > o.to) continue;
+      return { annual: o.annual, source: "SalaryStaff tab", days: o.days };
+    }
+    var d = salary.byAgreement[s.EmployeeAgreement];
+    return d ? { annual: d.annual, source: d.source, days: DP.SALARY_DAYS }
+             : { annual: 0, source: "", days: DP.SALARY_DAYS };
+  }
+
+  var rows = [], ann = [], who = [], dpw = [], skipped = 0, unknown = {}, srcCount = {}, leaveN = 0;
+  var excluded = [], leavePending = [];
   sheets.forEach(function (s) {
     var ou = s.OperationalUnitObject || {};
-    var area = ou.OperationalUnitName || "";              // BOH, Bar, FOH, Kitchen
-    var locRaw = dpLocations_()[ou.Company] || "";        // the actual venue
+    var area = ou.OperationalUnitName || "";
+    var locRaw = dpLocations_()[ou.Company] || "";
     var venue = dpVenue_(locRaw);
-    if (!venue) { skipped++; return; }                    // excluded location
-    var kind = dpKind_(locRaw);
+    /* Deputy books leave against NO operational unit at all, so dpVenue_ finds nothing and
+       every leave row was being discarded. Two costs to that: Deputy prices most leave
+       lines, so real wage dollars vanished; and for salaried staff the missing day turned a
+       paid five-day week into a four-day one, docking 20% of their salary for taking a
+       holiday. Hold leave back and attach it below to wherever the person actually works. */
+    if (!venue && s.IsLeave) { leavePending.push(s); return; }
+    if (!venue) {
+      // [NEW] Record what is being dropped. A bare count cannot tell you whether 11 excluded
+      // rows are harmless head-office admin or a salaried person's leave day going missing -
+      // and a missing leave day silently turns a 5-day salaried week into a 4-day one.
+      excluded.push({ who: (s.EmployeeObject && s.EmployeeObject.DisplayName) || String(s.Employee || ""),
+                      loc: dpLocName_(locRaw) || "(none)", leave: !!s.IsLeave,
+                      day: String(s.Date || "").slice(0, 10), hours: Number(s.TotalTime) || 0 });
+      skipped++; return;
+    }
     var lk = dpLocName_(locRaw).toLowerCase();
     if (!DP.LOCATIONS[lk] && !DP.NONOPERATIONAL[lk]) unknown[dpLocName_(locRaw)] = 1;
 
     var start = dpTime_(s.StartTime), end = dpTime_(s.EndTime);
-    if (!start || !end) return;                           // in progress, or no clock-out
-    // TotalTime is paid hours, already net of the meal break - use it. Mealbreak itself is
-    // a DATETIME expressing a duration from midnight ("...T00:30:00" = 30 minutes), not a
-    // number, so treating it as one produced NaN.
-    var hours = Number(s.TotalTime) || ((end - start) / 36e5 - dpBreakHours_(s.Mealbreak));
-    /* Cost only appears once the timesheet is EXPORTED to payroll - not when it is merely
-       approved (196 approved vs 111 costed in the 28 days to 23 Aug 2026, against 109
-       exported). So a zero on a recent shift means "not costed yet", not "cost nothing".
-       Carry the flag so the dashboard can show hours now and dollars when they land,
-       instead of quietly averaging in zeros and understating labour. */
+
+    /* [NEW] Leave is a timesheet on this install, and it was going into DeputyShifts as an
+       ordinary shift - putting someone on the floor in the time-of-day curve while they
+       were on holiday. Tag it, keep it (it is real wage cost), and let the dashboard drop
+       it from the curve the same way it drops training. A leave line may carry no clock
+       times, so fall back to the date and TotalTime rather than discarding the row. */
+    var isLeave = !!s.IsLeave;
+    var kind = isLeave ? "leave" : dpKind_(locRaw);
+    if (isLeave) leaveN++;
+    if (!isLeave && (!start || !end)) return;         // in progress, or no clock-out
+
+    var day = start ? Utilities.formatDate(start, tz, "yyyy-MM-dd")
+                    : String(s.Date || "").slice(0, 10);
+    if (!day) return;
+
+    var hours = Number(s.TotalTime) ||
+                (start && end ? (end - start) / 36e5 - dpBreakHours_(s.Mealbreak) : 0);
     var cost = Number(s.Cost) || payByTs[s.Id] || 0;
-    var costed = cost > 0 ? "final" : "pending";
+
+    var sal = annualFor(s, day);                      // [NEW]
+    if (sal.annual > 0) srcCount[sal.source] = (srcCount[sal.source] || 0) + 1;
+
     rows.push([
-      Utilities.formatDate(start, tz, "yyyy-MM-dd"),
-      venue,
-      kind,                                                // shift | training
-      area,                                                // FOH, Kitchen, BOH, Bar
+      day, venue, kind, area,
       (s.EmployeeObject && s.EmployeeObject.DisplayName) || String(s.Employee || ""),
-      Utilities.formatDate(start, tz, "HH:mm"),
-      Utilities.formatDate(end, tz, "HH:mm"),
+      start ? Utilities.formatDate(start, tz, "HH:mm") : "",
+      end ? Utilities.formatDate(end, tz, "HH:mm") : "",
       Math.round(hours * 100) / 100,
       Math.round(cost * 100) / 100,
-      costed
+      cost > 0 ? "final" : "pending",
+      ""                                              // [NEW] rate, filled in for salaried
     ]);
+    ann.push(sal.annual);                             // [NEW] parallel arrays, same order
+    dpw.push(sal.days || DP.SALARY_DAYS);
+    who.push(s.Employee || dpNameKey_(rows[rows.length - 1][4]));
   });
+  /* [NEW] Give each leave row the venue the person actually worked most that week - the
+     only defensible answer, since the leave record itself names no location. Falls back to
+     the whole window, and only then gives up. */
+  var wkTally = {}, allTally = {};
+  rows.forEach(function (r, i) {
+    var k = who[i] + "|" + dpWeekStart_(r[0]);
+    ((wkTally[k] = wkTally[k] || {})[r[1]]) = (wkTally[k][r[1]] || 0) + (Number(r[7]) || 0);
+    ((allTally[who[i]] = allTally[who[i]] || {})[r[1]]) = (allTally[who[i]][r[1]] || 0) + (Number(r[7]) || 0);
+  });
+  function topVenue(t) {
+    var best = "", n = -1;
+    Object.keys(t || {}).forEach(function (v) { if (t[v] > n) { n = t[v]; best = v; } });
+    return best;
+  }
+  var leavePlaced = 0;
+  leavePending.forEach(function (s) {
+    var day = String(s.Date || "").slice(0, 10);
+    if (!day) return;
+    var key = s.Employee;
+    var venue = topVenue(wkTally[key + "|" + dpWeekStart_(day)]) || topVenue(allTally[key]);
+    var name = (s.EmployeeObject && s.EmployeeObject.DisplayName) || String(s.Employee || "");
+    if (!venue) {
+      excluded.push({ who: name, loc: "(none)", leave: true, day: day,
+                      hours: Number(s.TotalTime) || 0 });
+      skipped++; return;
+    }
+    var start = dpTime_(s.StartTime), end = dpTime_(s.EndTime);
+    var salL = annualFor(s, day);
+    rows.push([day, venue, "leave", "", name,
+               start ? Utilities.formatDate(start, tz, "HH:mm") : "",
+               end ? Utilities.formatDate(end, tz, "HH:mm") : "",
+               Math.round((Number(s.TotalTime) || 0) * 100) / 100,
+               Math.round((Number(s.Cost) || 0) * 100) / 100,
+               Number(s.Cost) > 0 ? "final" : "pending", ""]);
+    ann.push(salL.annual); dpw.push(salL.days || DP.SALARY_DAYS); who.push(key);
+    leaveN++; leavePlaced++;
+    if (salL.annual > 0) srcCount[salL.source] = (srcCount[salL.source] || 0) + 1;
+  });
+
   if (!rows.length) { Logger.log("Nothing to write (" + skipped + " excluded)."); return; }
 
-  var header = ["date","venue","kind","area","employee","start","end","hours","cost","costed"];
+  var sal = dpAllocateSalary_(rows, ann, who, dpw, f, t, today);   // [NEW]
+
+  // [NEW] "rate" carries the contractual hourly rate for salaried staff - annual/52/38,
+  // the figure on the payslip. Blank for everyone else, whose cost is real payroll output.
+  var header = ["date","venue","kind","area","employee","start","end","hours","cost","costed","rate"];
   var n = writeReport_(SpreadsheetApp.openById(SF.SPREADSHEET_ID), DP.TAB, header,
                        rows.sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; }));
-  var pending = rows.filter(function (r) { return r[9] === "pending"; });
-  var training = rows.filter(function (r) { return r[2] === "training"; });
-  Logger.log("Deputy " + f + " to " + t + ": " + n.written + " shift(s), " + n.replaced +
+
+  Logger.log("Deputy " + f + " to " + t + ": " + n.written + " row(s), " + n.replaced +
              " replaced" + (skipped ? ", " + skipped + " excluded" : "") + ".");
-  if (training.length) {
-    Logger.log("  of those, " + training.length + " training line(s) worth $" +
-               training.reduce(function (a, r) { return a + r[8]; }, 0).toFixed(2) +
-               " - real wage cost, but kept out of the time-of-day view.");
+
+  /* [NEW] Salary reporting. Say where each figure came from - a number nobody can trace is
+     a number nobody trusts. */
+  var np = Object.keys(sal.people).length;
+  if (np) {
+    Logger.log("  SALARY: " + np + " salaried person/people, " + sal.days + " working day(s), $" +
+               sal.total.toFixed(2) + " allocated at annual/260 per day.");
+    Object.keys(srcCount).forEach(function (k) { Logger.log("    from " + k + ": " + srcCount[k] + " shift(s)"); });
   }
+  if (excluded.length) {
+    var exLeave = excluded.filter(function (e) { return e.leave; });
+    Logger.log("  " + excluded.length + " row(s) excluded (location maps to no venue)" +
+               (exLeave.length ? " - " + exLeave.length + " of them LEAVE:" : ":"));
+    excluded.slice(0, 12).forEach(function (e) {
+      Logger.log("     " + e.day + "  " + e.who + "  " + e.hours.toFixed(1) + "h  @ " + e.loc +
+                 (e.leave ? "  [LEAVE]" : ""));
+    });
+  }
+  if (sal.openWeeks.length) {
+    Logger.log("  " + sal.openWeeks.length + " week(s) still open (not yet finished):");
+    sal.openWeeks.slice(0, 10).forEach(function (g) {
+      Logger.log("     " + (sal.people[g.who] || g.who) + ", week of " + g.week + ": " +
+                 g.days + " day(s) so far = " + g.pct + "% of a week's salary");
+    });
+  }
+  if (sal.oddWeeks.length) {
+    // Not an error - a real rostering fact. Five days is the assumption; a six-day week
+    // genuinely bills 120% of salary and a four-day week 80%. Surfaced so it is a decision
+    // rather than a silent distortion.
+    // Informational, not a warning: the salary total for these weeks is correct either
+    // way. Worth seeing because a persistent pattern is a roster fact worth knowing.
+    Logger.log("  " + sal.oddWeeks.length + " finished week(s) not on the expected days " +
+               "(salary still totals correctly):");
+    sal.oddWeeks.slice(0, 10).forEach(function (g) {
+      Logger.log("     " + (sal.people[g.who] || g.who) + ", week of " + g.week + ": " +
+                 g.days + " day(s) worked, salary spread across those days");
+    });
+  }
+  if (sal.overrode.length) {
+    Logger.log("  >> " + sal.overrode.length + " shift(s) had a Deputy cost AND resolved to a " +
+               "salary; the salary won. Check these people are actually salaried.");
+  }
+  if (leaveN) Logger.log("  " + leaveN + " leave line(s) placed at the person's main venue, " +
+                         "tagged 'leave' and kept out of the floor curve.");
+
+  var pending = rows.filter(function (r) { return r[9] === "pending"; });
   if (pending.length) {
-    Logger.log("  " + pending.length + " shift(s) not yet costed (" +
+    Logger.log("  " + pending.length + " shift(s) still uncosted (" +
                pending.reduce(function (a, r) { return a + r[7]; }, 0).toFixed(1) +
-               " hours). Deputy fills the cost in when the timesheet is exported to " +
-               "payroll; the next run picks it up.");
+               " hours) - hourly staff awaiting payroll export.");
   }
   var u = Object.keys(unknown);
   if (u.length) Logger.log("Locations not in DP.LOCATIONS, passed through as-is: " + u.join(", "));
