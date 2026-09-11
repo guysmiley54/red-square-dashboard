@@ -17,12 +17,20 @@
  *   backfillPdfs           — one-off: archive PDFs for rows processed before Drive archiving
  *   fixInvoiceNumberText   — one-off: convert invoice-number columns to text
  *
+ * OVERHEADS: mail from energy, waste, rent and repairs suppliers is routed through
+ * Overheads.gs (profiles, multi-site split, EnergyUsage). Its audit and reprocess entry
+ * points are listed at the top of that file.
+ *
  * RETRY a failed email: delete its row from the ProcessedEmails tab.
  */
 
 var CONFIG = {
   // Lane 1: anything with a PDF attached, to accounts@ or labelled Supplier Invoices
-  SEARCH_QUERY: '(deliveredto:accounts@redsquarecafe.com.au OR to:accounts@redsquarecafe.com.au OR label:supplier-invoices) filename:pdf newer_than:14d',
+  // Shell Energy and Scooter's Electrical bill adrian@/abeckitt@ without the label, so
+  // before 11 Sep 2026 neither ever reached this query. Keep this list in step with the
+  // senders in OH_PROFILES (Overheads.gs). Supagas is labelled already, and its pod@
+  // dockets must NOT be added - they carry litres that reappear on the statement.
+  SEARCH_QUERY: '(deliveredto:accounts@redsquarecafe.com.au OR to:accounts@redsquarecafe.com.au OR label:supplier-invoices OR from:(shellenergy.com.au OR scootz.cresswell@gmail.com)) filename:pdf newer_than:14d',
   // Lane 2: invoices that arrive as the EMAIL BODY with no PDF attached.
   // Matched three ways, so a missing label can't hide an invoice:
   //   1. label:supplier-invoices                — anything you file by hand
@@ -238,6 +246,14 @@ function runLane_(query, PAGE, state, handleMsg, processedIds) {
 }
 
 function processAttachments_(apiKey, sheets, existing, msg, notes, lane) {
+  // Overhead suppliers (Overheads.gs). typeof-guarded so invoice ingestion carries on
+  // exactly as before if that file is ever removed.
+  var OHX = typeof ohProfileForMessage_ === "function";
+  var prof = OHX ? ohProfileForMessage_(msg.getFrom(), msg.getSubject()) : null;
+  if (prof && ohSkipMessage_(prof, msg.getSubject(), "")) {
+    notes.push("skipped (" + prof.id + " notice, not a bill)");
+    return;
+  }
   msg.getAttachments().forEach(function (att) {
     var ct = att.getContentType();
     var isPdf = isPdfAtt_(att);
@@ -253,6 +269,18 @@ function processAttachments_(apiKey, sheets, existing, msg, notes, lane) {
       notes.push(att.getName() + ": skipped (remittance advice, not a bill)");
       return;
     }
+    if (prof && ohSkipMessage_(prof, "", att.getName())) {
+      notes.push(att.getName() + ": skipped (" + prof.id + " notice, not a bill)");
+      return;
+    }
+    var ohCtx = prof ? ohContext_(msg, att, lane) : null;
+    if (prof && prof.statementLines && isPdf) {
+      var sl;
+      try { sl = ohStatementLines_(apiKey, sheets, existing, msg, att, prof, ohCtx); }
+      catch (e) { throw new Error(att.getName() + ": " + (e && e.message ? e.message : e)); }
+      notes.push(att.getName() + ": " + sl.note);
+      return;
+    }
 
     var b64 = Utilities.base64Encode(att.getBytes());
     var block = isPdf
@@ -262,7 +290,9 @@ function processAttachments_(apiKey, sheets, existing, msg, notes, lane) {
     // handler logs a bare parser error with no clue which file caused it.
     var result;
     try {
-      result = extractFromContent_(apiKey, [block], modelForSender_(msg.getFrom()));
+      result = extractFromContent_(apiKey, [block],
+        (prof && prof.model) || modelForSender_(msg.getFrom()),
+        prof ? ohPromptFor_(prof) : "");
     } catch (e) {
       throw new Error(att.getName() + " (" + Math.round(att.getSize() / 1024) + "KB): " +
         (e && e.message ? e.message : e));
@@ -270,6 +300,17 @@ function processAttachments_(apiKey, sheets, existing, msg, notes, lane) {
     if (result.not_invoice) { notes.push(att.getName() + ": skipped (" + (result.reason || "not an invoice") + ")"); return; }
 
     fixInvoiceDate_(result, msg.getDate(), notes);
+
+    // A profile can also be recognised from the supplier the model read, which catches an
+    // overhead bill forwarded from somewhere its sender list doesn't cover.
+    var prof2 = prof || (OHX ? ohProfileForSupplier_(result.supplier) : null);
+    if (prof2) {
+      var ctx = ohCtx || ohContext_(msg, att, lane);
+      ctx.savePdf = function () { return savePdf_(att, result); };
+      var ow = ohWriteInvoice_(sheets, result, prof2, existing, ctx);
+      notes.push(att.getName() + ": " + ow.note);
+      return;
+    }
 
     if (isDupInvoice_(existing, result)) { notes.push(att.getName() + ": duplicate " + result.invoice_number + ", skipped"); return; }
     markInvoice_(existing, result);
@@ -345,11 +386,14 @@ function route_(msg, lane) {
   return "lane" + lane + ":" + tags.join("+");
 }
 
-function extractFromContent_(apiKey, contentBlocks, model) {
+// extraPrompt: appended after EXTRACT_PROMPT. Used by Overheads.gs to admit invoice /
+// statement hybrids and multi-site bills for overhead suppliers only - COGS suppliers get
+// the base prompt, unchanged, so their statements are still skipped.
+function extractFromContent_(apiKey, contentBlocks, model, extraPrompt) {
   var payload = {
     model: model || CONFIG.MODEL,
     max_tokens: 8000,
-    messages: [{ role: "user", content: contentBlocks.concat([{ type: "text", text: EXTRACT_PROMPT }]) }]
+    messages: [{ role: "user", content: contentBlocks.concat([{ type: "text", text: EXTRACT_PROMPT + (extraPrompt || "") }]) }]
   };
 
   var resp = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
@@ -499,9 +543,17 @@ function markInvoice_(existing, result) {
 }
 
 function writeInvoice_(sheets, j, fromEmail, fileName, pdfUrl, emailDate, route) {
-  var venue = detectVenue_(j.deliver_to);
+  // venue_override: set by Overheads.gs from the supplier's own site ID. Address matching
+  // cannot do this job - Cambridge and Luma share a building on Kennedy Drive, and each
+  // supplier numbers its units differently.
+  var venue = j.venue_override || detectVenue_(j.deliver_to);
   var isCredit = j.doc_type === "credit_note";
-  var sign = isCredit ? -1 : 1;
+  // The prompt asks for credit notes as POSITIVE amounts and the sign is applied here. The
+  // model does not always comply: on 11 Sep 2026, 7 of 53 credit notes in the live tab had
+  // been reported negative and flipped positive by this line - $3,074.75 of credits counted
+  // as spend, $2,554 of it one Supagas credit. If the model already made the total
+  // negative, keep its signs as they are.
+  var sign = isCredit ? ((Number(j.total) || 0) < 0 ? 1 : -1) : 1;
   var invNo = String(j.invoice_number || "");
   var items = (j.items || []).map(function (li) {
     return Array.isArray(li)
@@ -559,14 +611,16 @@ function writeInvoice_(sheets, j, fromEmail, fileName, pdfUrl, emailDate, route)
     if (dObj > ceiling || dObj < floor) dateOk = false;
   }
 
-  var status = (reconciled && dateOk) ? "OK" : "CHECK";
+  // force_check: Overheads.gs sets it when a venue had to be defaulted, when site totals
+  // don't add up to the bill, or when the row comes off a statement line.
+  var status = (reconciled && dateOk && !j.force_check) ? "OK" : "CHECK";
 
   // Leading apostrophe keeps invoice numbers as text so the data feed
   // never nulls alphanumeric ones (SAV59701, CR632518, ADVS8Y).
   sheets.inv.appendRow([
     new Date(), venue, j.supplier || "", "'" + invNo, j.invoice_date || "",
     sign * (Number(j.subtotal) || 0), sign * (Number(j.gst) || 0), sign * freight, sign * (Number(j.total) || 0),
-    j.category_guess || "Other", isCredit ? "credit_note" : "invoice",
+    j.category_override || j.category_guess || "Other", isCredit ? "credit_note" : "invoice",
     status, "email: " + fromEmail + " / " + fileName + (route ? " [" + route + "]" : ""), pdfUrl || "", sign * cdl,
     j.order_ref ? "'" + String(j.order_ref).trim() : ""
   ]);
@@ -694,6 +748,49 @@ function fixInvoiceNumberText() {
 }
 
 /** One-off: archive PDFs for existing rows by finding the original emails. No API credits used. */
+/** One-off pair, same shape as auditOrderDuplicates / applyOrderDuplicates.
+ *  Credit notes the model reported NEGATIVE were flipped positive by writeInvoice_ before
+ *  11 Sep 2026, so they count as spend. Found live that day: 7 of 53, $3,074.75, the
+ *  largest a $2,554 Supagas credit. audit... logs them; apply... negates the money columns
+ *  on those Invoices rows and on their InvoiceLines rows. Only rows of type credit_note
+ *  with a POSITIVE total are touched, so running either twice changes nothing. */
+function auditCreditNoteSigns() { creditSignCore_(false); }
+function applyCreditNoteSigns() { creditSignCore_(true); }
+function creditSignCore_(apply) {
+  var sh = getSheets_();
+  var inv = sh.inv, lin = sh.lin;
+  var n = inv.getLastRow();
+  if (n < 2) return;
+  var iv = inv.getRange(2, 1, n - 1, 15).getValues();
+  var keys = {}, hits = 0, sum = 0;
+  for (var i = 0; i < iv.length; i++) {
+    if (String(iv[i][10]) !== "credit_note" || !(Number(iv[i][8]) > 0)) continue;
+    hits++; sum += Number(iv[i][8]);
+    keys[normKey_(iv[i][2]) + "|" + normKey_(iv[i][3])] = true;
+    Logger.log("row " + (i + 2) + " " + iv[i][2] + " " + String(iv[i][3]).replace(/^'/, "") + " " + iv[i][4] + " total " + iv[i][8]);
+    if (apply) {
+      [6, 7, 8, 9, 15].forEach(function (c) {
+        var v = Number(iv[i][c - 1]) || 0;
+        if (v) inv.getRange(i + 2, c).setValue(-Math.abs(v));
+      });
+    }
+  }
+  var ln = lin.getLastRow(), lines = 0;
+  if (ln > 1) {
+    var lv = lin.getRange(2, 1, ln - 1, 9).getValues();
+    for (var k = 0; k < lv.length; k++) {
+      if (!keys[normKey_(lv[k][1]) + "|" + normKey_(lv[k][0])]) continue;
+      if (!(Number(lv[k][8]) > 0)) continue;
+      lines++;
+      if (apply) {
+        lin.getRange(k + 2, 9).setValue(-Math.abs(Number(lv[k][8])));
+        if (Number(lv[k][5]) > 0) lin.getRange(k + 2, 6).setValue(-Math.abs(Number(lv[k][5])));
+      }
+    }
+  }
+  Logger.log((apply ? "Fixed " : "Would fix ") + hits + " credit note(s), $" + sum.toFixed(2) + ", and " + lines + " line row(s).");
+}
+
 function backfillPdfs() {
   var sheets = getSheets_();
   var inv = sheets.inv;
