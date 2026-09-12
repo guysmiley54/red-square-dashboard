@@ -153,6 +153,15 @@ var OH_PROFILES = [
     id: "elders", supplier: "Elders Real Estate", category: "Rent",
     senders: ["eldersrealestate.com.au", "elders.com.au"],
     supplierRe: /elders/i,
+    model: "claude-sonnet-4-6",
+    // One invoice bills BOTH tenancies, the same way a Supagas statement bills three sites,
+    // so it splits the same way - see OH_ELDERS_RULES.
+    split: true,
+    prompt: "elders",
+    sites: {
+      "21": "Red Square Cambridge",   // the base premises on the invoice header
+      "22": "Luma Kitchen"            // the lines suffixed "- Unit 22"
+    },
     // Abbie at Elders also sends centre notices with attachments.
     skipRe: /rent\s+review|renovation|shutdown|fencing|ceiling|storage|bathroom/i,
     // One lease reference (BG-FIP01) covers both tenancies in the building. The unit number
@@ -253,9 +262,27 @@ var OH_SUPAGAS_RULES = [
   "Ignore the account summary block entirely: balance brought forward, payments and total balance due are not charges."
 ].join("\n");
 
+/* Elders bills both Kennedy Drive tenancies on ONE invoice, split only by a suffix on the
+   line description. Written from invoice 63857 (Aug 2026), read line by line. */
+var OH_ELDERS_RULES = [
+  "",
+  "ELDERS TENANT TAX INVOICE - LAYOUT NOTES",
+  'This is a "TAX INVOICE / STATEMENT OF ACCOUNT" from Elders Tasmania for the Cambridge Homemaker Centre. It is a bill: doc_type "invoice".',
+  "It charges TWO separate tenancies in one building, and you must return both as locations.",
+  'Use exactly two location ids, the strings "21" and "22":',
+  '  - "22" is the tenancy whose line descriptions carry the suffix "- Unit 22" (for example "Retail Rental - Unit 22", "Variable Outgoings - Unit 22").',
+  '  - "21" is the base premises - the one named in the "PREMISES :" header - and takes every other charge line, including repairs and one-off works.',
+  'Some line descriptions are TRUNCATED by the column width, so a "- Unit 22" suffix may be cut off. When the SAME description appears TWICE with no suffix visible (typically the promotional levy, "Tenants Contribution to Prom..."), the LARGER amount belongs to "21" and the SMALLER to "22". They are charged in proportion to each tenancy rent.',
+  'Put the lines for each tenancy in that location items array, keep the printed description as-is, and leave the top-level "items" empty.',
+  "Each location subtotal, gst and total are the sums of its own lines. The two locations together must equal the invoice Total For This Tax Invoice.",
+  'Ignore the remittance advice block and the EFT payment details at the foot of the page - they repeat the total, they are not charges.'
+].join("\n");
+
 function ohPromptFor_(prof) {
   if (!prof) return "";
-  return OH_HYBRID_RULES + (prof.prompt === "supagas" ? "\n" + OH_SUPAGAS_RULES : "");
+  var extra = prof.prompt === "supagas" ? OH_SUPAGAS_RULES
+            : prof.prompt === "elders" ? OH_ELDERS_RULES : "";
+  return OH_HYBRID_RULES + (extra ? "\n" + extra : "");
 }
 
 /* ---------------------------------------------------------------- matching */
