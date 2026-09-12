@@ -159,6 +159,12 @@ var OH_PROFILES = [
     // on the invoice separates them: Unit 22 is Luma, and Red Square Cambridge carries no
     // unit number at all.
     unitRules: OH_RENT_UNIT_RULES,
+    // Some Elders invoices print only the lease reference (CAMHOC01 / BG-FIP01) and no
+    // street address at all, so there is nothing for the address matcher to find and the
+    // charge would fall through to DEFAULT_VENUE - Glenorchy, which is SPG's site and not
+    // Elders' at all. Their lease is the Kennedy Drive centre, so fall back there instead.
+    // Still written CHECK: the venue was assumed from the supplier, not read off the bill.
+    defaultVenue: "Red Square Cambridge",
     auditQuery: "from:(eldersrealestate.com.au OR elders.com.au) subject:invoice has:attachment newer_than:150d"
   },
   {
@@ -322,6 +328,10 @@ function ohVenue_(prof, siteId, texts) {
   for (var key in venues) {
     if (low.indexOf(key) !== -1) return { venue: venues[key], how: "address" };
   }
+  // A profile-level fallback beats the global one: DEFAULT_VENUE is Glenorchy, which is
+  // wrong for every supplier that only bills the Cambridge building. Either way the row is
+  // flagged, because nothing on the document said which venue it was.
+  if (prof && prof.defaultVenue) return { venue: prof.defaultVenue, how: "default" };
   var def = (typeof CONFIG !== "undefined" && CONFIG.DEFAULT_VENUE) || "Red Square Glenorchy";
   return { venue: def, how: "default" };
 }
