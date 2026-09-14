@@ -31,6 +31,7 @@ var OB = {
   SETTINGS_STORE_TAB: "SupplierSettings",
   FAVS_TAB:     "Favourites",
   FAVLINES_TAB: "FavouriteLines",
+  COVER_TAB:    "CategoryOverrides",
   ORDERS_TAB:   "Orders",
   LINES_TAB:    "OrderLines",
   TARGETS_TAB:  "OrderTargets",
@@ -45,9 +46,15 @@ var ORDERS_HEADER = ["order_id","action","supplier","venue","order_date","subtot
                      "channel","placed_by","note","logged_at"];
 var LINES_HEADER  = ["order_id","line_no","item_code","description","unit","qty","unit_price","line_total"];
 var TARGETS_HEADER= ["venue","cogs_pct","weekly_budget","updated_by","updated_at"];
-var SUPSET_HEADER = ["supplier","rep_email","visible","portal_only","stores","cc","note","updated_by","updated_at"];
+var SUPSET_HEADER = ["supplier","rep_email","visible","portal_only","cc","note","updated_by","updated_at"];
 var FAVS_HEADER   = ["fav_id","fav_name","venue","supplier","created_by","created_at"];
 var FAVLINE_HEADER= ["fav_id","line_no","item_key","description","unit","qty","supplier"];
+var COVER_HEADER  = ["item_key","supplier","description","category","updated_by","updated_at"];
+
+/* The categories the dashboard knows how to render. A free-text category would save fine
+   and then show up as a chip nobody can filter on, so the list is closed. */
+var OB_CATEGORIES = ["Produce","Meat","Seafood","Dairy / Cold Storage","Bakery","Dry Goods",
+  "Beverage","Coffee","Hot Containers","Cold Containers","Packaging","Cleaning & Chemicals","Uncategorised"];
 
 /* Only these settings can be written, and each value is checked. The endpoint is public
    behind a shared PIN, so "whatever field the request names" is not an option: a typo'd
@@ -58,11 +65,6 @@ var SETTING_FIELDS = {
   cc:          function (v) { return v === "" || isEmail_(v) ? v : null; },
   visible:     function (v) { return v === "yes" || v === "no" ? v : null; },
   portal_only: function (v) { return v === "yes" || v === "no" ? v : null; },
-  stores:      function (v) {
-    var list = v.split(/[;,|]/).map(trim_).filter(function (x) { return x; });
-    for (var i = 0; i < list.length; i++) if (OB_STORES.indexOf(list[i]) === -1) return null;
-    return list.join(", ");
-  },
   note:        function (v) { return v.slice(0, 300); }
 };
 function isEmail_(v) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v); }
@@ -102,6 +104,7 @@ function doPost(e) {
       case "supplier_setting":  return out(supplierSetting_(body, user));
       case "favourite":         return out(favourite_(body, user));
       case "favourite_delete":  return out(favouriteDelete_(body, user));
+      case "category_override": return out(categoryOverride_(body, user));
       default:        return out({ ok:false, error:"unknown action" });
     }
   } catch (err) {
@@ -238,11 +241,37 @@ function supplierSetting_(body, user) {
     /* A new row carries the defaults the dashboard assumes. Without them a supplier that
        only ever had its rep email set would read back hidden, with no stores. */
     sh.getRange(row, 1, 1, SUPSET_HEADER.length)
-      .setValues([[supplier, "", "yes", "no", OB_STORES.join(", "), "", "", user, new Date()]]);
+      .setValues([[supplier, "", "yes", "no", "", "", user, new Date()]]);
   }
   sh.getRange(row, col).setValue(value);
   sh.getRange(row, SUPSET_HEADER.indexOf("updated_by") + 1, 1, 2).setValues([[user, new Date()]]);
   return { ok:true, supplier:supplier, field:field, value:value };
+}
+
+/* One row per product, replaced in place. An empty category clears the override and lets
+   the automatic rules take the product back, so "undo" needs no separate action. */
+function categoryOverride_(body, user) {
+  var key = trim_(body.item_key).slice(0, 200);
+  var cat = trim_(body.category);
+  if (!key) return { ok:false, error:"no item_key" };
+  if (cat && OB_CATEGORIES.indexOf(cat) === -1) return { ok:false, error:"unknown category: " + cat };
+
+  var sh = tab_(OB.COVER_TAB, COVER_HEADER);
+  var last = sh.getLastRow(), row = 0;
+  if (last > 1) {
+    var vals = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0]).trim() === key) { row = i + 2; break; }
+    }
+  }
+  if (!cat) {
+    if (row) sh.deleteRow(row);
+    return { ok:true, item_key:key, cleared:true };
+  }
+  if (!row) row = last + 1;
+  sh.getRange(row, 1, 1, COVER_HEADER.length).setValues([[key,
+    trim_(body.supplier).slice(0, 120), trim_(body.description).slice(0, 200), cat, user, new Date()]]);
+  return { ok:true, item_key:key, category:cat };
 }
 
 function favourite_(body, user) {
@@ -435,6 +464,7 @@ function setup() {
   tab_(OB.SETTINGS_STORE_TAB, SUPSET_HEADER);
   tab_(OB.FAVS_TAB, FAVS_HEADER);
   tab_(OB.FAVLINES_TAB, FAVLINE_HEADER);
+  tab_(OB.COVER_TAB, COVER_HEADER);
   var pin = scriptPin_();
   Logger.log(pin ? "ORDER_PIN is set. Tabs ready." :
     "Tabs ready. NOW SET ORDER_PIN: Project Settings > Script Properties > Add, key ORDER_PIN.");
