@@ -423,6 +423,11 @@ function readTab_(name) {
   });
 }
 
+/* Every write below addresses columns BY POSITION, so a header left over from an older
+   version of this file silently puts values in the wrong column. SupplierSettings lost its
+   per-site "stores" column in v3, which would have pushed cc, note and updated_by one place
+   left on a tab created by v2. An empty tab is simply re-headed; a tab with data is not
+   touched and the call fails loudly, because shifting live rows is worse than refusing. */
 function tab_(name, header) {
   var ss = book_();
   var sh = ss.getSheetByName(name);
@@ -432,9 +437,19 @@ function tab_(name, header) {
     sh.setFrozenRows(1);
     return sh;
   }
-  if (sh.getLastRow() === 0) {
+  if (sh.getLastRow() <= 1) {                       // absent or header-only: safe to re-head
+    sh.getRange(1, 1, 1, sh.getLastColumn() || header.length).clearContent();
     sh.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight("bold");
     sh.setFrozenRows(1);
+    return sh;
+  }
+  var cur = sh.getRange(1, 1, 1, Math.max(header.length, sh.getLastColumn())).getValues()[0]
+              .map(function (h) { return String(h).trim().toLowerCase(); });
+  for (var i = 0; i < header.length; i++) {
+    if (cur[i] !== header[i]) {
+      throw new Error("'" + name + "' column " + (i + 1) + " is '" + cur[i] + "', expected '" +
+        header[i] + "'. It has data, so nothing was written. Fix the header row by hand, then retry.");
+    }
   }
   return sh;
 }
