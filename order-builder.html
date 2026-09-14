@@ -104,13 +104,13 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v2-1810"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v2-1845"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 const SALES_SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
 const SALES_CUTOVER  = "2026-08-03";
-const WEBAPP_URL     = "";   // Orders.gs /exec — set after deployment
+const WEBAPP_URL     = "https://script.google.com/macros/s/AKfycbz4LRNzbabVhkQ2PT0v2IxSPboDpyBNcW2PCpjqVb6knLicd9_0V4bXE_2ltMKikzxQmg/exec";
 
 /* Cambridge and Luma only. Glenorchy is excluded at the point every read is filtered, not
    by hiding it in the UI, so no total, report or catalogue can pick it up by accident. */
