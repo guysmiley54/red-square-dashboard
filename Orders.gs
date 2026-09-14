@@ -49,7 +49,7 @@ var TARGETS_HEADER= ["venue","cogs_pct","weekly_budget","updated_by","updated_at
 var SUPSET_HEADER = ["supplier","rep_email","visible","portal_only","cc","note","updated_by","updated_at"];
 var FAVS_HEADER   = ["fav_id","fav_name","venue","supplier","created_by","created_at"];
 var FAVLINE_HEADER= ["fav_id","line_no","item_key","description","unit","qty","supplier"];
-var COVER_HEADER  = ["item_key","supplier","description","category","updated_by","updated_at"];
+var COVER_HEADER  = ["item_key","supplier","description","category","hidden","updated_by","updated_at"];
 
 /* The categories the dashboard knows how to render. A free-text category would save fine
    and then show up as a chip nobody can filter on, so the list is closed. */
@@ -105,6 +105,7 @@ function doPost(e) {
       case "favourite":         return out(favourite_(body, user));
       case "favourite_delete":  return out(favouriteDelete_(body, user));
       case "category_override": return out(categoryOverride_(body, user));
+      case "category_bulk":     return out(categoryBulk_(body, user));
       default:        return out({ ok:false, error:"unknown action" });
     }
   } catch (err) {
@@ -248,30 +249,64 @@ function supplierSetting_(body, user) {
   return { ok:true, supplier:supplier, field:field, value:value };
 }
 
-/* One row per product, replaced in place. An empty category clears the override and lets
-   the automatic rules take the product back, so "undo" needs no separate action. */
+/* One row per product, replaced in place. It carries two independent things: a category
+   override, and whether the product is turned off in the ordering screens. A row with
+   neither is deleted rather than left as an empty record, so "undo" needs no extra action.
+   Turning a product off never affects spend or reporting — that would hide money. */
 function categoryOverride_(body, user) {
-  var key = trim_(body.item_key).slice(0, 200);
-  var cat = trim_(body.category);
-  if (!key) return { ok:false, error:"no item_key" };
-  if (cat && OB_CATEGORIES.indexOf(cat) === -1) return { ok:false, error:"unknown category: " + cat };
-
   var sh = tab_(OB.COVER_TAB, COVER_HEADER);
-  var last = sh.getLastRow(), row = 0;
+  var res = writeCover_(sh, body, user);
+  return res.error ? { ok:false, error:res.error } : { ok:true, item_key:res.key,
+                                                       category:res.cat, hidden:res.hidden, cleared:res.cleared };
+}
+
+/* The whole selection in one call. Fifty single posts would burn quota and could half-apply
+   if one failed midway; here a bad item is reported and the rest still land. */
+function categoryBulk_(body, user) {
+  var items = body.items || [];
+  if (!items.length) return { ok:false, error:"no items" };
+  if (items.length > 500) return { ok:false, error:"too many items (" + items.length + ")" };
+  var sh = tab_(OB.COVER_TAB, COVER_HEADER);
+  var done = 0, cleared = 0, failed = [];
+  for (var i = 0; i < items.length; i++) {
+    var res = writeCover_(sh, items[i], user);
+    if (res.error) failed.push(res.error);
+    else if (res.cleared) cleared++;
+    else done++;
+  }
+  return { ok:true, written:done, cleared:cleared, failed:failed };
+}
+
+function writeCover_(sh, o, user) {
+  var key = trim_(o.item_key).slice(0, 200);
+  var cat = trim_(o.category);
+  var hid = trim_(o.hidden).toLowerCase();
+  if (!key) return { error:"no item_key" };
+  if (cat && OB_CATEGORIES.indexOf(cat) === -1) return { error:"unknown category: " + cat };
+  if (hid && hid !== "yes" && hid !== "no") return { error:"hidden must be yes or no" };
+
+  var last = sh.getLastRow(), row = 0, cur = null;
   if (last > 1) {
-    var vals = sh.getRange(2, 1, last - 1, 1).getValues();
+    var vals = sh.getRange(2, 1, last - 1, COVER_HEADER.length).getValues();
     for (var i = 0; i < vals.length; i++) {
-      if (String(vals[i][0]).trim() === key) { row = i + 2; break; }
+      if (String(vals[i][0]).trim() === key) { row = i + 2; cur = vals[i]; break; }
     }
   }
-  if (!cat) {
+  /* Only the fields the request actually names are changed: setting a category must not
+     quietly un-hide a product, and turning one off must not drop its category. */
+  var keepCat = cur ? String(cur[3] || "").trim() : "";
+  var keepHid = cur ? String(cur[4] || "").trim().toLowerCase() : "";
+  var newCat = o.hasOwnProperty("category") ? cat : keepCat;
+  var newHid = hid || keepHid || "no";
+
+  if (!newCat && newHid !== "yes") {
     if (row) sh.deleteRow(row);
-    return { ok:true, item_key:key, cleared:true };
+    return { key:key, cleared:true };
   }
   if (!row) row = last + 1;
   sh.getRange(row, 1, 1, COVER_HEADER.length).setValues([[key,
-    trim_(body.supplier).slice(0, 120), trim_(body.description).slice(0, 200), cat, user, new Date()]]);
-  return { ok:true, item_key:key, category:cat };
+    trim_(o.supplier).slice(0, 120), trim_(o.description).slice(0, 200), newCat, newHid, user, new Date()]]);
+  return { key:key, cat:newCat, hidden:newHid };
 }
 
 function favourite_(body, user) {
