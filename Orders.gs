@@ -262,19 +262,57 @@ function categoryOverride_(body, user) {
 
 /* The whole selection in one call. Fifty single posts would burn quota and could half-apply
    if one failed midway; here a bad item is reported and the rest still land. */
+/* One read and one write for the whole selection. Doing it item by item meant a full-column
+   read plus a single-row write per product — eighteen products took eighteen round trips to
+   the sheet, which is why it crawled. Here the sheet is read once, edited in memory, and
+   written back in one setValues. */
 function categoryBulk_(body, user) {
   var items = body.items || [];
   if (!items.length) return { ok:false, error:"no items" };
   if (items.length > 500) return { ok:false, error:"too many items (" + items.length + ")" };
+
   var sh = tab_(OB.COVER_TAB, COVER_HEADER);
-  var done = 0, cleared = 0, failed = [];
-  for (var i = 0; i < items.length; i++) {
-    var res = writeCover_(sh, items[i], user);
-    if (res.error) failed.push(res.error);
-    else if (res.cleared) cleared++;
-    else done++;
+  var last = sh.getLastRow();
+  var rows = last > 1 ? sh.getRange(2, 1, last - 1, COVER_HEADER.length).getValues() : [];
+  var index = {};
+  for (var i = 0; i < rows.length; i++) index[String(rows[i][0]).trim()] = i;
+
+  var now = new Date(), written = 0, cleared = 0, failed = [], drop = {};
+  for (var k = 0; k < items.length; k++) {
+    var o = items[k];
+    var key = trim_(o.item_key).slice(0, 200);
+    var cat = trim_(o.category);
+    var hid = trim_(o.hidden).toLowerCase();
+    if (!key) { failed.push("no item_key"); continue; }
+    if (cat && OB_CATEGORIES.indexOf(cat) === -1) { failed.push("unknown category: " + cat); continue; }
+    if (hid && hid !== "yes" && hid !== "no") { failed.push("hidden must be yes or no"); continue; }
+
+    var at = index.hasOwnProperty(key) ? index[key] : -1;
+    var curRow = at >= 0 ? rows[at] : null;
+    var keepCat = curRow ? String(curRow[3] || "").trim() : "";
+    var keepHid = curRow ? String(curRow[4] || "").trim().toLowerCase() : "";
+    var newCat = o.hasOwnProperty("category") ? cat : keepCat;
+    var newHid = hid || keepHid || "no";
+
+    /* Nothing left to remember: mark the row for removal rather than leaving an empty record. */
+    if (!newCat && newHid !== "yes") {
+      if (at >= 0) { drop[at] = true; cleared++; }
+      continue;
+    }
+    var out = [key, trim_(o.supplier).slice(0, 120), trim_(o.description).slice(0, 200),
+               newCat, newHid, user, now];
+    if (at >= 0) rows[at] = out;
+    else { index[key] = rows.length; rows.push(out); }
+    written++;
   }
-  return { ok:true, written:done, cleared:cleared, failed:failed };
+
+  var keep = [];
+  for (var r = 0; r < rows.length; r++) if (!drop[r]) keep.push(rows[r]);
+  if (keep.length) sh.getRange(2, 1, keep.length, COVER_HEADER.length).setValues(keep);
+  var stale = (last - 1) - keep.length;
+  if (stale > 0) sh.getRange(2 + keep.length, 1, stale, COVER_HEADER.length).clearContent();
+
+  return { ok:true, written:written, cleared:cleared, failed:failed };
 }
 
 function writeCover_(sh, o, user) {
@@ -480,6 +518,11 @@ function tab_(name, header) {
   }
   var cur = sh.getRange(1, 1, 1, Math.max(header.length, sh.getLastColumn())).getValues()[0]
               .map(function (h) { return String(h).trim().toLowerCase(); });
+  /* A known old layout is migrated rather than reported. v3 made supplier settings global and
+     dropped the per-site "stores" column; the shape it left behind is specific enough to
+     recognise exactly, so drop that one column and carry on. Anything else still refuses —
+     a generic "rewrite whatever is there" would shift live data on the first typo. */
+  cur = migrateLegacy_(sh, name, cur);
   for (var i = 0; i < header.length; i++) {
     if (cur[i] !== header[i]) {
       throw new Error("'" + name + "' column " + (i + 1) + " is '" + cur[i] + "', expected '" +
@@ -487,6 +530,26 @@ function tab_(name, header) {
     }
   }
   return sh;
+}
+
+var LEGACY_LAYOUTS = [{
+  tab: "SupplierSettings",
+  was: ["supplier","rep_email","visible","portal_only","stores","cc","note","updated_by","updated_at"],
+  drop: "stores"
+}];
+function migrateLegacy_(sh, name, cur) {
+  for (var i = 0; i < LEGACY_LAYOUTS.length; i++) {
+    var L = LEGACY_LAYOUTS[i];
+    if (L.tab !== name || L.was.length !== cur.length) continue;
+    var same = true;
+    for (var j = 0; j < L.was.length; j++) if (cur[j] !== L.was[j]) { same = false; break; }
+    if (!same) continue;
+    var col = L.was.indexOf(L.drop) + 1;
+    sh.deleteColumn(col);
+    cur = cur.slice(0, col - 1).concat(cur.slice(col));
+    Logger.log("migrated '" + name + "': dropped dead column '" + L.drop + "'");
+  }
+  return cur;
 }
 
 /* The send cap is per calendar day and shared by everyone, which is the point: it bounds
