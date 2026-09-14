@@ -26,6 +26,13 @@
    on read, so a stale tab or a hand-edited request can't put it back into the data. */
 var OB_STORES = ["Red Square Cambridge", "Luma Kitchen"];
 
+/* Bumped with every change to this file. An Apps Script deployment serves a SNAPSHOT, so
+   saving the editor changes nothing until someone picks "New version" — and until now there
+   was no way to tell from outside which code was actually live. doGet reports this, so the
+   dashboard (and anyone with the URL) can see at a glance whether the deployment matches
+   the repo. */
+var OB_BUILD = "gs-v5-1545";
+
 var OB = {
   SHEET_ID:     "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4",   // BG Ops Data
   SETTINGS_STORE_TAB: "SupplierSettings",
@@ -74,7 +81,9 @@ function isEmail_(v) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v); }
 function doGet() {
   /* Health check only. It answers whether the deployment is reachable and current; it
      never returns sheet contents, because anyone can call it. */
-  return out({ ok:true, service:"Orders.gs", version:"1.0.0",
+  return out({ ok:true, service:"Orders.gs", build:OB_BUILD,
+               actions:["place","send","receive","cancel","target","supplier_setting",
+                        "favourite","favourite_delete","category_override","category_bulk"],
                pin_configured: !!scriptPin_(), time:new Date().toISOString() });
 }
 
