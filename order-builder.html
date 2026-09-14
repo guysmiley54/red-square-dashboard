@@ -117,7 +117,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v5-1410"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v5-1545"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -155,6 +155,7 @@ let INV=[],LINES=[],CFG={},PMERGE={},ORDERS=[],SSET={},FAVS=[],COVER={},HIDDEN={
 let SALES_OK=false;
 let TAG=TAGS[0], WEEK_OFF=0, SUPPLIER="", CATFILT="", SEARCH="", HIDE_PORTAL=true;
 let SHOW_HIDDEN=false, PICKED={};      // PICKED: item_key -> true, for bulk category edits
+let HOME_INV=null;                     // supplier whose invoices are open on the order list
 let SORT={col:"name",dir:1};
 let RANGE={preset:"8w",from:null,to:null};
 let DRAFTS={}, LOCAL_ORDERS=[];
@@ -934,20 +935,29 @@ function renderHome(){
       <div class="label">Start an order — ${esc(TAG.name)}</div>
       ${portalCount?`<div style="margin-bottom:10px"><span class="chip sm ${HIDE_PORTAL?"on":""}" onclick="togglePortal()">${HIDE_PORTAL?"portal-only hidden":"portal-only shown"} (${portalCount})</span></div>`:""}
       <table><thead><tr>
+        <th style="width:30px"></th>
         <th>Supplier</th><th class="num">Spend this week</th><th class="num hide-sm">Avg spend/wk</th>
         <th class="num hide-sm">Last delivery</th><th class="num">Draft</th>
       </tr></thead><tbody>
       ${shown.map(s=>{
         const d=DRAFTS[draftId(s.name,TAG.name)], n=d?Object.keys(d.qty||{}).length:0;
         const v=s.vsUsual;
-        return `<tr class="click ${n?"picked":""}" onclick="go('s::${encodeURIComponent(s.name)}')">
-          <td><b>${esc(s.name)}</b>${s.portal?' <span class="pill">portal</span>':""}${s.rep?"":' <span class="pill">no rep email</span>'}</td>
+        const openHere=HOME_INV===s.name;
+        /* The name opens the order builder; the chevron drops the invoices in place. Two
+           different jobs on one row, so they get two different targets rather than one
+           click that has to guess. */
+        return `<tr class="${n?"picked":""} ${openHere?"picked":""}">
+          <td style="text-align:center;cursor:pointer;color:var(--dim)" onclick="toggleHomeInv('${esc(s.name)}')"
+              title="Show invoices">${openHere?"▾":"▸"}</td>
+          <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.portal?' <span class="pill">portal</span>':""}${s.rep?"":' <span class="pill">no rep email</span>'}</td>
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
             ${v!=null?`<br><span class="${v>0?"up":"down"}" style="font-size:11px" title="vs ${money(s.usualToDate)} by this day in recent weeks">${v>0?"▲":"▼"} ${Math.abs(Math.round(v))}%</span>`:""}</td>
           <td class="num hide-sm">${money(s.avgWk)}</td>
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
           <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
-        </tr>`;}).join("")}
+        </tr>`
+        + (openHere?`<tr><td colspan="6" style="background:#faf9f6;padding:0 6px 10px">
+             ${invoiceTable(s.name,TAG.name,15)}</td></tr>`:"");}).join("")}
       </tbody></table>
       ${shown.length?"":'<div class="note">No suppliers with itemised lines in the last '+CAT_DAYS+' days.</div>'}
       <div class="note">Ordering is per store — this list, the catalogue, drafts and favourites are
@@ -958,6 +968,7 @@ function renderHome(){
     </div>`;
 }
 function togglePortal(){ HIDE_PORTAL=!HIDE_PORTAL; route(); }
+function toggleHomeInv(n){ HOME_INV = HOME_INV===n ? null : n; OPEN_INV=null; route(); }
 
 /* ================= BUILDER ================= */
 function sortCat(rows){
@@ -1375,14 +1386,16 @@ function renderPriceHistory(key){
 let OPEN_INV=null;
 function toggleInv(k){ OPEN_INV = OPEN_INV===k ? null : k; route(); }
 function invoicePanel(supplier,venue,limit){
-  const rows=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)&&r.date)
-                .sort((a,b)=>b.date-a.date).slice(0,limit||40);
-  if(!rows.length) return `<div class="card"><div class="label">Invoices</div>
-    <div class="note">No invoices for this supplier${venue?" at "+esc(venue):""} in the data.</div></div>`;
-  const tot=rows.reduce((s,r)=>s+r.total,0);
   return `<div class="card">
     <div class="label">Invoices — ${esc(supplier)}${venue?" · "+esc(venue):" · both stores"}</div>
-    <div style="font-size:13px;color:var(--dim);margin-bottom:8px">${rows.length} invoice(s), ${money(tot)}</div>
+    ${invoiceTable(supplier,venue,limit)}</div>`;
+}
+function invoiceTable(supplier,venue,limit){
+  const rows=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)&&r.date)
+                .sort((a,b)=>b.date-a.date).slice(0,limit||40);
+  if(!rows.length) return `<div class="note">No invoices for this supplier${venue?" at "+esc(venue):""} in the data.</div>`;
+  const tot=rows.reduce((s,r)=>s+r.total,0);
+  return `<div style="font-size:13px;color:var(--dim);margin:6px 0 8px">${rows.length} invoice(s), ${money(tot)}</div>
     <table><thead><tr><th>Date</th><th class="hide-sm">Invoice</th><th class="hide-sm">Venue</th>
       <th class="num">Subtotal</th><th class="num hide-sm">GST</th><th class="num">Total</th></tr></thead>
     <tbody>${rows.map(r=>{
@@ -1405,8 +1418,7 @@ function invoicePanel(supplier,venue,limit){
               :`<div class="note">No itemised lines captured for this invoice — it arrived as a total only.</div>`}
           </td></tr>`:"");
     }).join("")}</tbody></table>
-    <div class="note">Most recent first, capped at ${limit||40}. Click any invoice for its lines.</div>
-  </div>`;
+    <div class="note">Most recent first, capped at ${limit||40}. Click any invoice for its lines.</div>`;
 }
 
 /* ================= PLACED ORDERS ================= */
