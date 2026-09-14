@@ -117,7 +117,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v4-1120"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v4-1245"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -735,21 +735,36 @@ function supplierList(now,opts){
   opts=opts||{};
   const venue=opts.venue===undefined?TAG.name:opts.venue;
   const t=+(now||new Date()),from=t-CAT_DAYS*864e5,m={},wk=currentWeek(now);
+  /* "Spend this week" is week-to-date, so comparing it with a whole week's average makes
+     every supplier read ▼70% on a Monday morning. The honest comparison is like for like:
+     the same Monday-to-today span in each of the previous WEEKS_BACK weeks. */
+  const WEEKS_BACK=6;
+  const dayOfWeek=Math.min(6,Math.max(0,Math.round((mid(now||new Date())-wk.start)/864e5)));
   INV.forEach(r=>{
     if(r.type==="manual"||!r.date||+r.date<from||!supActive(r.supplier)) return;
     if(venue&&r.venue!==venue) return;
-    const s=m[r.supplier]||(m[r.supplier]={name:r.supplier,spend:0,week:0,n:0,last:null});
+    const s=m[r.supplier]||(m[r.supplier]={name:r.supplier,spend:0,week:0,n:0,last:null,priorToDate:[]});
     s.spend+=r.total; s.n++;
     if(r.date>=wk.start&&r.date<=wk.end) s.week+=r.total;
+    for(let w=1;w<=WEEKS_BACK;w++){
+      const ws=addD(wk.start,-7*w), we=addD(ws,dayOfWeek);
+      we.setHours(23,59,59,999);
+      if(r.date>=ws&&r.date<=we){ s.priorToDate[w]=(s.priorToDate[w]||0)+r.total; break; }
+    }
     if(!s.last||r.date>s.last) s.last=r.date;
   });
   const wks=CAT_DAYS/7;
   return Object.values(m).map(s=>{
     const cfg=sset(s.name);
     s.group=supGroup(s.name); s.avgWk=s.spend/wks;
-    /* Against this supplier's own running average, not last week: a fortnightly supplier
-       would otherwise read as a huge spike every second week. */
-    s.vsUsual=s.avgWk>0?(s.week-s.avgWk)/s.avgWk*100:null;
+    /* Against the same point of the week across recent weeks, averaged over ALL of them —
+       including the ones with no delivery, since a supplier you buy from fortnightly really
+       does average half as much. A supplier with no history at this point of the week has
+       nothing to compare against and gets no arrow rather than a made-up one. */
+    let sum=0, seen=0;
+    for(let w=1;w<=WEEKS_BACK;w++){ if(+addD(wk.start,-7*w)>=from){ sum+=s.priorToDate[w]||0; seen++; } }
+    s.usualToDate=seen?sum/seen:null;
+    s.vsUsual=(s.usualToDate!=null&&s.usualToDate>0)?(s.week-s.usualToDate)/s.usualToDate*100:null;
     s.daysSince=Math.round((t-+s.last)/864e5);
     s.lines=LINES.some(l=>l.supplier===s.name&&(!venue||l.venue===venue));
     s.visible=cfg.visible; s.portal=cfg.portal_only; s.rep=cfg.rep_email;
@@ -902,7 +917,7 @@ function renderHome(){
         return `<tr class="click ${n?"picked":""}" onclick="go('s::${encodeURIComponent(s.name)}')">
           <td><b>${esc(s.name)}</b>${s.portal?' <span class="pill">portal</span>':""}${s.rep?"":' <span class="pill">no rep email</span>'}</td>
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
-            ${v!=null&&s.week?`<br><span class="${v>0?"up":"down"}" style="font-size:11px">${v>0?"▲":"▼"} ${Math.abs(Math.round(v))}%</span>`:""}</td>
+            ${v!=null?`<br><span class="${v>0?"up":"down"}" style="font-size:11px" title="vs ${money(s.usualToDate)} by this day in recent weeks">${v>0?"▲":"▼"} ${Math.abs(Math.round(v))}%</span>`:""}</td>
           <td class="num hide-sm">${money(s.avgWk)}</td>
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
           <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
@@ -911,8 +926,9 @@ function renderHome(){
       ${shown.length?"":'<div class="note">No suppliers with itemised lines in the last '+CAT_DAYS+' days.</div>'}
       <div class="note">Ordering is per store — this list, the catalogue, drafts and favourites are
         <b>${esc(TAG.name)}</b>. Budget and income are pooled across both kitchens.
-        <b>Spend this week</b> is this store's invoices for that supplier, with the arrow comparing it to the
-        supplier's own running weekly average. Cost of goods only.</div>
+        <b>Spend this week</b> is this store's invoices for that supplier so far, and the arrow compares it with
+        the same point of the week over the last 6 weeks — so a Monday morning doesn't show everything as down.
+        Cost of goods only.</div>
     </div>`;
 }
 function togglePortal(){ HIDE_PORTAL=!HIDE_PORTAL; route(); }
