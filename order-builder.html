@@ -5,320 +5,347 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Order Builder</title>
 <style>
-  :root {
-    --ink:#111; --paper:#f7f6f3; --line:#ddd; --red:#c8102e; --dim:#777; --green:#1a7f37; --amber:#b45309;
-    --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-  }
+  :root{--ink:#111;--paper:#f7f6f3;--line:#ddd;--red:#c8102e;--dim:#777;--green:#1a7f37;--amber:#b45309;
+        --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--paper);color:var(--ink)}
-  header{background:var(--ink);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:6}
+  header{background:var(--ink);color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:20}
   header .sq{width:13px;height:13px;background:var(--red)}
   header h1{font-size:16px;font-weight:700;white-space:nowrap}
-  header .crumb{font-size:12px;color:#aaa;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  header button, header a.hbtn{background:none;border:1px solid #555;color:#fff;border-radius:6px;padding:6px 11px;font-size:12px;cursor:pointer;text-decoration:none}
   header .spacer{margin-left:auto}
-  #filters{background:#fff;border-bottom:1px solid var(--line);padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;top:49px;z-index:5}
-  .chip{border:1px solid var(--line);border-radius:99px;padding:7px 14px;font-size:13px;cursor:pointer;background:#fff;font-weight:600}
-  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
-  .chip.sm{padding:5px 11px;font-size:12px}
-  main{max-width:1240px;margin:0 auto;padding:14px}
+  header button,header a.hbtn{background:none;border:1px solid #555;color:#fff;border-radius:6px;padding:6px 11px;font-size:12px;cursor:pointer;text-decoration:none}
+  header .on{background:#fff;color:var(--ink);border-color:#fff;font-weight:700}
+  .store{display:flex;border:1px solid #555;border-radius:7px;overflow:hidden}
+  .store button{border:none;border-radius:0;padding:7px 13px;font-size:12px;font-weight:600}
+  .store button.sel{background:#fff;color:var(--ink)}
+  #filters{background:#fff;border-bottom:1px solid var(--line);padding:8px 14px;display:flex;flex-wrap:wrap;gap:7px;align-items:center;position:sticky;top:47px;z-index:19}
+  main{max-width:1280px;margin:0 auto;padding:14px}
   .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
   .label{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
   .note{font-size:11px;color:var(--dim);line-height:1.5;margin-top:8px}
+  .chip{border:1px solid var(--line);border-radius:99px;padding:6px 13px;font-size:13px;cursor:pointer;background:#fff;font-weight:600}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .chip.sm{padding:4px 10px;font-size:12px}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th{text-align:left;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:1px solid var(--line)}
+  th.s{cursor:pointer;user-select:none} th.s:hover{color:var(--ink)}
+  th.act{color:var(--ink)}
   td{padding:8px;border-bottom:1px solid #f0efec;vertical-align:middle}
-  tr.click{cursor:pointer}
-  tr.click:hover{background:#faf9f6}
+  tr.click{cursor:pointer} tr.click:hover{background:#faf9f6}
   tr.picked{background:#fffbe9}
   .num{text-align:right;font-family:var(--mono);white-space:nowrap}
-  .up{color:var(--red);font-weight:600}
-  .down{color:var(--green);font-weight:600}
+  .up{color:var(--red);font-weight:600} .down{color:var(--green);font-weight:600}
   .pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em;background:#eee;color:#555}
-  .pill.warn{background:var(--red);color:#fff}
-  .pill.ok{background:var(--green);color:#fff}
-  input[type=search],input[type=text],input[type=number],select{border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:15px;background:#fff;font-family:inherit}
+  .pill.warn{background:var(--red);color:#fff} .pill.ok{background:var(--green);color:#fff}
+  input[type=search],input[type=text],input[type=email],input[type=number],select{border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:15px;background:#fff;font-family:inherit}
   input[type=search]{width:100%}
-  .back{display:inline-block;margin-bottom:10px;font-size:14px;color:var(--ink);text-decoration:none;font-weight:600;cursor:pointer}
-  .back:before{content:"← "}
   .btn{display:inline-block;background:var(--ink);color:#fff;border:none;border-radius:8px;padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center}
   .btn.outline{background:#fff;color:var(--ink);border:2px solid var(--ink);padding:9px 14px}
-  .btn.danger{background:var(--red)}
   .btn[disabled]{opacity:.4;cursor:not-allowed}
+  .back{display:inline-block;margin-bottom:10px;font-size:14px;font-weight:600;cursor:pointer}
+  .back:before{content:"← "}
   .err{border:1px solid var(--red);color:var(--red);border-radius:10px;padding:12px;font-size:14px;background:#fff;margin-bottom:12px}
   #status{padding:40px 0;text-align:center;color:var(--dim);font-size:14px}
-
-  /* ---- top summary bar ---- */
   .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
   .tile{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
   .tile .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
   .tile .v{font-size:26px;font-weight:700;font-family:var(--mono);line-height:1.15;margin-top:2px}
-  .tile .sub{font-size:11px;color:var(--dim);margin-top:3px;line-height:1.4}
-  .tile.over .v{color:var(--red)}
-  .tile.good .v{color:var(--green)}
+  .tile .sub{font-size:11px;color:var(--dim);margin-top:3px;line-height:1.45}
+  .tile.over .v{color:var(--red)} .tile.good .v{color:var(--green)}
   .bar{height:12px;border-radius:99px;background:#eee;overflow:hidden;display:flex;margin-top:8px}
   .bar i{display:block;height:100%}
-  .bar .b1{background:var(--ink)}
-  .bar .b2{background:#8a8a8a}
-  .bar .b3{background:var(--red)}
+  .bar .b1{background:var(--ink)} .bar .b2{background:#8a8a8a} .bar .b3{background:var(--red)}
   .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:6px}
   .legend span:before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
   .legend .l1:before{background:var(--ink)} .legend .l2:before{background:#8a8a8a} .legend .l3:before{background:var(--red)}
-
-  /* ---- dual panel ---- */
-  .panels{display:grid;grid-template-columns:1fr 380px;gap:12px;align-items:start}
-  .draft{position:sticky;top:110px}
-  @media (max-width:900px){ .panels{grid-template-columns:1fr} .draft{position:static} .summary{grid-template-columns:1fr} }
-  @media (max-width:600px){ .hide-sm{display:none} td,th{padding:7px 5px} #filters{position:static} }
-
-  /* ---- qty stepper ---- */
-  .qty{display:inline-flex;align-items:center;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
-  .qty button{width:38px;height:38px;border:none;background:#fff;font-size:19px;font-weight:700;cursor:pointer;color:var(--ink);line-height:1}
+  .panels{display:grid;grid-template-columns:1fr 370px;gap:12px;align-items:start}
+  .draft{position:sticky;top:104px}
+  @media (max-width:900px){.panels{grid-template-columns:1fr}.draft{position:static}.summary{grid-template-columns:1fr}}
+  @media (max-width:600px){.hide-sm{display:none}td,th{padding:7px 5px}#filters{position:static}}
+  .qty{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .qty button{width:38px;height:38px;border:none;background:#fff;font-size:19px;font-weight:700;cursor:pointer;line-height:1}
   .qty button:active{background:#eee}
-  .qty input{width:52px;height:38px;border:none;border-left:1px solid var(--line);border-right:1px solid var(--line);text-align:center;font-family:var(--mono);font-size:15px;padding:0;border-radius:0}
+  .qty input{width:50px;height:38px;border:none;border-left:1px solid var(--line);border-right:1px solid var(--line);text-align:center;font-family:var(--mono);font-size:15px;padding:0;border-radius:0}
   .qty.on{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
   .dline{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #f0efec;font-size:13px}
-  .dline .g{flex:1;min-width:0}
-  .dline .g b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis}
+  .dline .g{flex:1;min-width:0} .dline .g b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis}
   .tot{display:flex;justify-content:space-between;font-size:13px;padding:3px 0}
   .tot.big{font-size:17px;font-weight:700;font-family:var(--mono);border-top:1px solid var(--line);margin-top:6px;padding-top:8px}
-  textarea{width:100%;min-height:190px;border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px;line-height:1.5}
-  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:center;justify-content:center;padding:16px}
-  .modal .box{background:#fff;border-radius:12px;padding:18px;max-width:640px;width:100%;max-height:88vh;overflow:auto}
-  @media print { header,#filters,.draft,.btn{display:none!important} body{background:#fff} .card{border:none;padding:0} }
+  textarea{width:100%;min-height:180px;border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px;line-height:1.5}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:40;display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal .box{background:#fff;border-radius:12px;padding:18px;max-width:680px;width:100%;max-height:88vh;overflow:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:760px){.grid2{grid-template-columns:1fr}}
+  .sw{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
 </style>
 </head>
 <body>
 <header>
-  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Order Builder</h1><span id="buildtag" style="font-size:9px;color:#666;margin-left:6px"></span></a>
-  <div class="crumb" id="crumb"></div>
+  <div class="sq"></div><h1>Order Builder</h1>
+  <span id="buildtag" style="font-size:9px;color:#666"></span>
+  <div class="store" id="storepick"></div>
   <span class="spacer"></span>
-  <a class="hbtn" onclick="go('placed')" style="cursor:pointer">Placed</a>
-  <a class="hbtn" onclick="go('set')" style="cursor:pointer">⚙ Targets</a>
-  <button onclick="loadAll()">↻ refresh</button>
+  <a class="hbtn" onclick="go('')">Order</a>
+  <a class="hbtn" onclick="go('favs')">Favourites</a>
+  <a class="hbtn" onclick="go('reports')">Reports</a>
+  <a class="hbtn" onclick="go('admin')">Admin</a>
+  <button onclick="loadAll()">↻</button>
 </header>
 <div id="filters"></div>
 <main id="app"><div id="status">Loading data…</div></main>
 
 <script>
 /* =====================================================================================
-   ORDER BUILDER — stock ordering + weekly spend tracking for Red Square / Luma.
+   ORDER BUILDER v2 — Red Square Cambridge + Luma Kitchen.
 
-   Reads BG Ops Data (invoices, invoice lines, supplier config, manual purchases, orders)
-   and BG Sales Data (POS sales feed) over gviz, exactly as the other dashboards do.
-   Writes placed orders back through an Apps Script web app (Orders.gs).
+   Reads BG Ops Data and BG Sales Data over gviz; writes orders, favourites and global
+   settings back through the Orders.gs web app so every user of the link sees the same
+   configuration.
 
-   The page is PUBLIC. Never put a credential in it.
+   The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID = "build-141030"; console.log("Order Builder " + BUILD_ID);
-{ const el=document.getElementById("buildtag"); if(el) el.textContent=BUILD_ID; }
+const BUILD_ID="build-v2-1620"; console.log("Order Builder "+BUILD_ID);
+{const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 const SALES_SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
-/* From this date, daily sales come from the ImPOS feed. Before it, from the weekly form
-   sheets. The Sales tab is deliberately NOT read: it is the same figures as the forms by
-   another path (verified 8 Sep 2026, zero dollar differences on 176 week-rows per venue),
-   and reading both double-counted every pre-cutover week in the supplier explorer. */
 const SALES_CUTOVER  = "2026-08-03";
-const WEEKLY_SOURCES = [
-  { id:"10e898xL_QX9THVnxE3UJPdIe5uY7qBvC6PJfdn4k6qQ", gid:"345653728", weekEnd:1,
-    venues:[{name:"Red Square Cambridge", sales:2, wages:3},
-            {name:"Luma Kitchen",         sales:4, wages:5}] },
-  { id:"1WQF6KzCH8JqV3q2ssr0RE8Qsn1fwF6lI6g0NAoMLWUo", gid:"369747867", weekEnd:1,
-    venues:[{name:"Red Square Glenorchy", sales:2, wages:3}] }
+const WEBAPP_URL     = "";   // Orders.gs /exec — set after deployment
+
+/* Cambridge and Luma only. Glenorchy is excluded at the point every read is filtered, not
+   by hiding it in the UI, so no total, report or catalogue can pick it up by accident. */
+const STORES = [
+  { key:"cambridge", name:"Red Square Cambridge", short:"Cambridge",
+    addr:"66 Kennedy Drive, Cambridge TAS 7170" },
+  { key:"luma",      name:"Luma Kitchen",         short:"Luma",
+    addr:"66 Kennedy Drive, Cambridge TAS 7170" }
 ];
+const STORE_NAMES = STORES.map(s=>s.name);
 
-/* The /exec URL of the Orders.gs deployment. Empty = the page still builds and dispatches
-   orders (email / copy / print all work), but "mark as placed" cannot log to the sheet,
-   so committed spend won't survive a refresh. Set it once Orders.gs is deployed. */
-const WEBAPP_URL = "";
+const TARGET_COGS_PCT = 30;   // fixed, by instruction
 
-const COMPANY_BLOCK = ["B & G Fitness Pty Ltd", "Red Square Cafe | Luma Kitchen",
-                       "accounts@redsquarecafe.com.au"];
-const SELF_COPY_TO  = "accounts@redsquarecafe.com.au";
+const COMPANY_BLOCK = ["B & G Fitness Pty Ltd","Red Square Cafe | Luma Kitchen","accounts@redsquarecafe.com.au"];
+const ACCOUNTS_EMAIL = "accounts@redsquarecafe.com.au";
 
-/* Delivery addresses. Cambridge and Luma share 66 Kennedy Drive — the unit numbers you
-   see on paperwork are per-supplier, not universal (Elders call Luma Unit 22; Cambridge
-   has no unit number at all), so no unit number is printed here. Never detect a venue
-   from address text: these two collide. */
-const VENUE_ADDR = {
-  "Red Square Cambridge": "66 Kennedy Drive, Cambridge TAS 7170",
-  "Luma Kitchen":         "66 Kennedy Drive, Cambridge TAS 7170",
-  "Red Square Glenorchy": "2 Howard Road, Glenorchy TAS 7010"
-};
-/* Stock pools where labour does not: Luma draws on Cambridge's fridge, same building, one
-   delivery. So the default ordering site covers both. Glenorchy stands alone. */
-const SITES = [
-  { key:"kennedy",   label:"Cambridge + Luma", venues:["Red Square Cambridge","Luma Kitchen"] },
-  { key:"glenorchy", label:"Glenorchy",        venues:["Red Square Glenorchy"] },
-  { key:"all",       label:"All venues",       venues:[] }
-];
-
-const CAT_DAYS   = 180;  // an item appears in the catalogue if bought in this window
-const RATE_DAYS  = 90;   // suggested quantities and weekly rates are measured over this
-const DOW_WEEKS  = 6;    // weeks of history behind the day-of-week sales profile
-const MATCH_DAYS = 14;   // a placed order stops counting as committed after this long
+const CAT_DAYS=180, RATE_DAYS=90, DOW_WEEKS=6, MATCH_DAYS=14;
 
 /* ================= STATE ================= */
-let INV=[], LINES=[], CFG={}, PMERGE={}, ORDERS=[], OSET={}, TARGETS={}, SALES=[], VENUE_LIST=[];
-let SALES_OK=false, LOAD_WARN=[];
-let SITE=SITES[0], WEEK_OFF=0, SUPPLIER="", CATFILT="", SEARCH="";
-let DRAFTS={};              // supplier -> { venue, qty:{key:n}, note }
-let LOCAL_ORDERS=[];        // orders placed this session that the sheet hasn't echoed yet
+let INV=[],LINES=[],CFG={},PMERGE={},ORDERS=[],SSET={},FAVS=[],SALES=[],LOAD_WARN=[];
+let SALES_OK=false;
+let STORE=STORES[0], WEEK_OFF=0, SUPPLIER="", CATFILT="", SEARCH="", HIDE_PORTAL=true;
+let SORT={col:"name",dir:1};
+let DRAFTS={}, LOCAL_ORDERS=[];
 
-/* ================= SMALL HELPERS (shared with the other dashboards) ================= */
-const norm  = s => String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
-const money = v => (v==null||v==="")?"":"$"+Number(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
-const money0= v => "$"+Math.round(Number(v)||0).toLocaleString("en-AU");
-const pct1  = v => (Math.round(v*10)/10)+"%";
-const fmtD  = d => d ? d.toLocaleDateString("en-AU") : "";
-const fmtISO= d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-const mid   = d => { const x=new Date(d); x.setHours(0,0,0,0); return x; };
-const addD  = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+n); return x; };
-const weekStart = d => { const x=mid(d); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }; // Monday
-const vShort = v => String(v||"").replace("Red Square ","RS ").replace("Luma Kitchen","Luma");
-const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const num_ = v => +String(v||"").replace(/[^0-9.\-]/g,"")||0;
+/* ================= HELPERS ================= */
+const norm=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+const money=v=>(v==null||v==="")?"":"$"+Number(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+const money0=v=>"$"+Math.round(Number(v)||0).toLocaleString("en-AU");
+const pct1=v=>(Math.round(v*10)/10)+"%";
+const fmtD=d=>d?d.toLocaleDateString("en-AU"):"";
+const fmtISO=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const mid=d=>{const x=new Date(d);x.setHours(0,0,0,0);return x;};
+const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
+const weekStart=d=>{const x=mid(d);x.setDate(x.getDate()-((x.getDay()+6)%7));return x;};
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num_=v=>+String(v||"").replace(/[^0-9.\-]/g,"")||0;
+const storeByName=n=>STORES.find(s=>s.name===n)||STORES[0];
 
 function gvizDate(v){
-  if (v instanceof Date) return v;
+  if(v instanceof Date) return v;
   const s=String(v||"").trim();
-  let m=/Date\((\d+),(\d+),(\d+)/.exec(s);
-  if (m) return new Date(+m[1],+m[2],+m[3]);
-  m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
-  if (m) return new Date(+m[1],+m[2]-1,+m[3]);
-  m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);   // dd/mm/yyyy from CSV (AU locale)
-  if (m) return new Date(+m[3],+m[2]-1,+m[1]);
+  let m=/Date\((\d+),(\d+),(\d+)/.exec(s); if(m) return new Date(+m[1],+m[2],+m[3]);
+  m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s); if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+  m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s); if(m) return new Date(+m[3],+m[2]-1,+m[1]);
   return null;
 }
 
 const UNIT_ALIAS={each:"ea",ea:"ea",unit:"ea",units:"ea",pack:"ea",carton:"ctn",cartons:"ctn",ctn:"ctn",ct:"ctn",cs:"ctn",case:"ctn",box:"box",bx:"box",pkt:"pkt",packet:"pkt",pk:"pkt",sleeve:"slv",slv:"slv",bottle:"btl",btl:"btl",kg:"kg",g:"g",l:"l",ltr:"l",litre:"l",tray:"tray",bag:"bag",tub:"tub",doz:"doz",dozen:"doz"};
-function unitNorm(u){ const n=norm(u); return UNIT_ALIAS[n]||n; }
-/* Identical to the supplier explorer's keying, so a product means the same thing in both
-   tools. Codeless identity is the description with keying artefacts stripped. */
-function descNorm(desc){
-  let s=String(desc||"").toLowerCase().trim();
-  s=s.replace(/\s+(?:each|ea)\b\s*(?:x\s*\d+|\(?\s*\d+\s*\)?)?\s*$/,"");
-  s=s.replace(/\s*\(\s*\d+\s*\)\s*$/,"");
-  return norm(s)||norm(desc);
+const unitNorm=u=>{const n=norm(u);return UNIT_ALIAS[n]||n;};
+
+/* ================= ITEM NAME NORMALISATION =================
+   Suppliers spell the same product a dozen ways across a year of invoices: word order
+   flips ("Sliced cheese" / "Cheese, Sliced"), plurals wander, and typos stick ("cherry
+   tomatos"). Left alone, each variant becomes its own catalogue line with its own price
+   history, which is how a product ends up looking like it has never been bought before.
+
+   Three passes, each deliberately conservative, because a WRONG merge is worse than a
+   missed one — it silently averages two different products' prices:
+     1. strip punctuation and case, drop pure noise words;
+     2. singularise tokens, guarding the endings that aren't plurals (-ss, -us, -is);
+     3. sort the tokens, so word order stops mattering.
+   Sizes and pack counts are KEPT as tokens: "Milk 2L" and "Milk 1L" must never merge.
+   A near-miss pass then folds single-character typos together, but only within one
+   supplier, one unit, and only for long tokens. */
+const NOISE=new Set(["the","and","a","of","w","with","approx","abt","per","x"]);
+function singular(t){
+  if(t.length<=3) return t;
+  if(/(ss|us|is|as)$/.test(t)) return t;
+  if(/ies$/.test(t)) return t.slice(0,-3)+"y";
+  if(/(oes|ches|shes|sses|xes)$/.test(t)) return t.slice(0,-2);
+  if(/s$/.test(t) && t.length>3) return t.slice(0,-1);   // "cups"->"cup", "oats"->"oat"
+  return t;
 }
+function nameKey(desc){
+  const toks=String(desc||"").toLowerCase()
+    .replace(/[^a-z0-9. ]+/g," ")
+    .split(/\s+/).filter(Boolean)
+    .filter(t=>!NOISE.has(t))
+    .map(singular)
+    .filter(Boolean);
+  if(!toks.length) return norm(desc);
+  return toks.sort().join(" ");
+}
+/* Levenshtein, capped: anything past the cap is "too different" and we stop counting. */
+function lev(a,b,cap){
+  if(Math.abs(a.length-b.length)>cap) return cap+1;
+  let prev=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){
+    const cur=[i]; let best=i;
+    for(let j=1;j<=b.length;j++){
+      cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+      if(cur[j]<best) best=cur[j];
+    }
+    if(best>cap) return cap+1;
+    prev=cur;
+  }
+  return prev[b.length];
+}
+/* Folds near-identical keys together inside one supplier+unit bucket. The longest-standing
+   spelling wins (most invoice lines), so the name on screen is the one staff recognise. */
+function fuzzyFold(keys){
+  const map={}, sorted=keys.slice().sort((a,b)=>b.n-a.n||a.key.localeCompare(b.key));
+  const canon=[];
+  sorted.forEach(k=>{
+    const hit=canon.find(c=>c.bucket===k.bucket && k.key.length>=6 && c.key.length>=6
+                            && lev(c.key,k.key,1)<=1);
+    map[k.key]= hit ? hit.key : k.key;
+    if(!hit) canon.push(k);
+  });
+  return map;
+}
+
+/* ================= CATEGORISATION =================
+   Invoice rows carry a category the extractor guessed at invoice level ("Food"), which is
+   too coarse to order from — a chef wants Produce separate from Dairy. These rules tag the
+   LINE, from its description, first match wins. Order matters: the specific beats the
+   general, so "coffee beans" is Coffee before "bean" could make it Produce.
+   Anything unmatched keeps the invoice's own category rather than being forced somewhere
+   wrong, and shows as Uncategorised so the gap is visible instead of silently misfiled. */
+const CATEGORY_RULES=[
+  /* A coffee cup is packaging, not coffee. Onepac sells thousands of them and the Coffee
+     rule would otherwise claim every one. Vessels are checked before the drink. */
+  ["Packaging",/\b(coffee cup|takeaway cup|cup lid|coffee lid|cup carrier)\b/],
+  ["Coffee",   /\b(coffee|espresso|arabica|robusta|chai latte|coffee bean)\b/],
+  ["Dairy",    /\b(milk|cream|cheese|butter|yogh?urt|mozzarella|parmesan|feta|haloumi|ricotta|mascarpone|creme fraiche|custard)\b/],
+  ["Seafood",  /\b(salmon|prawn|fish|squid|calamari|octopus|mussel|oyster|scallop|barramundi|tuna|anchov\w*)\b/],
+  ["Meat",     /\b(beef|chicken|pork|lamb|bacon|ham|salami|prosciutto|chorizo|sausage|mince|steak|rump|brisket|turkey|duck|pancetta)\b/],
+  ["Bakery",   /\b(bread|bun|roll|sourdough|baguette|ciabatta|brioche|croissant|muffin|pastry|focaccia|bagel|wrap|tortilla|pita)\b/],
+  ["Produce",  /\b(tomato|lettuce|onion|potato|carrot|spinach|rocket|cucumber|capsicum|mushroom|avocado|lemon|lime|orange|apple|banana|berry|herb|basil|parsley|coriander|garlic|ginger|broccoli|cauliflower|zucchini|eggplant|pumpkin|cabbage|celery|kale|salad|fruit|veg)\b/],
+  ["Beverage", /\b(juice|soft drink|cola|lemonade|water|soda|kombucha|beer|wine|cider|syrup|cordial|tea|energy drink|tonic)\b/],
+  ["Packaging",/\b(cup|lid|napkin|serviette|container|box|bag|tray|straw|cutlery|film|foil|takeaway|clamshell|paper towel)\b/],
+  ["Cleaning", /\b(detergent|sanitis\w*|sanitiz\w*|degreas\w*|bleach|cleaner|chemical|glove|dishwash\w*|rinse aid|soap|scourer|bin liner)\b/],
+  ["Dry Goods",/\b(flour|sugar|rice|pasta|oil|vinegar|salt|pepper|spice|sauce|stock|tin|canned|chickpea|lentil|noodle|honey|jam|mayonnaise|mustard|oat|cereal|nut|seed)\b/]
+];
+/* Matched against the SINGULARISED description, not the raw one. "Cherry Tomatoes" has to
+   hit the same rule as "cherry tomato", and a rule list that spelled out every plural
+   would rot the first time a supplier wrote "Tomatos". Word order is preserved here (it is
+   not in nameKey) so multi-word rules like "rinse aid" and "paper towel" still match. */
+function catText(desc){
+  return " "+String(desc||"").toLowerCase().replace(/[^a-z0-9]+/g," ").split(/\s+/)
+           .filter(Boolean).map(singular).join(" ")+" ";
+}
+function categorise(desc, fallback){
+  const s=catText(desc);
+  for(const [cat,re] of CATEGORY_RULES) if(re.test(s)) return cat;
+  const f=String(fallback||"").trim();
+  return f && f.toLowerCase()!=="food" ? f : "Uncategorised";
+}
+
+/* Product identity. An item code is authoritative when the supplier gives one; otherwise
+   the normalised name plus the unit. ProductMerge rows from the sheet still win over
+   everything, so a merge somebody made by hand is never undone by these rules. */
 function prodKey(supplier,code,desc,unit){
   const hasCode=!!norm(code);
-  let id=hasCode?norm(code):descNorm(desc);
   const sk=norm(supplier);
-  const g = PMERGE[sk+"|"+norm(code)] || PMERGE[sk+"|"+norm(desc)] || PMERGE[sk+"|"+descNorm(desc)] || PMERGE[sk+"|"+id];
+  let id=hasCode?norm(code):nameKey(desc);
+  const g=PMERGE[sk+"|"+norm(code)]||PMERGE[sk+"|"+norm(desc)]||PMERGE[sk+"|"+nameKey(desc)]||PMERGE[sk+"|"+id];
   const merged=!!g;
   if(merged) id="grp:"+norm(g);
   const unitPart=(hasCode||merged)?"":unitNorm(unit||"");
   return sk+"|"+id+"|"+unitPart;
 }
 
-/* COGS is an EXCLUSION list, not a whitelist — a category the extractor invents lands in
-   COGS and shows up as unmapped, rather than silently vanishing from the number. */
-const NON_COGS=new Set(["cleaning","equipment","repairs","maintenance","utilities","energy",
-  "overheads","admin","insurance","rent","subscriptions","freight","waste","misc","other"]);
-function supGroup(name){ const c=CFG[norm(name)]; return (c&&c.group)||"Ungrouped"; }
-function supActive(name){ const c=CFG[norm(name)]; return c?c.active:true; }
-function rowGroup(r){ const g=supGroup(r.supplier); return g!=="Ungrouped"?g:(r.category||"Ungrouped"); }
-function isCogs(r){ return !NON_COGS.has(String(rowGroup(r)||"").trim().toLowerCase()); }
+/* COGS is an exclusion list: an unexpected category lands IN cost of goods and shows up,
+   rather than vanishing from the number. */
+const NON_COGS=new Set(["cleaning","equipment","repairs","maintenance","repairs & maintenance",
+  "utilities","energy","overheads","admin","insurance","rent","subscriptions","freight",
+  "waste","waste management","misc","other"]);
+const supGroup=n=>{const c=CFG[norm(n)];return (c&&c.group)||"Ungrouped";};
+const supActive=n=>{const c=CFG[norm(n)];return c?c.active:true;};
+const rowGroup=r=>{const g=supGroup(r.supplier);return g!=="Ungrouped"?g:(r.category||"Ungrouped");};
+const isCogs=r=>!NON_COGS.has(String(rowGroup(r)||"").trim().toLowerCase());
+
+/* Per-supplier global settings, defaulted so the app works before anything is configured. */
+function sset(name){
+  const s=SSET[norm(name)]||{};
+  return { rep_email:s.rep_email||"", visible:s.visible!==false, portal_only:!!s.portal_only,
+           stores:(s.stores&&s.stores.length)?s.stores:STORE_NAMES.slice(),
+           cc:s.cc||"", note:s.note||"" };
+}
+const canOrder=(name,storeName)=>sset(name).stores.indexOf(storeName)>=0;
 
 /* ================= FETCH ================= */
-/* gviz does NOT error on a sheet name that does not exist — it serves the FIRST sheet in
-   the workbook (here, Invoices). The only reliable guard is the header row, so every tab
-   declares the columns its reader needs. A NEW fetchTab call gets no protection until its
-   tab is added here. "Sales" and "Invoices" share a venue column, so a weaker "does any
-   expected column appear" test is not enough. */
-const TAB_COLUMNS = {
-  "Invoices":        ["invoice_number","invoice_date","total"],
-  "InvoiceLines":    ["invoice_number","description","line_total"],
-  "SupplierConfig":  ["supplier","merge_into"],
-  "ProductMerge":    ["supplier","match","into"],
-  "ManualPurchases": ["date","shop","venue","amount"],
-  "Orders":          ["order_id","supplier","venue","order_date"],
-  "OrderSettings":   ["supplier","channel"],
-  "OrderTargets":    ["venue","cogs_pct"]
+/* gviz answers a missing tab with the FIRST sheet's data, HTTP 200, no error. The header
+   signature is the only guard, and a tab with no signature declared gets none — so an
+   undeclared name throws rather than quietly returning invoices. */
+const TAB_COLUMNS={
+  "Invoices":["invoice_number","invoice_date","total"],
+  "InvoiceLines":["invoice_number","description","line_total"],
+  "SupplierConfig":["supplier","merge_into"],
+  "ProductMerge":["supplier","match","into"],
+  "ManualPurchases":["date","shop","venue","amount"],
+  "Orders":["order_id","supplier","venue","order_date"],
+  "SupplierSettings":["supplier","rep_email"],
+  "Favourites":["fav_id","fav_name","venue"],
+  "FavouriteLines":["fav_id","item_key","qty"]
 };
 async function fetchTab(name){
   const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(name)}`;
-  const res=await fetch(url);
-  const txt=await res.text();
+  const res=await fetch(url), txt=await res.text();
   if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("tab '"+name+"' not found or not shared");
   const rows=parseCsv(txt);
   if(!rows.length) return [];
   const cols=rows[0].map(c=>String(c||"").toLowerCase().trim());
   const need=TAB_COLUMNS[name];
-  /* An undeclared tab gets NO protection from the header check, which is how the trap
-     survives a new fetchTab call. Every call site here is known, so an undeclared name is
-     a bug in this file rather than a possibility to tolerate. */
   if(!need) throw new Error("fetchTab('"+name+"'): no column signature declared in TAB_COLUMNS");
   const missing=need.filter(c=>cols.indexOf(c)===-1);
-  if(missing.length){
-    console.warn("fetchTab: '"+name+"' answered with columns ["+cols.join(", ")+"] - missing ["
-      +missing.join(", ")+"]. gviz serves the first sheet when a tab is absent.");
-    throw new Error("tab '"+name+"' did not answer with its own columns (missing: "+missing.join(", ")+")");
-  }
-  return rows.slice(1).map(r=>{ const o={}; cols.forEach((c,i)=>{ o[c]= r[i]!==undefined ? r[i] : null; }); return o; });
+  if(missing.length) throw new Error("tab '"+name+"' did not answer with its own columns (missing: "+missing.join(", ")+")");
+  return rows.slice(1).map(r=>{const o={};cols.forEach((c,i)=>{o[c]=r[i]!==undefined?r[i]:null;});return o;});
 }
-
-/* Daily sales from the POS feed, summed server-side by gviz: ~3 rows a day instead of the
-   12k+ item rows behind them. No WHERE clause — column B types as datetime and comparing
-   it to a bare date matched nothing. */
 async function fetchSalesDaily(){
   const q="select B, C, sum(H) group by B, C label B 'date', C 'venue', sum(H) 'sales'";
   const url=`https://docs.google.com/spreadsheets/d/${SALES_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=SalesFeed&tq=${encodeURIComponent(q)}`;
-  const res=await fetch(url);
-  const txt=await res.text();
+  const res=await fetch(url), txt=await res.text();
   if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("sales feed not readable");
   const rows=parseCsv(txt);
   if(rows.length<2) return [];
-  return rows.slice(1).map(r=>({ date:gvizDate(r[0]), venue:String(r[1]||"").trim(), sales:num_(r[2]) }))
-                      .filter(r=>r.date&&r.venue);
+  return rows.slice(1).map(r=>({date:gvizDate(r[0]),venue:String(r[1]||"").trim(),sales:num_(r[2])}))
+                      .filter(r=>r.date&&STORE_NAMES.indexOf(r.venue)>=0);
 }
-
-/* Weekly form responses, spread evenly across the seven days ending on Week Ending.
-   Used for dates BEFORE the cutover only. */
-async function fetchWeekly(){
-  const out=[];
-  for(const src of WEEKLY_SOURCES){
-    let rows;
-    try{
-      const url=`https://docs.google.com/spreadsheets/d/${src.id}/gviz/tq?tqx=out:csv&gid=${src.gid}`;
-      const res=await fetch(url);
-      const txt=await res.text();
-      if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("weekly sheet not readable");
-      rows=parseCsv(txt);
-    }catch(e){ console.warn("weekly source skipped:", src.id, e.message); continue; }
-    rows.slice(1).forEach(r=>{
-      const wk=gvizDate(r[src.weekEnd]); if(!wk) return;
-      src.venues.forEach(v=>{
-        const sales=num_(r[v.sales]); if(!sales) return;
-        for(let i=6;i>=0;i--) out.push({date:addD(wk,-i), venue:v.name, sales:sales/7});
-      });
-    });
-  }
-  return out;
-}
-
 function parseCsv(text){
-  const rows=[]; let row=[], field="", inQ=false;
+  const rows=[];let row=[],field="",inQ=false;
   for(let i=0;i<text.length;i++){
     const ch=text[i];
-    if(inQ){
-      if(ch==='"'){ if(text[i+1]==='"'){field+='"';i++;} else inQ=false; }
-      else field+=ch;
-    }else{
+    if(inQ){ if(ch==='"'){ if(text[i+1]==='"'){field+='"';i++;} else inQ=false; } else field+=ch; }
+    else{
       if(ch==='"') inQ=true;
-      else if(ch===","){ row.push(field); field=""; }
-      else if(ch==="\n"||ch==="\r"){
-        if(ch==="\r"&&text[i+1]==="\n") i++;
-        row.push(field); field="";
-        if(row.length>1||row[0]!=="") rows.push(row);
-        row=[];
-      }
+      else if(ch===","){row.push(field);field="";}
+      else if(ch==="\n"||ch==="\r"){ if(ch==="\r"&&text[i+1]==="\n")i++; row.push(field);field="";
+        if(row.length>1||row[0]!=="") rows.push(row); row=[]; }
       else field+=ch;
     }
   }
-  if(field!==""||row.length){ row.push(field); if(row.length>1||row[0]!=="") rows.push(row); }
+  if(field!==""||row.length){row.push(field); if(row.length>1||row[0]!=="") rows.push(row);}
   return rows;
 }
 
@@ -328,347 +355,298 @@ async function loadAll(){
   app.innerHTML='<div id="status">Loading data…</div>';
   LOAD_WARN=[];
   try{
-    const warn=(label)=>(e)=>{ LOAD_WARN.push(label+": "+e.message); return []; };
-    const [inv,lines,cfgRows,pmRows,manualRows,orderRows,setRows,tgtRows,feed,weekly]=await Promise.all([
+    const warn=l=>e=>{LOAD_WARN.push(l+": "+e.message);return [];};
+    const [inv,lines,cfgRows,pmRows,manRows,ordRows,setRows,favRows,favLineRows,feed]=await Promise.all([
       fetchTab("Invoices"),
       fetchTab("InvoiceLines"),
       fetchTab("SupplierConfig").catch(warn("SupplierConfig")),
-      fetchTab("ProductMerge").catch(()=>[]),      // optional variant-folding map
+      fetchTab("ProductMerge").catch(()=>[]),
       fetchTab("ManualPurchases").catch(warn("ManualPurchases")),
-      fetchTab("Orders").catch(()=>[]),          // absent until the first order is placed
-      fetchTab("OrderSettings").catch(()=>[]),
-      fetchTab("OrderTargets").catch(()=>[]),
-      fetchSalesDaily().catch(warn("sales feed")),
-      fetchWeekly().catch(warn("weekly forms"))
+      fetchTab("Orders").catch(()=>[]),
+      fetchTab("SupplierSettings").catch(()=>[]),
+      fetchTab("Favourites").catch(()=>[]),
+      fetchTab("FavouriteLines").catch(()=>[]),
+      fetchSalesDaily().catch(warn("sales feed"))
     ]);
 
     CFG={};
-    cfgRows.forEach(r=>{
-      const key=norm(r.supplier); if(!key) return;
-      CFG[key]={merge:String(r.merge_into||"").trim(), group:String(r.group||"").trim(),
-                active:String(r.active||"").trim().toLowerCase()!=="no"};
-    });
-    const applyCfg=name=>{ let n=name, seen={}; while(true){ const c=CFG[norm(n)]; if(c&&c.merge&&!seen[norm(c.merge)]){seen[norm(n)]=true;n=c.merge;} else break; } return n; };
+    cfgRows.forEach(r=>{const k=norm(r.supplier);if(!k)return;
+      CFG[k]={merge:String(r.merge_into||"").trim(),group:String(r.group||"").trim(),
+              active:String(r.active||"").trim().toLowerCase()!=="no"};});
+    const applyCfg=n=>{let x=n,seen={};while(true){const c=CFG[norm(x)];
+      if(c&&c.merge&&!seen[norm(c.merge)]){seen[norm(x)]=true;x=c.merge;}else break;}return x;};
 
-    INV=inv.map(r=>({
-      venue:r.venue||"", supplier:r.supplier||"", number:String(r.invoice_number||""),
-      date:gvizDate(r.invoice_date)||gvizDate(r.scanned),
-      scanned:gvizDate(r.scanned)||gvizDate(r.invoice_date),
-      subtotal:num_(r.subtotal), gst:num_(r.gst), total:num_(r.total),
-      category:r.category||"", type:r.type||"invoice", src:r.source||""
-    })).filter(r=>r.supplier&&r.date&&r.type!=="superseded");
+    /* Glenorchy is dropped here, at the first filter every row passes through. Nothing
+       downstream can reintroduce it. */
+    INV=inv.map(r=>({venue:r.venue||"",supplier:r.supplier||"",number:String(r.invoice_number||""),
+      date:gvizDate(r.invoice_date)||gvizDate(r.scanned),subtotal:num_(r.subtotal),gst:num_(r.gst),
+      total:num_(r.total),category:r.category||"",type:r.type||"invoice",src:r.source||""}))
+      .filter(r=>r.supplier&&r.date&&r.type!=="superseded"&&STORE_NAMES.indexOf(r.venue)>=0);
 
-    // Canonical spelling per supplier: the variant that appears most often wins.
     const variants={};
     INV.forEach(r=>{const k=norm(r.supplier);(variants[k]=variants[k]||{})[r.supplier]=(variants[k][r.supplier]||0)+1;});
     const canon={};
     Object.entries(variants).forEach(([k,v])=>{canon[k]=Object.entries(v).sort((a,b)=>b[1]-a[1])[0][0];});
-    INV.forEach(r=>{ r.supplier=applyCfg(canon[norm(r.supplier)]||r.supplier); });
+    INV.forEach(r=>{r.supplier=applyCfg(canon[norm(r.supplier)]||r.supplier);});
 
-    // Manual purchases carry a single amount and no lines: they move spend and COGS, and
-    // never appear in the catalogue.
-    manualRows.forEach(r=>{
-      const amt=num_(r.amount), d=gvizDate(r.date), shop=String(r.shop||"").trim();
-      if(!amt||!d||!shop) return;
-      INV.push({venue:r.venue||"", supplier:shop, number:"", date:d, scanned:d, subtotal:amt, gst:0,
-                total:amt, category:(r.category||"").trim()||"Food", type:"manual", src:""});
+    manRows.forEach(r=>{
+      const amt=num_(r.amount),d=gvizDate(r.date),shop=String(r.shop||"").trim(),v=r.venue||"";
+      if(!amt||!d||!shop||STORE_NAMES.indexOf(v)===-1) return;
+      INV.push({venue:v,supplier:shop,number:"",date:d,subtotal:amt,gst:0,total:amt,
+                category:(r.category||"").trim()||"Food",type:"manual",src:""});
     });
 
     const byNumber={};
     INV.forEach(r=>byNumber[norm(r.supplier)+"|"+norm(r.number)]=r);
+    PMERGE={};
+    const unwrap=v=>String(v==null?"":v).replace(/^="?|"?$/g,"").trim();
+    pmRows.forEach(r=>{const s=unwrap(r.supplier),m=unwrap(r.match),i=unwrap(r.into);
+      if(s&&m&&i) PMERGE[norm(s)+"|"+norm(m)]=i;});
+
     LINES=lines.map(r=>{
       const cs=applyCfg(canon[norm(r.supplier)]||r.supplier||"");
       const iv=byNumber[norm(cs)+"|"+norm(String(r.invoice_number||""))];
-      return { number:String(r.invoice_number||""), supplier:cs, venue:r.venue||"",
-               code:String(r.item_code||""), desc:r.description||"", qty:num_(r.qty), unit:r.unit||"",
-               price:num_(r.unit_price), total:num_(r.line_total), date:iv?iv.date:null };
-    }).filter(r=>r.supplier&&r.date);
+      return {number:String(r.invoice_number||""),supplier:cs,venue:r.venue||"",
+              code:String(r.item_code||""),desc:r.description||"",qty:num_(r.qty),unit:r.unit||"",
+              price:num_(r.unit_price),total:num_(r.line_total),date:iv?iv.date:null,
+              invCategory:iv?iv.category:""};
+    }).filter(r=>r.supplier&&r.date&&STORE_NAMES.indexOf(r.venue)>=0);
 
-    PMERGE={};
-    const unwrap=v=>String(v==null?"":v).replace(/^="?|"?$/g,"").trim();
-    pmRows.forEach(r=>{ const s=unwrap(r.supplier), m=unwrap(r.match), i=unwrap(r.into);
-      if(s&&m&&i) PMERGE[norm(s)+"|"+norm(m)]=i; });
+    applyFuzzyFold();
+    LINES.forEach(l=>{ l.key=prodKey(l.supplier,l.code,l.desc,l.unit);
+                       l.cat=categorise(l.desc,l.invCategory); });
 
-    OSET={};
-    setRows.forEach(r=>{
-      const k=norm(r.supplier); if(!k) return;
-      OSET[k]={ email:String(r.email||"").trim(), channel:String(r.channel||"").trim().toLowerCase(),
-                phone:String(r.phone||"").trim(), cutoff:String(r.cutoff||"").trim(),
-                delivery_days:String(r.delivery_days||"").trim(), min_order:num_(r.min_order),
-                account:String(r.account||"").trim(), note:String(r.note||"").trim() };
-    });
+    SSET={};
+    setRows.forEach(r=>{const k=norm(r.supplier);if(!k)return;
+      SSET[k]={rep_email:String(r.rep_email||"").trim(),
+               visible:String(r.visible||"").trim().toLowerCase()!=="no",
+               portal_only:String(r.portal_only||"").trim().toLowerCase()==="yes",
+               stores:String(r.stores||"").split(/[;,|]/).map(s=>s.trim()).filter(s=>STORE_NAMES.indexOf(s)>=0),
+               cc:String(r.cc||"").trim(), note:String(r.note||"").trim()};});
 
-    TARGETS={};
-    tgtRows.forEach(r=>{
-      const v=String(r.venue||"").trim(); if(!v) return;
-      TARGETS[v]={ cogs_pct:num_(r.cogs_pct), weekly_budget:num_(r.weekly_budget) };
-    });
+    const favLines={};
+    favLineRows.forEach(r=>{const id=String(r.fav_id||"").trim();if(!id)return;
+      (favLines[id]=favLines[id]||[]).push({key:String(r.item_key||""),desc:String(r.description||""),
+        unit:String(r.unit||""),qty:num_(r.qty),supplier:String(r.supplier||"")});});
+    FAVS=favRows.map(r=>({id:String(r.fav_id||"").trim(),name:String(r.fav_name||"").trim(),
+      venue:String(r.venue||"").trim(),supplier:String(r.supplier||"").trim(),
+      by:String(r.created_by||"").trim(),lines:favLines[String(r.fav_id||"").trim()]||[]}))
+      .filter(f=>f.id&&f.name&&STORE_NAMES.indexOf(f.venue)>=0);
 
-    ORDERS=parseOrders(orderRows);
-
-    // Sales: feed from the cutover, weekly forms before it. Never both for the same day.
+    ORDERS=parseOrders(ordRows);
     const cut=gvizDate(SALES_CUTOVER);
-    SALES=[];
-    weekly.forEach(w=>{ if(!cut||w.date<cut) SALES.push(w); });
-    feed.forEach(f=>{ if(!cut||f.date>=cut) SALES.push(f); });
-    SALES_OK=feed.length>0;
-    if(!SALES_OK) LOAD_WARN.push("the POS sales feed returned nothing, so COGS % and any target based on sales are unavailable");
+    SALES=feed.filter(f=>!cut||f.date>=cut);
+    SALES_OK=SALES.length>0;
+    if(!SALES_OK) LOAD_WARN.push("the POS sales feed returned nothing, so revenue and the COGS countdown are unavailable");
 
-    VENUE_LIST=[...new Set(INV.map(r=>r.venue).filter(Boolean))].sort();
-    loadDrafts();
-    renderFilters();
-    route();
+    loadDrafts(); renderStorePicker(); renderFilters(); route();
   }catch(e){
-    app.innerHTML=`<div class="err">Couldn't load the sheet: ${esc(e.message)}<br><br>Check SHEET_ID, and that the workbook is shared as "Anyone with the link – Viewer".</div>`;
+    app.innerHTML=`<div class="err">Couldn't load the sheet: ${esc(e.message)}<br><br>Check SHEET_ID and that the workbook is shared as "Anyone with the link – Viewer".</div>`;
   }
 }
-
-/* Orders is append-only, one row per event, so the last row for an order_id wins.
-   Keeping the history means a mis-tick can be corrected without editing the sheet. */
+/* Buckets are per supplier and unit, so a fold can never reach across either. */
+function applyFuzzyFold(){
+  const buckets={};
+  LINES.forEach(l=>{
+    if(norm(l.code)) return;                        // coded items need no name matching
+    const b=norm(l.supplier)+"|"+unitNorm(l.unit||"");
+    const k=nameKey(l.desc);
+    const m=(buckets[b]=buckets[b]||{});
+    (m[k]=m[k]||{key:k,bucket:b,n:0,desc:l.desc}).n++;
+  });
+  const fold={};
+  Object.values(buckets).forEach(m=>{
+    const map=fuzzyFold(Object.values(m));
+    Object.entries(map).forEach(([from,to])=>{ if(from!==to) fold[Object.values(m)[0].bucket+"|"+from]=to; });
+  });
+  LINES.forEach(l=>{
+    if(norm(l.code)) return;
+    const b=norm(l.supplier)+"|"+unitNorm(l.unit||"");
+    const to=fold[b+"|"+nameKey(l.desc)];
+    if(to) l.foldTo=to;
+  });
+}
 function parseOrders(rows){
   const byId={};
   rows.forEach(r=>{
     const id=String(r.order_id||"").trim(); if(!id) return;
-    const d=gvizDate(r.order_date);
-    const logged=gvizDate(r.logged_at)||d;
+    const venue=String(r.venue||"").trim();
+    if(STORE_NAMES.indexOf(venue)===-1) return;
+    const d=gvizDate(r.order_date), logged=gvizDate(r.logged_at)||d;
     const prev=byId[id];
-    const rec={ id, action:String(r.action||"place").trim().toLowerCase(), supplier:String(r.supplier||"").trim(),
-                venue:String(r.venue||"").trim(), date:d, total:num_(r.total), subtotal:num_(r.subtotal),
-                gst:num_(r.gst), channel:String(r.channel||"").trim(), by:String(r.placed_by||"").trim(),
-                logged:logged };
-    if(!prev || (logged&&prev.logged&&logged>=prev.logged) || !prev.logged) byId[id]=Object.assign({},prev||{},rec);
+    const rec={id,action:String(r.action||"place").trim().toLowerCase(),supplier:String(r.supplier||"").trim(),
+      venue,date:d,total:num_(r.total),subtotal:num_(r.subtotal),gst:num_(r.gst),
+      channel:String(r.channel||"").trim(),by:String(r.placed_by||"").trim(),logged};
+    if(!prev||(logged&&prev.logged&&logged>=prev.logged)||!prev.logged) byId[id]=Object.assign({},prev||{},rec);
   });
   return Object.values(byId).filter(o=>o.date&&o.supplier&&o.action!=="cancel");
 }
 
-/* ================= WEEK, SALES, BUDGET ================= */
-function scopeVenues(){ return SITE.venues.length?SITE.venues:VENUE_LIST.slice(); }
-function inScopeVenue(v){ return !SITE.venues.length || SITE.venues.indexOf(v)>=0; }
-function currentWeek(today){
-  const s=addD(weekStart(today||new Date()), WEEK_OFF*7);
-  const e=addD(s,6); e.setHours(23,59,59,999);
-  return {start:s, end:e};
-}
-function weekLabel(wk){ return fmtD(wk.start)+" – "+fmtD(wk.end)+(WEEK_OFF===0?" (this week)":WEEK_OFF===-1?" (last week)":""); }
-
-/* Daily sales for the venues in scope, keyed yyyy-mm-dd. */
-function dailySales(rows, venues){
+/* ================= WEEK / REVENUE / COGS ================= */
+const currentWeek=today=>{const s=addD(weekStart(today||new Date()),WEEK_OFF*7);
+  const e=addD(s,6);e.setHours(23,59,59,999);return {start:s,end:e};};
+const weekLabel=wk=>fmtD(wk.start)+" – "+fmtD(wk.end)+(WEEK_OFF===0?" (this week)":WEEK_OFF===-1?" (last week)":"");
+function dailySales(rows,venue){
   const m={};
-  (rows||[]).forEach(r=>{
-    if(!r.date) return;
-    if(venues.length && venues.indexOf(r.venue)===-1) return;
-    const k=fmtISO(r.date); m[k]=(m[k]||0)+(r.sales||0);
-  });
+  (rows||[]).forEach(r=>{ if(!r.date||r.venue!==venue) return;
+    const k=fmtISO(r.date); m[k]=(m[k]||0)+(r.sales||0); });
   return m;
 }
-/* Average takings by day of week over the weeks BEFORE this one. A day with no rows at
-   all is "no data", not "zero takings" — a closed day has no feed rows, so counting it as
-   zero would drag the profile down; skipping it means a day closed every week profiles at
-   0 (n stays 0) while an occasional closure averages the days that did trade. */
-function dowProfile(map, weekStartDate, weeks){
+/* A day with no feed rows is no data, not zero takings — a closed day would otherwise drag
+   its weekday average down every week. */
+function dowProfile(map,wkStart,weeks){
   const acc=Array.from({length:7},()=>({s:0,n:0}));
   for(let w=1;w<=weeks;w++) for(let d=0;d<7;d++){
-    const v=map[fmtISO(addD(weekStartDate,-7*w+d))];
+    const v=map[fmtISO(addD(wkStart,-7*w+d))];
     if(v===undefined) continue;
     acc[d].s+=v; acc[d].n++;
   }
   return acc.map(a=>a.n?a.s/a.n:0);
 }
-/* Week takings: actual for finished days, the day-of-week average for days still to come.
-   Today takes whichever is larger — the feed is live day-to-date, so by mid-afternoon the
-   actual is real but incomplete, and by close it beats the average. */
-function forecastWeek(map, wk, today, profile){
-  const t=mid(today||new Date()); let actual=0, forecast=0; const days=[];
+function forecastWeek(map,wk,today,profile){
+  const t=mid(today||new Date()); let actual=0,forecast=0; const days=[];
   for(let d=0;d<7;d++){
-    const dt=addD(wk.start,d), iso=fmtISO(dt), a=map[iso]||0;
-    const isToday=+dt===+t, past=+dt<+t;
-    const used = past ? a : (isToday ? Math.max(a, profile[d]||0) : (profile[d]||0));
+    const dt=addD(wk.start,d),iso=fmtISO(dt),a=map[iso]||0;
+    const isToday=+dt===+t,past=+dt<+t;
+    const used=past?a:(isToday?Math.max(a,profile[d]||0):(profile[d]||0));
     actual+=a; forecast+=used;
-    days.push({iso, dow:d, actual:a, used, past, isToday, est:!past&&!(isToday&&a>=(profile[d]||0))});
+    days.push({iso,dow:d,actual:a,used,past,isToday,est:!past&&!(isToday&&a>=(profile[d]||0))});
   }
-  return {actual, forecast, days};
+  return {actual,forecast,days};
 }
-/* Spend already captured this week: invoices dated inside the week, COGS groups only.
-   Capture lag is real — an invoice emailed on Friday can land on Monday — so this
-   UNDERSTATES a week still running. Orders placed through this tool are what close that
-   gap, which is the whole point of tracking them. */
-function capturedSpend(inv, venues, wk){
-  let cogs=0, all=0, n=0;
+/* Every supplier's invoices count toward spend, portal-only ones included — hiding a
+   supplier from the ordering screen must never hide their money. */
+function capturedSpend(inv,venue,wk){
+  let cogs=0,all=0,n=0;
   (inv||[]).forEach(r=>{
-    if(!r.date||r.date<wk.start||r.date>wk.end) return;
-    if(venues.length && venues.indexOf(r.venue)===-1) return;
+    if(!r.date||r.date<wk.start||r.date>wk.end||r.venue!==venue) return;
     if(!supActive(r.supplier)) return;
     all+=r.total; n++;
     if(isCogs(r)) cogs+=r.total;
   });
-  return {cogs, all, n};
+  return {cogs,all,n};
 }
-/* A placed order counts as committed spend until its invoice turns up. Four ways it
-   stops counting, all approximations and all visible on the Placed screen:
-     1. it was ticked received;
-     2. MATCH_DAYS have passed — an order that old is either invoiced under a name we
-        didn't match or it never happened;
-     3. an invoice from that supplier and venue is dated AFTER the order date;
-     4. or dated the SAME day and within a quarter of the order's value.
-
-   Rules 3 and 4 are one rule split by a limitation: the sheet holds invoice dates, not
-   times, so same-day cannot be ordered by the clock. Closing on a bare same-day match
-   made an order placed this afternoon vanish against a delivery that arrived this
-   morning — money spent, showing nowhere. Requiring the amounts to agree keeps the usual
-   same-day delivery closing correctly while an unrelated second order stays counted.
-
-   An invoice settles at most ONE order, oldest first. Without that, two orders to the
-   same supplier in a week are both closed by the first invoice to arrive.
-
-   Double counting is the failure that matters: committed plus captured for one delivery
-   shows a budget blown that isn't, and the tool gets ignored. */
-function openOrders(orders, inv, venues, wk, today){
+/* A placed order holds a slot in the week's budget until its invoice lands. Same-day needs
+   the amounts to agree, because dates carry no time and an order placed this afternoon
+   must not be closed by a delivery that arrived this morning. One invoice settles one
+   order, oldest first. */
+function openOrders(orders,inv,venue,wk,today){
   const now=mid(today||new Date());
-  const cands=(orders||[]).filter(o=>
-      o.date && o.date>=wk.start && o.date<=wk.end &&
-      (!venues.length||venues.indexOf(o.venue)>=0) &&
-      o.action!=="receive" &&
-      (+now - +mid(o.date))/864e5 <= MATCH_DAYS
-    ).sort((a,b)=>a.date-b.date);
-  const pool=(inv||[]).filter(r=>r.date&&(!venues.length||venues.indexOf(r.venue)>=0))
-                      .map(r=>({r, used:false}));
+  const cands=(orders||[]).filter(o=>o.date&&o.date>=wk.start&&o.date<=wk.end&&o.venue===venue
+    &&o.action!=="receive"&&(+now-+mid(o.date))/864e5<=MATCH_DAYS).sort((a,b)=>a.date-b.date);
+  const pool=(inv||[]).filter(r=>r.date&&r.venue===venue).map(r=>({r,used:false}));
   const out=[];
   cands.forEach(o=>{
-    const od=+mid(o.date), tol=Math.max(o.total*0.25, 20);
+    const od=+mid(o.date),tol=Math.max(o.total*0.25,20);
     const hit=pool.find(p=>{
       if(p.used) return false;
-      if(norm(p.r.supplier)!==norm(o.supplier) || p.r.venue!==o.venue) return false;
-      const id=+mid(p.r.date), gap=(id-od)/864e5;
-      if(gap<0 || gap>MATCH_DAYS) return false;
-      return gap>0 || Math.abs(p.r.total-o.total)<=tol;
+      if(norm(p.r.supplier)!==norm(o.supplier)) return false;
+      const gap=(+mid(p.r.date)-od)/864e5;
+      if(gap<0||gap>MATCH_DAYS) return false;
+      return gap>0||Math.abs(p.r.total-o.total)<=tol;
     });
-    if(hit){ hit.used=true; return; }
+    if(hit){hit.used=true;return;}
     out.push(o);
   });
   return out;
 }
-/* Target for the site: a fixed weekly dollar budget wins if one is set, else target COGS %
-   of forecast takings. With neither set the tool shows the trailing actual as a placeholder
-   and says so — an invented target is worse than a visible blank. */
-function targetFor(venues){
-  let pct=0, fixed=0, src=[];
-  (venues.length?venues:VENUE_LIST).forEach(v=>{
-    const t=TARGETS[v]; if(!t) return;
-    if(t.weekly_budget>0){ fixed+=t.weekly_budget; src.push(v); }
-    if(t.cogs_pct>0){ pct=Math.max(pct,t.cogs_pct); src.push(v); }
-  });
-  const local=localTarget();
-  if(!fixed && !pct && local>0) return {cogs_pct:local, weekly_budget:0, basis:"local"};
-  if(fixed) return {cogs_pct:pct, weekly_budget:fixed, basis:"sheet-fixed"};
-  if(pct)   return {cogs_pct:pct, weekly_budget:0, basis:"sheet-pct"};
-  return {cogs_pct:0, weekly_budget:0, basis:"none"};
-}
-function localTarget(){ try{ return +localStorage.getItem("ob_target_"+SITE.key)||0; }catch(e){ return 0; } }
-function setLocalTarget(v){ try{ localStorage.setItem("ob_target_"+SITE.key, String(v||"")); }catch(e){} }
-/* Trailing actual COGS %, used as the placeholder when no target exists. */
-function trailingCogsPct(inv, sales, venues, wk, weeks){
-  const from=addD(wk.start,-7*weeks), to=addD(wk.start,-1);
-  let spend=0, take=0;
-  (inv||[]).forEach(r=>{ if(!r.date||r.date<from||r.date>to) return;
-    if(venues.length&&venues.indexOf(r.venue)===-1) return;
-    if(!supActive(r.supplier)||!isCogs(r)) return; spend+=r.total; });
-  (sales||[]).forEach(s=>{ if(!s.date||s.date<from||s.date>to) return;
-    if(venues.length&&venues.indexOf(s.venue)===-1) return; take+=s.sales; });
-  return take>0 ? spend/take*100 : 0;
-}
-
-/* ================= GST ================= */
-/* Invoice lines carry no GST, so it is estimated per supplier from that supplier's own
-   invoices: sum(gst) / sum(subtotal). Fresh produce suppliers land near 0 and packaging
-   near 10%, which is right — a flat 10% would overstate a fruit and veg order by a tenth.
-   It is an estimate at the ORDER level: a mixed supplier (taxable and GST-free lines)
-   gets their blended rate, not a per-item one, so the label always says "est". */
 function gstRate(supplier){
-  let sub=0, gst=0;
-  const since=Date.now()-CAT_DAYS*864e5;
-  INV.forEach(r=>{
-    if(norm(r.supplier)!==norm(supplier)||r.type==="manual") return;
-    if(!r.date||+r.date<since) return;
-    if(!(r.subtotal>0)) return;
-    sub+=r.subtotal; gst+=r.gst;
-  });
-  if(!(sub>0)) return 0.1;                       // nothing to learn from: assume taxable
+  let sub=0,gst=0; const since=Date.now()-CAT_DAYS*864e5;
+  INV.forEach(r=>{ if(norm(r.supplier)!==norm(supplier)||r.type==="manual") return;
+    if(!r.date||+r.date<since||!(r.subtotal>0)) return; sub+=r.subtotal; gst+=r.gst; });
+  if(!(sub>0)) return 0.1;
   const r=gst/sub;
-  return r<0.005 ? 0 : Math.min(0.1, Math.round(r*1000)/1000);
+  return r<0.005?0:Math.min(0.1,Math.round(r*1000)/1000);
+}
+function weekModel(today){
+  const venue=STORE.name, wk=currentWeek(today), now=today||new Date();
+  const map=dailySales(SALES,venue);
+  const profile=dowProfile(map,wk.start,DOW_WEEKS);
+  const sales=forecastWeek(map,wk,now,profile);
+  const cap=capturedSpend(INV,venue,wk);
+  const open=openOrders(ORDERS.concat(LOCAL_ORDERS),INV,venue,wk,now);
+  const committed=open.reduce((s,o)=>s+o.total,0);
+  const drafted=allDraftTotal();
+  const budget=sales.forecast*TARGET_COGS_PCT/100;
+  const used=cap.cogs+committed+drafted;
+  return {wk,venue,sales,cap,open,committed,drafted,used,budget,remaining:budget-used,
+    cogsActual: sales.actual>0?cap.cogs/sales.actual*100:0,
+    cogsProjected: sales.forecast>0?used/sales.forecast*100:0};
 }
 
 /* ================= CATALOGUE ================= */
-/* Derived from InvoiceLines. There is no master product list anywhere in the platform —
-   what you actually buy IS the catalogue, and it stays current with no maintenance.
-   Delivery, freight and levy lines are stripped: they are charges, not stock. */
-function deriveCatalogue(lines, supplier, venues, now, opts){
+/* There is no master product list in the platform. What you buy is the catalogue, derived
+   from the invoice lines, so it needs no upkeep and prices follow the invoices. Charges
+   are not stock and are stripped. */
+function deriveCatalogue(lines,supplier,venue,now,opts){
   opts=opts||{};
   const listDays=opts.listDays||CAT_DAYS, rateDays=opts.rateDays||RATE_DAYS;
   const FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|admin\s*fee/i;
-  const t=+(now||new Date()), listFrom=t-listDays*864e5, rateFrom=t-rateDays*864e5;
+  const t=+(now||new Date()),listFrom=t-listDays*864e5,rateFrom=t-rateDays*864e5;
   const map={};
   (lines||[]).forEach(l=>{
-    if(supplier && l.supplier!==supplier) return;
+    if(supplier&&l.supplier!==supplier) return;
+    if(venue&&l.venue!==venue) return;
     if(!(l.price>0)||!(l.qty>0)||!l.date) return;
-    if(venues.length && venues.indexOf(l.venue)===-1) return;
     if(FEE.test(l.desc)) return;
     if(+l.date<listFrom) return;
-    const k=prodKey(l.supplier,l.code,l.desc,l.unit);
-    const p=map[k]||(map[k]={key:k,supplier:l.supplier,code:l.code,desc:l.desc,unit:l.unit,buys:[]});
+    const k=l.key||prodKey(l.supplier,l.code,l.desc,l.unit);
+    const p=map[k]||(map[k]={key:k,supplier:l.supplier,code:l.code,desc:l.desc,unit:l.unit,
+                             cat:l.cat||categorise(l.desc,l.invCategory),buys:[]});
     p.desc=l.desc; p.unit=l.unit; p.buys.push(l);
   });
   return Object.values(map).map(p=>{
     p.buys.sort((a,b)=>a.date-b.date);
-    const recent=p.buys.filter(b=>+b.date>=rateFrom);
-    const base=recent.length?recent:p.buys;
+    const recent=p.buys.filter(b=>+b.date>=rateFrom), base=recent.length?recent:p.buys;
     const qty=base.reduce((s,b)=>s+b.qty,0);
     const orders=new Set(base.map(b=>norm(b.number))).size||1;
-    /* Rate is measured over the span of the buys themselves, floored at a week — the same
-       basis the supplier explorer uses, so the two tools agree. It reads high for an item
-       first bought late in the window; that is known and deliberate. */
-    const span=Math.max(7,(+base[base.length-1].date - +base[0].date)/864e5+1);
+    const span=Math.max(7,(+base[base.length-1].date-+base[0].date)/864e5+1);
     p.last=p.buys[p.buys.length-1];
-    p.price=p.last.price;
-    p.lastQty=p.last.qty;
-    p.avgPerOrder=qty/orders;
-    p.avgQtyWk=qty/(span/7);
-    p.ordersPerWk=orders/(span/7);
+    p.price=p.last.price; p.lastQty=p.last.qty; p.lastDate=p.last.date;
+    p.avgPerOrder=qty/orders; p.avgQtyWk=qty/(span/7); p.ordersPerWk=orders/(span/7);
     p.daysSince=Math.round((t-+p.last.date)/864e5);
     p.stale=+p.last.date<rateFrom;
     p.suggested=Math.max(1,Math.round(p.avgPerOrder));
     p.prevPrice=null;
-    for(let i=p.buys.length-2;i>=0;i--){ if(p.buys[i].price!==p.price){ p.prevPrice=p.buys[i].price; break; } }
+    for(let i=p.buys.length-2;i>=0;i--){ if(p.buys[i].price!==p.price){p.prevPrice=p.buys[i].price;break;} }
     p.change=p.prevPrice?(p.price-p.prevPrice)/p.prevPrice*100:null;
+    p.variants=[...new Set(p.buys.map(b=>b.desc))];
     return p;
-  }).sort((a,b)=> b.ordersPerWk-a.ordersPerWk || a.desc.localeCompare(b.desc));
+  });
 }
-
-/* Suppliers worth showing in the picker: anything bought from in the catalogue window. */
-function supplierList(venues, now){
-  const t=+(now||new Date()), from=t-CAT_DAYS*864e5, m={};
+/* Suppliers for the ordering screen: stock only, visible, allowed for this store, and —
+   unless the toggle says otherwise — not portal-only. */
+function supplierList(venue,now){
+  const t=+(now||new Date()),from=t-CAT_DAYS*864e5,m={};
   INV.forEach(r=>{
-    if(r.type==="manual"||!r.date||+r.date<from) return;
-    if(venues.length&&venues.indexOf(r.venue)===-1) return;
+    if(r.type==="manual"||!r.date||+r.date<from||r.venue!==venue) return;
     if(!supActive(r.supplier)) return;
-    const s=m[r.supplier]||(m[r.supplier]={name:r.supplier,spend:0,n:0,last:null});
-    s.spend+=r.total; s.n++;
+    const s=m[r.supplier]||(m[r.supplier]={name:r.supplier,spend:0,cogs:0,n:0,last:null});
+    s.spend+=r.total; s.n++; if(isCogs(r)) s.cogs+=r.total;
     if(!s.last||r.date>s.last) s.last=r.date;
   });
   const wks=CAT_DAYS/7;
   return Object.values(m).map(s=>{
-    s.group=supGroup(s.name);
-    s.avgWk=s.spend/wks;
+    const cfg=sset(s.name);
+    s.group=supGroup(s.name); s.avgWk=s.spend/wks;
     s.daysSince=Math.round((t-+s.last)/864e5);
-    s.lines=LINES.some(l=>l.supplier===s.name);
+    s.lines=LINES.some(l=>l.supplier===s.name&&l.venue===venue);
+    s.stock=s.cogs>s.spend*0.5;
+    s.visible=cfg.visible; s.portal=cfg.portal_only; s.rep=cfg.rep_email;
+    s.allowed=canOrder(s.name,venue);
+    s.orderable=s.stock&&s.visible&&s.allowed;
     return s;
   }).sort((a,b)=>b.avgWk-a.avgWk);
 }
-
-/* Supplier ordering email: an OrderSettings row wins, else the address seen most often on
-   that supplier's own invoice emails, preferring real mailboxes over no-reply relays. */
+function orderableSuppliers(venue){
+  return supplierList(venue).filter(s=>s.orderable&&(!HIDE_PORTAL||!s.portal));
+}
+/* A configured rep address wins. Otherwise the address seen most on that supplier's own
+   invoice emails, with no-reply relays heavily discounted — invoices arrive through Xero
+   and NetSuite robots that nobody reads. */
 function supplierEmail(name){
-  const cfg=OSET[norm(name)];
-  if(cfg&&cfg.email) return cfg.email;
+  const cfg=sset(name);
+  if(cfg.rep_email) return cfg.rep_email;
   const tally={};
   INV.filter(r=>r.supplier===name).forEach(r=>{
     (String(r.src||"").match(/[\w.+-]+@[\w.-]+\.\w+/g)||[]).forEach(e=>{
@@ -683,384 +661,524 @@ function supplierEmail(name){
 }
 
 /* ================= DRAFTS ================= */
-const DRAFT_KEY="ob_drafts_v2";
-function loadDrafts(){
-  try{ DRAFTS=JSON.parse(localStorage.getItem(DRAFT_KEY)||"{}")||{}; }catch(e){ DRAFTS={}; }
+const DRAFT_KEY="ob2_drafts";
+function loadDrafts(){ try{DRAFTS=JSON.parse(localStorage.getItem(DRAFT_KEY)||"{}")||{};}catch(e){DRAFTS={};} }
+function saveDrafts(){ try{localStorage.setItem(DRAFT_KEY,JSON.stringify(DRAFTS));}catch(e){} }
+const draftId=(supplier,venue)=>venue+"::"+supplier;
+function draft(supplier,venue){
+  const id=draftId(supplier,venue||STORE.name);
+  return DRAFTS[id]||(DRAFTS[id]={supplier,venue:venue||STORE.name,qty:{},note:""});
 }
-function saveDrafts(){ try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(DRAFTS)); }catch(e){} }
-function draft(supplier){
-  const d=DRAFTS[supplier]||(DRAFTS[supplier]={venue:defaultVenue(), qty:{}, note:""});
-  if(!d.venue||VENUE_LIST.indexOf(d.venue)===-1) d.venue=defaultVenue();
-  return d;
-}
-function defaultVenue(){ const v=scopeVenues(); return v[0]||VENUE_LIST[0]||""; }
-function setQty(supplier,key,n){
-  const d=draft(supplier);
+function setQty(supplier,key,n,venue){
+  const d=draft(supplier,venue);
   n=Math.max(0,Math.round(Number(n)||0));
   if(n) d.qty[key]=n; else delete d.qty[key];
   saveDrafts();
 }
-function draftLines(supplier){
-  const d=DRAFTS[supplier]; if(!d) return [];
-  const cat=deriveCatalogue(LINES, supplier, scopeVenues(), new Date());
-  const by={}; cat.forEach(p=>by[p.key]=p);
+function draftLines(supplier,venue){
+  venue=venue||STORE.name;
+  const d=DRAFTS[draftId(supplier,venue)]; if(!d) return [];
+  const by={}; deriveCatalogue(LINES,supplier,venue,new Date()).forEach(p=>by[p.key]=p);
   return Object.keys(d.qty).map(k=>{
     const p=by[k]; if(!p) return null;
     const qty=d.qty[k];
-    return {key:k, code:p.code, desc:p.desc, unit:p.unit, qty, price:p.price, total:qty*p.price};
+    return {key:k,code:p.code,desc:p.desc,unit:p.unit,qty,price:p.price,total:qty*p.price,cat:p.cat};
   }).filter(Boolean);
 }
-function orderTotals(supplier){
-  const lines=draftLines(supplier), rate=gstRate(supplier);
+function orderTotals(supplier,venue){
+  const lines=draftLines(supplier,venue),rate=gstRate(supplier);
   const sub=lines.reduce((s,l)=>s+l.total,0);
-  const gst=sub*rate;
-  return {lines, sub, gst, total:sub+gst, rate};
+  return {lines,sub,gst:sub*rate,total:sub+sub*rate,rate};
 }
-/* Every draft on screen counts against the week, not just the supplier being edited —
-   otherwise the countdown lies the moment you start a second order. */
+/* Every open draft for the active store counts against the countdown, not just the one on
+   screen — otherwise the number lies the moment a second order is started. */
 function allDraftTotal(){
   let t=0;
-  Object.keys(DRAFTS).forEach(s=>{
-    const d=DRAFTS[s]; if(!d||!inScopeVenue(d.venue)) return;
-    t+=orderTotals(s).total;
-  });
+  Object.values(DRAFTS).forEach(d=>{ if(!d||d.venue!==STORE.name) return;
+    t+=orderTotals(d.supplier,d.venue).total; });
   return t;
 }
 
-/* ================= MODEL FOR THE SUMMARY BAR ================= */
-function weekModel(today){
-  const venues=scopeVenues(), wk=currentWeek(today), now=today||new Date();
-  const map=dailySales(SALES, venues);
-  const profile=dowProfile(map, wk.start, DOW_WEEKS);
-  const sales=forecastWeek(map, wk, now, profile);
-  const cap=capturedSpend(INV, venues, wk);
-  const open=openOrders(ORDERS.concat(LOCAL_ORDERS), INV, venues, wk, now);
-  const committed=open.reduce((s,o)=>s+o.total,0);
-  const drafted=allDraftTotal();
-  const tgt=targetFor(SITE.venues);
-  let budget=0, basis=tgt.basis, pctTarget=tgt.cogs_pct;
-  if(tgt.weekly_budget>0) budget=tgt.weekly_budget;
-  else if(tgt.cogs_pct>0) budget=sales.forecast*tgt.cogs_pct/100;
-  else {
-    pctTarget=trailingCogsPct(INV, SALES, venues, wk, 8);
-    budget=sales.forecast*pctTarget/100;
-    basis="placeholder";
-  }
-  const used=cap.cogs+committed+drafted;
-  return {wk, venues, sales, cap, open, committed, drafted, used, budget, basis, pctTarget,
-          remaining:budget-used,
-          cogsActual: sales.actual>0 ? cap.cogs/sales.actual*100 : 0,
-          cogsProjected: sales.forecast>0 ? used/sales.forecast*100 : 0};
+/* ================= UI SHELL ================= */
+function renderStorePicker(){
+  document.getElementById("storepick").innerHTML=
+    STORES.map(s=>`<button class="${STORE.key===s.key?"sel":""}" onclick="setStore('${s.key}')">${esc(s.short)}</button>`).join("");
 }
-
-/* ================= RENDER: FILTER BAR ================= */
+function setStore(k){ STORE=STORES.find(s=>s.key===k)||STORES[0]; SUPPLIER=""; renderStorePicker(); renderFilters(); route(); }
 function renderFilters(){
-  const f=document.getElementById("filters");
-  f.innerHTML=`
-    ${SITES.map(s=>`<span class="chip ${SITE.key===s.key?"on":""}" onclick="setSite('${s.key}')">${esc(s.label)}</span>`).join("")}
+  document.getElementById("filters").innerHTML=`
+    <span class="chip sm on" style="cursor:default">${esc(STORE.name)}</span>
     <span style="flex:1"></span>
     <span class="chip sm" onclick="stepWeek(-1)">‹</span>
     <span class="chip sm on" style="cursor:default">${esc(weekLabel(currentWeek()))}</span>
     <span class="chip sm" onclick="stepWeek(1)" ${WEEK_OFF>=0?'style="opacity:.35"':""}>›</span>`;
 }
-function setSite(k){ SITE=SITES.find(s=>s.key===k)||SITES[0]; SUPPLIER=""; renderFilters(); route(); }
 function stepWeek(d){ if(WEEK_OFF+d>0) return; WEEK_OFF+=d; renderFilters(); route(); }
-function go(hash){ location.hash=hash; route(); }
-function crumb(t){ document.getElementById("crumb").textContent=t||""; }
+function go(h){ location.hash=h; route(); }
+function warnBar(){ return LOAD_WARN.length?`<div class="err"><b>Some data didn't load.</b><br>${LOAD_WARN.map(esc).join("<br>")}</div>`:""; }
 
-/* ================= RENDER: SUMMARY BAR ================= */
 function summaryBar(m){
-  const b=Math.max(m.budget,1);
-  const seg=v=>Math.max(0,Math.min(100,v/b*100));
+  const b=Math.max(m.budget,1), seg=v=>Math.max(0,Math.min(100,v/b*100));
   const over=m.used>m.budget&&m.budget>0;
-  const tgtNote = m.basis==="placeholder"
-      ? `No target set. Showing your own last 8 weeks (${pct1(m.pctTarget)}) as a placeholder — <a onclick="go('set')" style="cursor:pointer;text-decoration:underline">set a real one</a>.`
-      : m.basis==="sheet-fixed" ? `Fixed weekly budget from OrderTargets.`
-      : m.basis==="local" ? `Target ${pct1(m.pctTarget)} of takings (this browser only — <a onclick="go('set')" style="cursor:pointer;text-decoration:underline">save it to the sheet</a>).`
-      : `Target ${pct1(m.pctTarget)} of takings.`;
-  const cogsCls = m.pctTarget>0 ? (m.cogsProjected<=m.pctTarget?"good":"over") : "";
-  return `
-  <div class="summary">
+  const cls=m.cogsProjected<=TARGET_COGS_PCT?"good":"over";
+  return `<div class="summary">
     <div class="tile ${over?"over":""}">
-      <div class="k">Left to spend this week</div>
+      <div class="k">Left to spend — ${esc(STORE.short)}</div>
       <div class="v">${m.budget>0?money0(m.remaining):"—"}</div>
       <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i></div>
-      <div class="legend">
-        <span class="l1">Invoiced ${money0(m.cap.cogs)}</span>
-        <span class="l2">Ordered ${money0(m.committed)}</span>
-        <span class="l3">This draft ${money0(m.drafted)}</span>
-      </div>
-      <div class="sub">${money0(m.used)} of ${money0(m.budget)} budget${over?" — <b style='color:var(--red)'>over</b>":""}</div>
+      <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Ordered ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span></div>
+      <div class="sub">${money0(m.used)} of ${money0(m.budget)} (${TARGET_COGS_PCT}% of forecast revenue)${over?" — <b style='color:var(--red)'>over</b>":""}</div>
     </div>
-    <div class="tile ${cogsCls}">
-      <div class="k">COGS % — projected</div>
+    <div class="tile ${m.sales.forecast>0?cls:""}">
+      <div class="k">COGS % — projected vs ${TARGET_COGS_PCT}%</div>
       <div class="v">${m.sales.forecast>0?pct1(m.cogsProjected):"—"}</div>
-      <div class="sub">${m.sales.actual>0?`${pct1(m.cogsActual)} on takings so far (${money0(m.sales.actual)}).`:""}
-        Week forecast ${money0(m.sales.forecast)}.<br>${tgtNote}</div>
+      <div class="sub">${m.sales.actual>0?`${pct1(m.cogsActual)} on revenue so far (${money0(m.sales.actual)}). `:""}Week forecast ${money0(m.sales.forecast)}.</div>
     </div>
     <div class="tile">
-      <div class="k">Orders on the go</div>
-      <div class="v">${money0(m.drafted)}</div>
-      <div class="sub">${Object.keys(DRAFTS).filter(s=>Object.keys(DRAFTS[s].qty||{}).length).length} draft(s) open ·
-        ${m.open.length} placed, not yet invoiced (${money0(m.committed)})</div>
-    </div>
-  </div>`;
+      <div class="k">Revenue this week</div>
+      <div class="v">${money0(m.sales.actual)}</div>
+      <div class="sub">${m.open.length} order(s) placed, not yet invoiced · ${Object.values(DRAFTS).filter(d=>d.venue===STORE.name&&Object.keys(d.qty||{}).length).length} draft(s) open</div>
+    </div></div>`;
 }
 
-function warnBar(){
-  if(!LOAD_WARN.length) return "";
-  return `<div class="err"><b>Some data didn't load.</b><br>${LOAD_WARN.map(esc).join("<br>")}</div>`;
-}
-
-/* ================= ROUTING ================= */
+/* ================= ROUTER ================= */
 function route(){
   const h=decodeURIComponent(location.hash.slice(1));
-  if(h==="set") return renderTargets();
-  if(h==="placed") return renderPlaced();
+  if(h==="admin") return renderAdmin();
+  if(h==="favs") return renderFavs();
+  if(h==="reports") return renderReports();
+  if(h.startsWith("rep::")) return renderSupplierDrill(h.slice(5));
+  if(h.startsWith("grp::")) return renderGroupDrill(h.slice(5));
   if(h.startsWith("s::")){ SUPPLIER=h.slice(3); return renderBuilder(); }
   SUPPLIER=""; renderHome();
 }
 
-/* ================= HOME: pick a supplier ================= */
+/* ================= HOME ================= */
 function renderHome(){
-  crumb("");
   const m=weekModel();
-  const sups=supplierList(scopeVenues());
-  const groups=[...new Set(sups.map(s=>s.group))].filter(g=>g&&g!=="Ungrouped").sort();
-  const shown=sups.filter(s=>!CATFILT||s.group===CATFILT);
+  const all=supplierList(STORE.name);
+  const shown=all.filter(s=>s.orderable&&(!HIDE_PORTAL||!s.portal));
+  const portalCount=all.filter(s=>s.orderable&&s.portal).length;
   document.getElementById("app").innerHTML=`
-    ${warnBar()}
-    ${summaryBar(m)}
+    ${warnBar()}${summaryBar(m)}
     <div class="card">
-      <div class="label">Start an order — ${esc(SITE.label)}</div>
+      <div class="label">Start an order — ${esc(STORE.name)}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-        <span class="chip sm ${CATFILT?"":"on"}" onclick="setCat('')">All</span>
-        ${groups.map(g=>`<span class="chip sm ${CATFILT===g?"on":""}" onclick="setCat('${esc(g)}')">${esc(g)}</span>`).join("")}
+        ${portalCount?`<span class="chip sm ${HIDE_PORTAL?"on":""}" onclick="togglePortal()">${HIDE_PORTAL?"portal-only hidden":"portal-only shown"} (${portalCount})</span>`:""}
       </div>
-      <table>
-        <thead><tr><th>Supplier</th><th class="num hide-sm">Avg spend/wk</th><th class="num hide-sm">Last delivery</th><th class="num">Draft</th></tr></thead>
-        <tbody>${shown.map(s=>{
-          const d=DRAFTS[s.name], n=d?Object.keys(d.qty||{}).length:0;
-          return `<tr class="click ${n?"picked":""}" onclick="go('s::${encodeURIComponent(s.name)}')">
-            <td><b>${esc(s.name)}</b>${s.group!=="Ungrouped"?` <span class="pill">${esc(s.group)}</span>`:""}
-                ${s.lines?"":' <span class="pill warn">no line items</span>'}</td>
-            <td class="num hide-sm">${money(s.avgWk)}</td>
-            <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
-            <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
-          </tr>`;}).join("")}</tbody>
-      </table>
-      <div class="note">Suppliers you have bought from in the last ${CAT_DAYS} days, busiest first. A supplier
-        marked <b>no line items</b> has invoices but no itemised lines captured, so there is nothing to build an
-        order from — order it the old way and log it under Placed.</div>
+      <table><thead><tr>
+        <th>Supplier</th><th class="num hide-sm">Avg spend/wk</th><th class="num hide-sm">Last delivery</th><th class="num">Draft</th>
+      </tr></thead><tbody>
+      ${shown.map(s=>{
+        const d=DRAFTS[draftId(s.name,STORE.name)], n=d?Object.keys(d.qty||{}).length:0;
+        return `<tr class="click ${n?"picked":""}" onclick="go('s::${encodeURIComponent(s.name)}')">
+          <td><b>${esc(s.name)}</b>${s.portal?' <span class="pill">portal</span>':""}${s.lines?"":' <span class="pill warn">no line items</span>'}
+              ${s.rep?"":' <span class="pill">no rep email</span>'}</td>
+          <td class="num hide-sm">${money(s.avgWk)}</td>
+          <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
+          <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
+        </tr>`;}).join("")}
+      </tbody></table>
+      ${shown.length?"":'<div class="note">No suppliers are enabled for this store yet. Check Admin.</div>'}
+      <div class="note">Only stock suppliers appear here. Rent, energy, waste and repairs are excluded from
+        ordering — their invoices still count toward spend and COGS on the Reports screen.</div>
     </div>`;
 }
-function setCat(g){ CATFILT=g; route(); }
+function togglePortal(){ HIDE_PORTAL=!HIDE_PORTAL; route(); }
 
 /* ================= BUILDER ================= */
+function sortCat(rows){
+  const dir=SORT.dir;
+  const by={ name:(a,b)=>a.desc.localeCompare(b.desc),
+             price:(a,b)=>a.price-b.price,
+             last:(a,b)=>(+a.lastDate)-(+b.lastDate),
+             qty:(a,b)=>a.lastQty-b.lastQty,
+             cat:(a,b)=>a.cat.localeCompare(b.cat)||a.desc.localeCompare(b.desc),
+             freq:(a,b)=>a.ordersPerWk-b.ordersPerWk };
+  return rows.slice().sort((a,b)=>dir*(by[SORT.col]||by.name)(a,b));
+}
+function sortHead(col,label,cls){
+  const on=SORT.col===col;
+  return `<th class="s ${cls||""} ${on?"act":""}" onclick="setSort('${col}')">${label}${on?(SORT.dir>0?" ▲":" ▼"):""}</th>`;
+}
+function setSort(c){ if(SORT.col===c) SORT.dir*=-1; else {SORT.col=c;SORT.dir=1;} route(); }
+
 function renderBuilder(){
-  const name=SUPPLIER;
-  crumb(name);
-  const m=weekModel();
-  const cat=deriveCatalogue(LINES, name, scopeVenues(), new Date());
-  const d=draft(name);
+  const name=SUPPLIER, venue=STORE.name, m=weekModel();
+  if(!canOrder(name,venue)){
+    document.getElementById("app").innerHTML=`${summaryBar(m)}<a class="back" onclick="go('')">All suppliers</a>
+      <div class="card"><div class="label">${esc(name)}</div>
+      <div class="note">${esc(STORE.name)} isn't permitted to order from this supplier. Change it in Admin.</div></div>`;
+    return;
+  }
+  const cat=deriveCatalogue(LINES,name,venue,new Date());
+  const cats=[...new Set(cat.map(p=>p.cat))].sort();
   const q=SEARCH.trim().toLowerCase();
-  const rows=cat.filter(p=>!q||p.desc.toLowerCase().includes(q)||String(p.code).toLowerCase().includes(q));
-  const cfg=OSET[norm(name)]||{};
+  const rows=sortCat(cat.filter(p=>(!CATFILT||p.cat===CATFILT)&&(!q||p.desc.toLowerCase().includes(q)||String(p.code).toLowerCase().includes(q))));
+  const d=draft(name,venue), t=orderTotals(name,venue), cfg=sset(name);
   const email=supplierEmail(name);
-  const t=orderTotals(name);
+  const myFavs=FAVS.filter(f=>f.venue===venue&&(!f.supplier||f.supplier===name));
 
   document.getElementById("app").innerHTML=`
-    ${warnBar()}
-    ${summaryBar(m)}
+    ${warnBar()}${summaryBar(m)}
     <a class="back" onclick="go('')">All suppliers</a>
     <div class="panels">
-      <div>
-        <div class="card">
-          <div class="label">${esc(name)} — catalogue</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-            <input type="search" id="csearch" placeholder="Find an item…" value="${esc(SEARCH)}" style="flex:1;min-width:180px">
-            <span class="chip sm" onclick="suggestAll()">Fill suggested</span>
-            <span class="chip sm" onclick="clearDraft()">Clear</span>
-          </div>
-          ${cfg.delivery_days||cfg.cutoff||cfg.min_order?`<div class="note" style="margin:0 0 8px">
-            ${cfg.delivery_days?`Delivers: <b>${esc(cfg.delivery_days)}</b>. `:""}
-            ${cfg.cutoff?`Cut-off: <b>${esc(cfg.cutoff)}</b>. `:""}
-            ${cfg.min_order?`Minimum order <b>${money(cfg.min_order)}</b>. `:""}
-            ${cfg.account?`Account ${esc(cfg.account)}.`:""}</div>`:""}
-          <table>
-            <thead><tr><th>Item</th><th class="num hide-sm">Price</th><th class="num hide-sm">Usual</th><th class="num hide-sm">Last</th><th class="num">Qty</th></tr></thead>
-            <tbody>${rows.map(p=>`
-              <tr class="${d.qty[p.key]?"picked":""}">
-                <td><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}
-                    ${p.code?`<br><span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(p.code)}</span>`:""}
-                    ${p.stale?' <span class="pill">not bought lately</span>':""}</td>
-                <td class="num hide-sm">${money(p.price)}${p.change!=null?`<br><span class="${p.change>0?"up":"down"}" style="font-size:11px">${(p.change>0?"+":"")+Math.round(p.change*10)/10}%</span>`:""}</td>
-                <td class="num hide-sm">${Math.round(p.avgPerOrder*10)/10}<br><span style="color:var(--dim);font-size:11px">${Math.round(p.avgQtyWk*10)/10}/wk</span></td>
-                <td class="num hide-sm">${p.daysSince}d<br><span style="color:var(--dim);font-size:11px">${p.lastQty} ${esc(p.unit||"")}</span></td>
-                <td class="num">
-                  <span class="qty ${d.qty[p.key]?"on":""}">
-                    <button onclick="bump('${esc(p.key)}',-1)">−</button>
-                    <input type="number" min="0" step="1" value="${d.qty[p.key]||0}" data-k="${esc(p.key)}" onchange="typed(this)">
-                    <button onclick="bump('${esc(p.key)}',1)">+</button>
-                  </span>
-                  <div style="font-size:11px;color:var(--dim);margin-top:2px">${d.qty[p.key]?money(d.qty[p.key]*p.price):"&nbsp;"}</div>
-                </td>
-              </tr>`).join("")}</tbody>
-          </table>
-          ${rows.length?"":'<div class="note">Nothing bought from this supplier for this site in the last '+CAT_DAYS+' days.</div>'}
-          <div class="note">Prices are what you last paid, from the invoice lines. <b>Usual</b> is your average
-            quantity per order over ${RATE_DAYS} days, and the per-week figure under it. No stock count exists,
-            so these are buying rates, not shelf levels.</div>
+      <div><div class="card">
+        <div class="label">${esc(name)} — catalogue · ${esc(STORE.short)}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <input type="search" id="csearch" placeholder="Find an item…" value="${esc(SEARCH)}" style="flex:1;min-width:170px">
+          <span class="chip sm" onclick="fillSuggested()">Fill usual</span>
+          <span class="chip sm" onclick="clearDraft()">Clear</span>
         </div>
-      </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <span class="chip sm ${CATFILT?"":"on"}" onclick="setCat('')">All</span>
+          ${cats.map(c=>`<span class="chip sm ${CATFILT===c?"on":""}" onclick="setCat('${esc(c)}')">${esc(c)}</span>`).join("")}
+        </div>
+        ${myFavs.length?`<div style="margin-bottom:8px;font-size:12px">Favourites:
+          ${myFavs.map(f=>`<span class="chip sm" onclick="recallFav('${esc(f.id)}')">${esc(f.name)}</span>`).join(" ")}</div>`:""}
+        <table><thead><tr>
+          ${sortHead("name","Product")}${sortHead("cat","Category","hide-sm")}${sortHead("price","Unit price","num")}
+          ${sortHead("last","Last ordered","num hide-sm")}${sortHead("qty","Last qty","num hide-sm")}<th class="num">Qty</th>
+        </tr></thead><tbody>
+        ${rows.map(p=>`<tr class="${d.qty[p.key]?"picked":""}">
+          <td class="click" onclick="history_('${esc(p.key)}')"><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}
+            ${p.code?`<br><span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(p.code)}</span>`:""}
+            ${p.variants.length>1?` <span class="pill" title="${esc(p.variants.join(" / "))}">${p.variants.length} names merged</span>`:""}
+            ${p.stale?' <span class="pill">not bought lately</span>':""}</td>
+          <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
+          <td class="num">${money(p.price)}${p.change!=null?`<br><span class="${p.change>0?"up":"down"}" style="font-size:11px">${(p.change>0?"+":"")+Math.round(p.change*10)/10}%</span>`:""}</td>
+          <td class="num hide-sm">${fmtD(p.lastDate)}<br><span style="color:var(--dim);font-size:11px">${p.daysSince}d</span></td>
+          <td class="num hide-sm">${p.lastQty} ${esc(p.unit||"")}<br><span style="color:var(--dim);font-size:11px">usual ${Math.round(p.avgPerOrder*10)/10}</span></td>
+          <td class="num"><span class="qty ${d.qty[p.key]?"on":""}">
+            <button onclick="bump('${esc(p.key)}',-1)">−</button>
+            <input type="number" min="0" step="1" value="${d.qty[p.key]||0}" data-k="${esc(p.key)}" onchange="typed(this)">
+            <button onclick="bump('${esc(p.key)}',1)">+</button></span>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px">${d.qty[p.key]?money(d.qty[p.key]*p.price):"&nbsp;"}</div></td>
+        </tr>`).join("")}
+        </tbody></table>
+        ${rows.length?"":`<div class="note">Nothing bought from this supplier at ${esc(STORE.short)} in the last ${CAT_DAYS} days.</div>`}
+        <div class="note">Click a product name for its price and order history. Prices are what this store last
+          paid. <b>Usual</b> is the average quantity per order over ${RATE_DAYS} days — a buying rate, not a
+          shelf count; no stock count exists anywhere in the platform.</div>
+      </div></div>
 
-      <div class="draft">
-        <div class="card">
-          <div class="label">This order</div>
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-            <span style="font-size:12px;color:var(--dim)">Deliver to</span>
-            <select onchange="setDraftVenue(this.value)" style="flex:1;font-size:13px;padding:7px 9px">
-              ${VENUE_LIST.map(v=>`<option ${d.venue===v?"selected":""}>${esc(v)}</option>`).join("")}
-            </select>
+      <div class="draft"><div class="card">
+        <div class="label">This order</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:8px">Deliver to <b>${esc(venue)}</b></div>
+        ${t.lines.length?`
+          <div style="max-height:36vh;overflow:auto">
+          ${t.lines.map(l=>`<div class="dline"><div class="g"><b>${esc(l.desc)}</b>
+            <span style="color:var(--dim);font-size:11px">${l.qty} × ${money(l.price)} ${esc(l.unit||"")}</span></div>
+            <div class="num" style="font-size:13px">${money(l.total)}</div>
+            <div><button onclick="setQty(SUPPLIER,'${esc(l.key)}',0);route()" style="border:none;background:none;font-size:15px;color:var(--dim);cursor:pointer;padding:2px 4px">✕</button></div>
+          </div>`).join("")}</div>
+          <div style="margin-top:10px">
+            <div class="tot"><span>Subtotal</span><span class="num">${money(t.sub)}</span></div>
+            <div class="tot"><span>GST est. (${Math.round(t.rate*1000)/10}%)</span><span class="num">${money(t.gst)}</span></div>
+            <div class="tot big"><span>Total</span><span>${money(t.total)}</span></div>
           </div>
-          ${t.lines.length?`
-            <div style="max-height:38vh;overflow:auto">
-              ${t.lines.map(l=>`<div class="dline">
-                <div class="g"><b>${esc(l.desc)}</b>
-                  <span style="color:var(--dim);font-size:11px">${l.qty} × ${money(l.price)} ${esc(l.unit||"")}</span></div>
-                <div class="num" style="font-size:13px">${money(l.total)}</div>
-                <div><button onclick="setQty(SUPPLIER,'${esc(l.key)}',0);route()" title="Remove" style="border:none;background:none;font-size:15px;color:var(--dim);cursor:pointer;padding:2px 4px">✕</button></div>
-              </div>`).join("")}
-            </div>
-            <div style="margin-top:10px">
-              <div class="tot"><span>Subtotal</span><span class="num">${money(t.sub)}</span></div>
-              <div class="tot"><span>GST est. (${Math.round(t.rate*1000)/10}%)</span><span class="num">${money(t.gst)}</span></div>
-              <div class="tot big"><span>Total</span><span>${money(t.total)}</span></div>
-            </div>
-            ${t.total>m.remaining&&m.budget>0?`<div class="note" style="color:var(--red)"><b>This order takes the week ${money0(t.total-m.remaining)} over budget.</b></div>`:
-              m.budget>0?`<div class="note">Leaves ${money0(m.remaining)} for the rest of the week.</div>`:""}
-            ${cfg.min_order&&t.total<cfg.min_order?`<div class="note" style="color:var(--amber)">Under this supplier's ${money(cfg.min_order)} minimum.</div>`:""}
-            <div style="display:grid;gap:8px;margin-top:12px">
-              ${email&&WEBAPP_URL?`<a class="btn" onclick="sendNow()" style="cursor:pointer">✉ Send to ${esc(email)}</a>`:""}
-              ${email?`<a class="btn ${WEBAPP_URL?"outline":""}" onclick="dispatch('email')" style="cursor:pointer">✉ ${WEBAPP_URL?"Open in my mail app instead":"Email "+esc(email)}</a>`
-                     :`<div class="note">No ordering email known for this supplier. Add one in the OrderSettings tab, or copy the text below.</div>`}
-              <a class="btn outline" onclick="dispatch('copy')" style="cursor:pointer">⧉ Copy for SMS / WhatsApp / portal</a>
-              <a class="btn outline" onclick="dispatch('self')" style="cursor:pointer">✉ Email a copy to me</a>
-              <a class="btn outline" onclick="markPlaced()" style="cursor:pointer">✓ Mark as placed</a>
-            </div>
-            <div class="note">Sending does not log the order. Tick <b>Mark as placed</b> so it counts against the
-              week until the invoice arrives.${WEBAPP_URL?"":" <b>WEBAPP_URL is not set</b>, so placed orders live in this browser only."}</div>
-          `:`<div class="note">Nothing added yet. Tap + against an item, or <a onclick="suggestAll()" style="cursor:pointer;text-decoration:underline">fill your usual quantities</a>.</div>`}
-        </div>
-      </div>
+          ${t.total>m.remaining?`<div class="note" style="color:var(--red)"><b>Takes the week ${money0(t.total-m.remaining)} past the ${TARGET_COGS_PCT}% target.</b></div>`
+            :`<div class="note">Leaves ${money0(m.remaining-t.total)} before the ${TARGET_COGS_PCT}% target.</div>`}
+          <div style="display:grid;gap:8px;margin-top:12px">
+            <div style="font-size:12px;color:var(--dim)">Rep: <input type="email" id="repmail" value="${esc(email)}" placeholder="rep@supplier.com.au" style="width:100%;margin-top:4px;font-size:13px;padding:7px 9px"></div>
+            <label class="sw"><input type="checkbox" id="cckitchen" ${cfg.cc?"checked":""}> CC ${esc(cfg.cc||ACCOUNTS_EMAIL)}</label>
+            <a class="btn" onclick="dispatch('email')">✉ Email the order</a>
+            <a class="btn outline" onclick="dispatch('copy')">⧉ Copy for portal / SMS</a>
+            <a class="btn outline" onclick="markPlaced()">✓ Mark as placed</a>
+            <a class="btn outline" onclick="saveFavPrompt()">★ Save as favourite</a>
+          </div>
+          <div class="note">Sending doesn't log the order. Tick <b>Mark as placed</b> so it holds its slot in the
+            week until the invoice arrives.${WEBAPP_URL?"":" <b>WEBAPP_URL isn't set</b>, so orders, favourites and settings can't be saved to the sheet yet."}</div>
+        `:`<div class="note">Nothing added yet. Tap + on an item, or
+           <a onclick="fillSuggested()" style="cursor:pointer;text-decoration:underline">fill your usual quantities</a>.</div>`}
+      </div></div>
     </div>`;
   const s=document.getElementById("csearch");
-  if(s) s.addEventListener("input",e=>{ SEARCH=e.target.value; clearTimeout(window.__st); window.__st=setTimeout(route,140); });
+  if(s) s.addEventListener("input",e=>{SEARCH=e.target.value;clearTimeout(window.__st);window.__st=setTimeout(route,140);});
 }
-function bump(key,d){
-  const cur=(DRAFTS[SUPPLIER]&&DRAFTS[SUPPLIER].qty[key])||0;
-  setQty(SUPPLIER,key,cur+d); route();
-}
-function typed(el){ setQty(SUPPLIER, el.dataset.k, el.value); route(); }
-function setDraftVenue(v){ draft(SUPPLIER).venue=v; saveDrafts(); route(); }
-function suggestAll(){
-  const cat=deriveCatalogue(LINES, SUPPLIER, scopeVenues(), new Date());
-  cat.filter(p=>!p.stale).forEach(p=>setQty(SUPPLIER,p.key,p.suggested));
+function setCat(c){ CATFILT=c; route(); }
+function bump(k,n){ const cur=(DRAFTS[draftId(SUPPLIER,STORE.name)]||{qty:{}}).qty[k]||0; setQty(SUPPLIER,k,cur+n); route(); }
+function typed(el){ setQty(SUPPLIER,el.dataset.k,el.value); route(); }
+function fillSuggested(){
+  deriveCatalogue(LINES,SUPPLIER,STORE.name,new Date()).filter(p=>!p.stale)
+    .forEach(p=>setQty(SUPPLIER,p.key,p.suggested));
   route();
 }
-function clearDraft(){ if(DRAFTS[SUPPLIER]){ DRAFTS[SUPPLIER].qty={}; saveDrafts(); } route(); }
+function clearDraft(){ const d=DRAFTS[draftId(SUPPLIER,STORE.name)]; if(d){d.qty={};saveDrafts();} route(); }
+
+/* ================= ORDER HISTORY MODAL ================= */
+function history_(key){
+  const p=deriveCatalogue(LINES,SUPPLIER,STORE.name,new Date()).find(x=>x.key===key);
+  if(!p) return;
+  const buys=p.buys.slice().reverse();
+  const prices=p.buys.map(b=>b.price);
+  const lo=Math.min(...prices), hi=Math.max(...prices), first=p.buys[0];
+  const move=first.price?((p.price-first.price)/first.price*100):0;
+  modal(`<div class="label">${esc(p.desc)}</div>
+    <div style="font-size:13px;margin-bottom:10px">
+      ${esc(p.cat)} · ${esc(p.unit||"")} ${p.code?"· "+esc(p.code):""}<br>
+      Now ${money(p.price)} · range ${money(lo)}–${money(hi)} ·
+      <span class="${move>0?"up":move<0?"down":""}">${move>0?"+":""}${Math.round(move*10)/10}% since ${fmtD(first.date)}</span><br>
+      Bought ${p.buys.length} time(s), about ${Math.round(p.ordersPerWk*10)/10}× a week, ${Math.round(p.avgPerOrder*10)/10} per order.
+      ${p.variants.length>1?`<br><span style="color:var(--dim)">Merged names: ${esc(p.variants.join(" / "))}</span>`:""}
+    </div>
+    <table><thead><tr><th>Date</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Line</th><th class="hide-sm">Invoice</th></tr></thead>
+    <tbody>${buys.map((b,i)=>{
+      const prev=buys[i+1];
+      const ch=prev&&prev.price!==b.price?((b.price-prev.price)/prev.price*100):null;
+      return `<tr><td>${fmtD(b.date)}</td><td class="num">${b.qty}</td>
+        <td class="num">${money(b.price)}${ch!=null?` <span class="${ch>0?"up":"down"}" style="font-size:11px">${ch>0?"+":""}${Math.round(ch*10)/10}%</span>`:""}</td>
+        <td class="num">${money(b.total)}</td><td class="hide-sm" style="font-family:var(--mono);font-size:11px">${esc(b.number)}</td></tr>`;
+    }).join("")}</tbody></table>
+    <div style="margin-top:12px"><a class="btn" onclick="closeModal()">Close</a></div>`);
+}
+
+/* ================= FAVOURITES ================= */
+function saveFavPrompt(){
+  const t=orderTotals(SUPPLIER,STORE.name);
+  if(!t.lines.length){ alert("Nothing in this order yet."); return; }
+  modal(`<div class="label">Save as favourite</div>
+    <div style="font-size:13px;margin-bottom:8px">${t.lines.length} item(s) · ${esc(SUPPLIER)} · ${esc(STORE.name)}</div>
+    <input type="text" id="favname" placeholder="e.g. Monday Produce Run" style="width:100%">
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <a class="btn" id="favok">Save</a><a class="btn outline" onclick="closeModal()">Cancel</a></div>
+    <div class="note">Favourites are saved to the sheet, so anyone opening this link at ${esc(STORE.short)} sees them.</div>`);
+  document.getElementById("favok").onclick=()=>saveFav(document.getElementById("favname").value.trim(),t.lines,SUPPLIER,STORE.name);
+}
+/* Takes the lines explicitly: the prompt after a placed order runs once the draft has
+   already been cleared, so reading the draft here would save an empty favourite. */
+async function saveFav(name,lines,supplier,venue){
+  if(!name||!lines||!lines.length) return;
+  const fav={fav_id:"f"+Date.now().toString(36),fav_name:name,venue,supplier,
+    lines:lines.map((l,i)=>({line_no:i+1,item_key:l.key,description:l.desc,unit:l.unit,qty:l.qty,supplier}))};
+  closeModal();
+  try{
+    await post(Object.assign({action:"favourite"},fav));
+    FAVS.push({id:fav.fav_id,name,venue,supplier,by:identity().user||"",
+      lines:fav.lines.map(l=>({key:l.item_key,desc:l.description,unit:l.unit,qty:l.qty,supplier}))});
+    toast("Favourite saved.");
+  }catch(e){
+    if(e.message==="no-webapp") toast("Can't save favourites until WEBAPP_URL is set.");
+    else alert(e.message);
+  }
+  route();
+}
+/* Recalling fills the cart as an ordinary editable draft — a template, never a placed order. */
+function recallFav(id){
+  const f=FAVS.find(x=>x.id===id); if(!f) return;
+  const sup=f.supplier||SUPPLIER;
+  const known={}; deriveCatalogue(LINES,sup,f.venue,new Date()).forEach(p=>known[p.key]=p);
+  let miss=0;
+  f.lines.forEach(l=>{ if(known[l.key]) setQty(sup,l.key,l.qty,f.venue); else miss++; });
+  SUPPLIER=sup; location.hash="s::"+encodeURIComponent(sup);
+  route();
+  toast(miss?`Loaded "${f.name}" — ${miss} item(s) no longer in the catalogue were skipped.`:`Loaded "${f.name}".`);
+}
+function renderFavs(){
+  const m=weekModel();
+  const mine=FAVS.filter(f=>f.venue===STORE.name);
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="card"><div class="label">Saved favourites — ${esc(STORE.name)}</div>
+      <table><thead><tr><th>Name</th><th class="hide-sm">Supplier</th><th class="num">Items</th><th class="num"></th></tr></thead>
+      <tbody>${mine.map(f=>`<tr><td><b>${esc(f.name)}</b>${f.by?`<br><span style="color:var(--dim);font-size:11px">${esc(f.by)}</span>`:""}</td>
+        <td class="hide-sm">${esc(f.supplier||"—")}</td><td class="num">${f.lines.length}</td>
+        <td class="num"><a class="chip sm" onclick="recallFav('${esc(f.id)}')">Load</a>
+          <a class="chip sm" onclick="deleteFav('${esc(f.id)}')">Delete</a></td></tr>`).join("")}</tbody></table>
+      ${mine.length?"":'<div class="note">No favourites saved for this store yet. Build an order and choose <b>Save as favourite</b>.</div>'}
+    </div>`;
+}
+async function deleteFav(id){
+  const f=FAVS.find(x=>x.id===id); if(!f) return;
+  if(!confirm(`Delete favourite "${f.name}"?`)) return;
+  try{ await post({action:"favourite_delete",fav_id:id}); }
+  catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
+  FAVS=FAVS.filter(x=>x.id!==id); route();
+}
+
+/* ================= REPORTS ================= */
+function reportRange(){ const wk=currentWeek(); return {start:addD(wk.start,-7*7),end:wk.end,label:"8 weeks to "+fmtD(wk.end)}; }
+function spendRows(venue,range){
+  const bySup={},byGrp={};
+  INV.forEach(r=>{
+    if(r.venue!==venue||!r.date||r.date<range.start||r.date>range.end) return;
+    if(!supActive(r.supplier)) return;
+    const g=rowGroup(r);
+    (bySup[r.supplier]=bySup[r.supplier]||{name:r.supplier,spend:0,n:0,cogs:isCogs(r),group:g}).spend+=r.total;
+    bySup[r.supplier].n++;
+    (byGrp[g]=byGrp[g]||{name:g,spend:0,n:0,cogs:isCogs(r)}).spend+=r.total; byGrp[g].n++;
+  });
+  return {sup:Object.values(bySup).sort((a,b)=>b.spend-a.spend),
+          grp:Object.values(byGrp).sort((a,b)=>b.spend-a.spend)};
+}
+function renderReports(){
+  const m=weekModel(), range=reportRange(), d=spendRows(STORE.name,range);
+  const totalAll=d.sup.reduce((s,x)=>s+x.spend,0);
+  const totalCogs=d.sup.filter(x=>x.cogs).reduce((s,x)=>s+x.spend,0);
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="grid2">
+      <div class="card"><div class="label">Suppliers by spend — ${esc(range.label)}</div>
+        <table><thead><tr><th>Supplier</th><th class="num">Spend</th><th class="num hide-sm">Invoices</th><th class="num">%</th></tr></thead>
+        <tbody>${d.sup.map(s=>`<tr class="click" onclick="go('rep::${encodeURIComponent(s.name)}')">
+          <td><b>${esc(s.name)}</b>${s.cogs?"":' <span class="pill">not COGS</span>'}</td>
+          <td class="num">${money(s.spend)}</td><td class="num hide-sm">${s.n}</td>
+          <td class="num">${totalAll?pct1(s.spend/totalAll*100):""}</td></tr>`).join("")}</tbody></table>
+        <div class="note">Every supplier counts here, portal-only ones included. Click through for the invoices.</div>
+      </div>
+      <div class="card"><div class="label">Spend by group — ${esc(range.label)}</div>
+        <table><thead><tr><th>Group</th><th class="num">Spend</th><th class="num hide-sm">Invoices</th><th class="num">%</th></tr></thead>
+        <tbody>${d.grp.map(g=>`<tr class="click" onclick="go('grp::${encodeURIComponent(g.name)}')">
+          <td><b>${esc(g.name)}</b>${g.cogs?"":' <span class="pill">not COGS</span>'}</td>
+          <td class="num">${money(g.spend)}</td><td class="num hide-sm">${g.n}</td>
+          <td class="num">${totalAll?pct1(g.spend/totalAll*100):""}</td></tr>`).join("")}</tbody></table>
+        <div class="note">COGS total ${money(totalCogs)} of ${money(totalAll)} all spend.</div>
+      </div>
+    </div>`;
+}
+function renderSupplierDrill(name){
+  const m=weekModel(), range=reportRange();
+  const rows=INV.filter(r=>r.supplier===name&&r.venue===STORE.name&&r.date>=range.start&&r.date<=range.end)
+                .sort((a,b)=>b.date-a.date);
+  const tot=rows.reduce((s,r)=>s+r.total,0);
+  document.getElementById("app").innerHTML=`${summaryBar(m)}
+    <a class="back" onclick="go('reports')">Reports</a>
+    <div class="card"><div class="label">${esc(name)} — ${esc(range.label)} · ${esc(STORE.short)}</div>
+      <div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(tot)}</div>
+      <table><thead><tr><th>Date</th><th class="hide-sm">Invoice</th><th>Group</th><th class="num">Total</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr><td>${fmtD(r.date)}</td>
+        <td class="hide-sm" style="font-family:var(--mono);font-size:11px">${esc(r.number)}</td>
+        <td><span class="pill">${esc(rowGroup(r))}</span></td><td class="num">${money(r.total)}</td></tr>`).join("")}</tbody></table>
+    </div>`;
+}
+function renderGroupDrill(group){
+  const m=weekModel(), range=reportRange();
+  const bySup={};
+  INV.forEach(r=>{ if(r.venue!==STORE.name||rowGroup(r)!==group||r.date<range.start||r.date>range.end) return;
+    (bySup[r.supplier]=bySup[r.supplier]||{name:r.supplier,spend:0,n:0}).spend+=r.total; bySup[r.supplier].n++; });
+  const rows=Object.values(bySup).sort((a,b)=>b.spend-a.spend);
+  const tot=rows.reduce((s,r)=>s+r.spend,0);
+  document.getElementById("app").innerHTML=`${summaryBar(m)}
+    <a class="back" onclick="go('reports')">Reports</a>
+    <div class="card"><div class="label">${esc(group)} — ${esc(range.label)} · ${esc(STORE.short)}</div>
+      <div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(tot)}</div>
+      <table><thead><tr><th>Supplier</th><th class="num">Spend</th><th class="num">Invoices</th></tr></thead>
+      <tbody>${rows.map(s=>`<tr class="click" onclick="go('rep::${encodeURIComponent(s.name)}')">
+        <td><b>${esc(s.name)}</b></td><td class="num">${money(s.spend)}</td><td class="num">${s.n}</td></tr>`).join("")}</tbody></table>
+    </div>`;
+}
+
+/* ================= ADMIN ================= */
+function renderAdmin(){
+  const all=supplierList(STORE.name).concat(
+    supplierList(STORES.find(s=>s.key!==STORE.key).name).filter(s=>!supplierList(STORE.name).some(x=>x.name===s.name)));
+  const seen={}, list=all.filter(s=>seen[s.name]?false:(seen[s.name]=true));
+  document.getElementById("app").innerHTML=`
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="card"><div class="label">Supplier settings — saved for everyone</div>
+      <table><thead><tr><th>Supplier</th><th>Rep email</th><th class="num">Cambridge</th><th class="num">Luma</th>
+        <th class="num">Visible</th><th class="num">Portal only</th></tr></thead>
+      <tbody>${list.map(s=>{const c=sset(s.name);return `<tr>
+        <td><b>${esc(s.name)}</b>${s.stock?"":' <span class="pill">not stock</span>'}</td>
+        <td><input type="email" value="${esc(c.rep_email)}" placeholder="${esc(supplierEmail(s.name)||"none known")}"
+             style="width:100%;font-size:12px;padding:6px 8px" onchange="saveSupplier('${esc(s.name)}','rep_email',this.value)"></td>
+        <td class="num"><input type="checkbox" ${c.stores.indexOf("Red Square Cambridge")>=0?"checked":""} onchange="toggleStore('${esc(s.name)}','Red Square Cambridge',this.checked)"></td>
+        <td class="num"><input type="checkbox" ${c.stores.indexOf("Luma Kitchen")>=0?"checked":""} onchange="toggleStore('${esc(s.name)}','Luma Kitchen',this.checked)"></td>
+        <td class="num"><input type="checkbox" ${c.visible?"checked":""} onchange="saveSupplier('${esc(s.name)}','visible',this.checked?'yes':'no')"></td>
+        <td class="num"><input type="checkbox" ${c.portal_only?"checked":""} onchange="saveSupplier('${esc(s.name)}','portal_only',this.checked?'yes':'no')"></td>
+      </tr>`;}).join("")}</tbody></table>
+      <div class="note">
+        <b>Rep email</b> is the person you order from, which is rarely the address invoices arrive from — the
+        greyed-out placeholder shows what the invoices suggest, and it is often a no-reply robot. Set it before
+        anyone emails an order.<br>
+        <b>Portal only</b> keeps a supplier off the ordering list while their invoices still count toward spend
+        and COGS.<br>
+        <b>Visible</b> hides a supplier from ordering entirely.<br>
+        ${WEBAPP_URL?"Changes save to the sheet immediately and apply to everyone.":"<b>WEBAPP_URL isn't set</b>, so changes here can't be saved yet."}
+      </div>
+    </div>`;
+}
+async function saveSupplier(name,field,value){
+  const cur=sset(name), k=norm(name);
+  SSET[k]=Object.assign({},cur,{[field]: field==="visible"?value!=="no":field==="portal_only"?value==="yes":value});
+  try{ await post({action:"supplier_setting",supplier:name,field,value}); toast("Saved."); }
+  catch(e){ if(e.message==="no-webapp") toast("Not saved — WEBAPP_URL isn't set."); else alert(e.message); }
+}
+async function toggleStore(name,store,on){
+  const cur=sset(name);
+  const stores=on?[...new Set(cur.stores.concat(store))]:cur.stores.filter(s=>s!==store);
+  SSET[norm(name)]=Object.assign({},cur,{stores});
+  try{ await post({action:"supplier_setting",supplier:name,field:"stores",value:stores.join(", ")}); toast("Saved."); }
+  catch(e){ if(e.message==="no-webapp") toast("Not saved — WEBAPP_URL isn't set."); else alert(e.message); }
+}
 
 /* ================= DISPATCH ================= */
-function orderText(supplier, opts){
+function orderText(supplier,venue,opts){
   opts=opts||{};
-  const d=draft(supplier), t=orderTotals(supplier);
-  const when=new Date();
-  const pad=s=>String(s);
-  const lines=t.lines.map(l=>{
-    const left=`${l.qty} x ${l.unit||"ea"}`;
-    return `- ${pad(left)}  ${l.desc}${l.code?" ["+l.code+"]":""}`+(opts.prices?`   ${money(l.price)} ea`:"");
-  });
-  const head=[
-    `Order — ${d.venue}`,
-    `Date: ${fmtD(when)}`,
-    VENUE_ADDR[d.venue]?`Deliver to: ${VENUE_ADDR[d.venue]}`:"",
-    (OSET[norm(supplier)]&&OSET[norm(supplier)].account)?`Account: ${OSET[norm(supplier)].account}`:""
-  ].filter(Boolean);
-  const tail=opts.prices?[``,`Estimated ${money(t.sub)} + ${money(t.gst)} GST = ${money(t.total)}`]:[];
-  const note=d.note?[``,d.note]:[];
-  return head.join("\n")+"\n\n"+lines.join("\n")+tail.join("\n")+note.join("\n");
+  const t=orderTotals(supplier,venue), st=storeByName(venue);
+  const lines=t.lines.map(l=>`- ${l.qty} x ${l.unit||"ea"}  ${l.desc}${l.code?" ["+l.code+"]":""}`+(opts.prices?`   ${money(l.price)} ea`:""));
+  const head=[`Order — ${venue}`,`Date: ${fmtD(new Date())}`,`Deliver to: ${st.addr}`];
+  const tail=opts.prices?["",`Estimated ${money(t.sub)} + ${money(t.gst)} GST = ${money(t.total)}`]:[];
+  return head.join("\n")+"\n\n"+lines.join("\n")+tail.join("\n");
 }
-function orderEmailBody(supplier){
-  const d=draft(supplier);
-  return `Hi ${supplier},\n\nCould we please order the following for ${d.venue}:\n\n`
-       + orderText(supplier,{prices:false}).split("\n\n").slice(1).join("\n\n")
-       + `\n\nPlease confirm availability and delivery day.\n\nThanks,\n${identity().user||"Red Square"}\n`
-       + COMPANY_BLOCK.join("\n");
+function orderEmailBody(supplier,venue){
+  return `Hi,\n\nCould we please order the following for ${venue}:\n\n`
+    + orderText(supplier,venue,{prices:false}).split("\n\n").slice(1).join("\n\n")
+    + `\n\nPlease confirm availability and delivery day.\n\nThanks,\n${identity().user||"Red Square"}\n`
+    + COMPANY_BLOCK.join("\n");
 }
-function mailto(to,subject,body){ return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`; }
 function dispatch(how){
-  const t=orderTotals(SUPPLIER);
+  const venue=STORE.name, t=orderTotals(SUPPLIER,venue);
   if(!t.lines.length){ alert("Nothing in this order yet."); return; }
-  const d=draft(SUPPLIER);
-  if(how==="email"){
-    const to=supplierEmail(SUPPLIER);
-    location.href=mailto(to, `Order — ${d.venue} — ${fmtD(new Date())}`, orderEmailBody(SUPPLIER));
-  }else if(how==="self"){
-    location.href=mailto(SELF_COPY_TO, `Order copy — ${SUPPLIER} — ${d.venue}`, orderText(SUPPLIER,{prices:true}));
-  }else{
-    const txt=orderText(SUPPLIER,{prices:false});
-    copyText(txt);
-  }
+  if(how==="copy") return copyText(orderText(SUPPLIER,venue,{prices:false}));
+  const to=(document.getElementById("repmail")||{}).value||supplierEmail(SUPPLIER);
+  if(!to){ alert("No rep email for this supplier. Add one in Admin, or use Copy."); return; }
+  const ccOn=(document.getElementById("cckitchen")||{}).checked;
+  const cc=ccOn?(sset(SUPPLIER).cc||ACCOUNTS_EMAIL):"";
+  const q=`subject=${encodeURIComponent(`Order — ${venue} — ${fmtD(new Date())}`)}&body=${encodeURIComponent(orderEmailBody(SUPPLIER,venue))}`;
+  location.href=`mailto:${encodeURIComponent(to)}?${cc?`cc=${encodeURIComponent(cc)}&`:""}${q}`;
 }
 function copyText(txt){
-  const done=()=>toast("Copied — paste it into the message.");
-  if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(done,()=>showCopyBox(txt));
-  }else showCopyBox(txt);
+  const done=()=>toast("Copied — paste it into the portal or message.");
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done,()=>showCopyBox(txt));
+  else showCopyBox(txt);
 }
 function showCopyBox(txt){
   modal(`<div class="label">Copy this order</div><textarea id="cpbox">${esc(txt)}</textarea>
-    <div style="margin-top:10px"><a class="btn" onclick="closeModal()" style="cursor:pointer">Done</a></div>`);
-  const el=document.getElementById("cpbox"); if(el){ el.focus(); el.select(); }
+    <div style="margin-top:10px"><a class="btn" onclick="closeModal()">Done</a></div>`);
+  const el=document.getElementById("cpbox"); if(el){el.focus();el.select();}
 }
 function toast(msg){
-  const el=document.createElement("div");
-  el.textContent=msg;
-  el.style.cssText="position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#111;color:#fff;padding:11px 18px;border-radius:8px;font-size:14px;z-index:30";
-  document.body.appendChild(el);
-  setTimeout(()=>el.remove(),2400);
+  const el=document.createElement("div"); el.textContent=msg;
+  el.style.cssText="position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#111;color:#fff;padding:11px 18px;border-radius:8px;font-size:14px;z-index:50";
+  document.body.appendChild(el); setTimeout(()=>el.remove(),2600);
 }
 function modal(html){
   closeModal();
-  const w=document.createElement("div");
-  w.className="modal"; w.id="obmodal";
+  const w=document.createElement("div"); w.className="modal"; w.id="obmodal";
   w.innerHTML=`<div class="box">${html}</div>`;
-  w.addEventListener("click",e=>{ if(e.target===w) closeModal(); });
+  w.addEventListener("click",e=>{if(e.target===w) closeModal();});
   document.body.appendChild(w);
 }
 function closeModal(){ const m=document.getElementById("obmodal"); if(m) m.remove(); }
 
-/* ================= PLACING (writes to the sheet) ================= */
-function identity(){
-  try{ return JSON.parse(localStorage.getItem("ob_identity")||"{}")||{}; }catch(e){ return {}; }
-}
+/* ================= WRITE PATH ================= */
+function identity(){ try{return JSON.parse(localStorage.getItem("ob_identity")||"{}")||{};}catch(e){return {};} }
 function askIdentity(){
   const id=identity();
   if(id.user&&id.pin) return Promise.resolve(id);
   return new Promise(res=>{
-    modal(`<div class="label">Who is placing this order?</div>
+    modal(`<div class="label">Who's using this?</div>
       <div style="display:grid;gap:8px">
         <input type="text" id="obname" placeholder="Your name" value="${esc(id.user||"")}">
         <input type="text" id="obpin" placeholder="Shared PIN" value="${esc(id.pin||"")}">
-        <a class="btn" id="obok" style="cursor:pointer">Save</a>
-      </div>
-      <div class="note">Your name goes on the order record so there is a trail of who ordered what. The PIN is
-        shared and is a working record, not real security — this page is public.</div>`);
+        <a class="btn" id="obok">Save</a></div>
+      <div class="note">Your name goes on the order record. The PIN is shared and is a working record, not
+        security — this page is public.</div>`);
     document.getElementById("obok").onclick=()=>{
-      const user=document.getElementById("obname").value.trim();
-      const pin=document.getElementById("obpin").value.trim();
+      const user=document.getElementById("obname").value.trim(), pin=document.getElementById("obpin").value.trim();
       if(!user||!pin) return;
-      try{ localStorage.setItem("ob_identity",JSON.stringify({user,pin})); }catch(e){}
+      try{localStorage.setItem("ob_identity",JSON.stringify({user,pin}));}catch(e){}
       closeModal(); res({user,pin});
     };
   });
@@ -1069,184 +1187,49 @@ async function post(payload){
   if(!WEBAPP_URL) throw new Error("no-webapp");
   const id=await askIdentity();
   let res;
-  try{
-    /* A string body sends as text/plain: a "simple" request needing no CORS preflight,
-       which an Apps Script web app cannot answer. A JSON content-type fails. */
-    res=await fetch(WEBAPP_URL,{method:"POST",body:JSON.stringify(Object.assign({pin:id.pin,user:id.user},payload)),redirect:"follow"});
-  }catch(e){
-    throw new Error("Couldn't reach the save endpoint. In Apps Script check Deploy → Manage deployments → edit: "
-      +"'Who has access' must be Anyone, and the /exec URL must be the current version. Nothing was saved.");
-  }
+  /* A string body sends as text/plain: a simple request with no CORS preflight, which an
+     Apps Script web app cannot answer. */
+  try{ res=await fetch(WEBAPP_URL,{method:"POST",body:JSON.stringify(Object.assign({pin:id.pin,user:id.user},payload)),redirect:"follow"}); }
+  catch(e){ throw new Error("Couldn't reach the save endpoint. In Apps Script check Deploy → Manage deployments: access must be Anyone, and the /exec URL current. Nothing was saved."); }
   const txt=await res.text();
   let j; try{ j=JSON.parse(txt); }catch(e){ throw new Error("Unexpected reply from the web app (not JSON). Is the deployment set to 'Anyone'?"); }
   if(!j.ok) throw new Error(j.error||"save failed");
   return j;
 }
 function buildPayload(action){
-  const t=orderTotals(SUPPLIER), d=draft(SUPPLIER);
-  return { order_id:"o"+Date.now().toString(36), action:action, supplier:SUPPLIER, venue:d.venue,
-           order_date:fmtISO(new Date()), subtotal:t.sub, gst:t.gst, total:t.total,
-           channel:(OSET[norm(SUPPLIER)]||{}).channel||"email", note:d.note||"",
-           lines:t.lines.map((l,i)=>({line_no:i+1,item_code:l.code,description:l.desc,unit:l.unit,
-                                      qty:l.qty,unit_price:l.price,line_total:l.total})) };
+  const venue=STORE.name, t=orderTotals(SUPPLIER,venue);
+  return {order_id:"o"+Date.now().toString(36),action,supplier:SUPPLIER,venue,
+    order_date:fmtISO(new Date()),subtotal:t.sub,gst:t.gst,total:t.total,
+    channel:sset(SUPPLIER).portal_only?"portal":"email",
+    lines:t.lines.map((l,i)=>({line_no:i+1,item_code:l.code,description:l.desc,unit:l.unit,
+                               qty:l.qty,unit_price:l.price,line_total:l.total}))};
 }
-function localRecord(order){
-  return { id:order.order_id, action:"place", supplier:order.supplier, venue:order.venue,
-           date:mid(new Date()), total:order.total, subtotal:order.subtotal, gst:order.gst,
-           channel:order.channel, by:identity().user||"", logged:new Date() };
-}
-/* Sends through Orders.gs, which resolves the address from the sheet itself — the address
-   shown here is a preview of what it will pick, not an instruction it will follow. */
-function sendNow(){
-  const t=orderTotals(SUPPLIER);
+const localRecord=o=>({id:o.order_id,action:"place",supplier:o.supplier,venue:o.venue,date:mid(new Date()),
+  total:o.total,subtotal:o.subtotal,gst:o.gst,channel:o.channel,by:identity().user||"",logged:new Date()});
+async function markPlaced(){
+  const venue=STORE.name, t=orderTotals(SUPPLIER,venue);
   if(!t.lines.length){ alert("Nothing in this order yet."); return; }
-  const d=draft(SUPPLIER);
-  modal(`<div class="label">Send this order?</div>
-    <div style="font-size:13px;margin-bottom:6px">To <b>${esc(supplierEmail(SUPPLIER))}</b> · ${esc(d.venue)} · ${money(t.total)} inc GST est.</div>
-    <textarea readonly>${esc(orderEmailBody(SUPPLIER))}</textarea>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <a class="btn" id="obsend" style="cursor:pointer">Send and log it</a>
-      <a class="btn outline" onclick="closeModal()" style="cursor:pointer">Cancel</a>
-    </div>
-    <div class="note">A copy is bcc'd to ${esc(SELF_COPY_TO)}.</div>`);
-  document.getElementById("obsend").onclick=async()=>{
-    closeModal();
-    const order=buildPayload("send");
-    try{
-      const j=await post(order);
-      LOCAL_ORDERS.push(localRecord(order));
-      DRAFTS[SUPPLIER]={venue:order.venue,qty:{},note:""}; saveDrafts();
-      toast(j.sent?("Sent to "+j.to+" and logged."):(j.error||"Logged, but not sent."));
-      go("");
-    }catch(e){ alert(e.message==="no-webapp"?"WEBAPP_URL is not set, so this page can't send. Use the mail app button.":e.message); }
+  const order=buildPayload("place"), local=localRecord(order);
+  const placedLines=t.lines, placedSupplier=SUPPLIER;
+  const finish=msg=>{ LOCAL_ORDERS.push(local); DRAFTS[draftId(SUPPLIER,venue)]={supplier:SUPPLIER,venue,qty:{},note:""};
+                      saveDrafts(); toast(msg); offerFav(placedLines,placedSupplier,venue); };
+  try{ await post(order); finish("Order logged."); }
+  catch(e){ if(e.message==="no-webapp") finish("Logged in this browser only — WEBAPP_URL isn't set.");
+            else alert(e.message); }
+}
+/* Asked after the order is safely logged, never before — a prompt that blocks the order is
+   a prompt people learn to dismiss. */
+function offerFav(lines,supplier,venue){
+  modal(`<div class="label">Save this as a favourite?</div>
+    <div style="font-size:13px;margin-bottom:8px">Give it a name and it can be reloaded as an editable order.</div>
+    <input type="text" id="favname" placeholder="e.g. Monday Produce Run" style="width:100%">
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <a class="btn" id="favok">Save favourite</a><a class="btn outline" onclick="closeModal();go('')">No thanks</a></div>`);
+  document.getElementById("favok").onclick=()=>{
+    const n=document.getElementById("favname").value.trim(); if(!n) return;
+    saveFav(n,lines,supplier,venue);
   };
 }
-async function markPlaced(){
-  const t=orderTotals(SUPPLIER);
-  if(!t.lines.length){ alert("Nothing in this order yet."); return; }
-  const d=draft(SUPPLIER);
-  const order=buildPayload("place");
-  const local=localRecord(order);
-  try{
-    await post(order);
-    LOCAL_ORDERS.push(local);
-    DRAFTS[SUPPLIER]={venue:d.venue,qty:{},note:""}; saveDrafts();
-    toast("Order logged.");
-    go("");
-  }catch(e){
-    if(e.message==="no-webapp"){
-      LOCAL_ORDERS.push(local);
-      DRAFTS[SUPPLIER]={venue:d.venue,qty:{},note:""}; saveDrafts();
-      toast("Logged in this browser only — WEBAPP_URL is not set.");
-      go("");
-    }else{
-      alert(e.message);
-    }
-  }
-}
-async function markReceived(id){
-  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
-  try{
-    await post({order_id:id, action:"receive", supplier:o.supplier, venue:o.venue,
-                order_date:fmtISO(o.date), subtotal:o.subtotal, gst:o.gst, total:o.total});
-  }catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
-  o.action="receive";
-  route();
-}
-
-/* ================= PLACED ORDERS ================= */
-function renderPlaced(){
-  crumb("placed orders");
-  const m=weekModel();
-  const all=ORDERS.concat(LOCAL_ORDERS)
-    .filter(o=>inScopeVenue(o.venue)&&o.date>=addD(m.wk.start,-28))
-    .sort((a,b)=>b.date-a.date);
-  const openIds=new Set(m.open.map(o=>o.id));
-  document.getElementById("app").innerHTML=`
-    ${warnBar()}
-    ${summaryBar(m)}
-    <a class="back" onclick="go('')">All suppliers</a>
-    <div class="card">
-      <div class="label">Orders placed — last 4 weeks · ${esc(SITE.label)}</div>
-      <table>
-        <thead><tr><th>Date</th><th>Supplier</th><th class="hide-sm">Venue</th><th class="num">Total</th><th class="num">Status</th></tr></thead>
-        <tbody>${all.map(o=>`<tr>
-          <td>${fmtD(o.date)}</td>
-          <td><b>${esc(o.supplier)}</b>${o.by?`<br><span style="color:var(--dim);font-size:11px">${esc(o.by)}</span>`:""}</td>
-          <td class="hide-sm">${esc(vShort(o.venue))}</td>
-          <td class="num">${money(o.total)}</td>
-          <td class="num">${openIds.has(o.id)
-            ? `<span class="pill">counting</span> <a class="chip sm" onclick="markReceived('${esc(o.id)}')" style="cursor:pointer">Received</a>`
-            : `<span class="pill ok">closed</span>`}</td>
-        </tr>`).join("")}</tbody>
-      </table>
-      ${all.length?"":'<div class="note">No orders logged yet for this site.</div>'}
-      <div class="note">An order counts against the week's budget until its invoice arrives, it is ticked
-        received, or ${MATCH_DAYS} days pass. Matching is by supplier, venue and date — close enough to stop
-        double counting, not an exact receipt match.</div>
-    </div>`;
-}
-
-/* ================= TARGETS ================= */
-function renderTargets(){
-  crumb("targets");
-  const m=weekModel();
-  const t=targetFor(SITE.venues);
-  document.getElementById("app").innerHTML=`
-    <a class="back" onclick="go('')">All suppliers</a>
-    <div class="card">
-      <div class="label">Weekly target — ${esc(SITE.label)}</div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <span style="font-size:13px">Target COGS %</span>
-        <input type="number" id="tgtpct" min="0" max="100" step="0.5" value="${t.cogs_pct||Math.round(m.pctTarget*10)/10}" style="width:90px">
-        <a class="btn" onclick="saveTarget()" style="cursor:pointer">Save</a>
-      </div>
-      <div class="note">
-        At ${pct1(t.cogs_pct||m.pctTarget)} of a ${money0(m.sales.forecast)} forecast week that is a budget of
-        about <b>${money0(m.sales.forecast*(t.cogs_pct||m.pctTarget)/100)}</b>.<br><br>
-        ${WEBAPP_URL?`Saving writes a row per venue to the <b>OrderTargets</b> tab, so everyone sees the same
-        target.`:`Saving keeps it in this browser only — WEBAPP_URL is not set. For a target the whole team
-        sees, add rows to the <b>OrderTargets</b> tab of BG Ops Data: <b>venue | cogs_pct | weekly_budget</b>.`}
-        A weekly_budget in dollars wins over a percentage.<br><br>
-        Your own last 8 weeks ran at <b>${pct1(trailingCogsPct(INV,SALES,scopeVenues(),m.wk,8))}</b> COGS for this site —
-        that is what the tool falls back to when no target is set. Note the group-wide goal on record is
-        prime cost (COGS + wages) of 30%, which is not the same number as a COGS target.
-      </div>
-    </div>
-    <div class="card">
-      <div class="label">Where the numbers come from</div>
-      <div class="note">
-        <b>Takings</b>: the ImPOS feed from ${esc(SALES_CUTOVER)}, the weekly report forms before that.
-        Today is live and still filling, so the forecast uses the larger of today's takings and its
-        ${DOW_WEEKS}-week day-of-week average.<br>
-        <b>Spend</b>: invoices and manual purchases dated inside the week, COGS groups only — cleaning,
-        equipment, energy, rent and the rest are excluded. Invoices arrive by email over the following days,
-        so a week still running always reads light until the orders you place here fill the gap.<br>
-        <b>GST</b>: estimated per supplier from their own invoices (sum of GST over sum of subtotal), because
-        invoice lines carry no GST. Fresh produce lands near zero, packaging near 10%.<br>
-        <b>No stock count exists</b> anywhere in the platform, so every quantity here is a buying rate, not a
-        shelf level.
-      </div>
-    </div>`;
-}
-async function saveTarget(){
-  const v=+(document.getElementById("tgtpct")||{}).value||0;
-  if(!(v>0&&v<=100)){ alert("Enter a target between 0 and 100."); return; }
-  setLocalTarget(v);
-  if(!WEBAPP_URL){ toast("Target saved for this browser."); route(); return; }
-  try{
-    for(const venue of scopeVenues()){
-      await post({action:"target", venue, cogs_pct:v, weekly_budget:0});
-      TARGETS[venue]={cogs_pct:v, weekly_budget:0};
-    }
-    toast("Target saved to the sheet.");
-  }catch(e){
-    if(e.message!=="no-webapp") alert(e.message+"\n\nIt is still saved in this browser.");
-  }
-  route();
-}
-
-/* ================= GO ================= */
 window.addEventListener("hashchange",route);
 if(!window.__OB_NO_AUTOLOAD) loadAll();
 </script>
