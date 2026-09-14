@@ -104,7 +104,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v2-1735"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v2-1810"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -240,17 +240,17 @@ const CATEGORY_RULES=[
      rule would otherwise claim every one. Vessels are checked before the drink. */
   ["Packaging",/\b(coffee cup|takeaway cup|cup lid|coffee lid|cup carrier)\b/],
   ["Coffee",   /\b(coffee|espresso|arabica|robusta|chai latte|coffee bean)\b/],
-  ["Dairy",    /\b(milk|cream|cheese|butter|yogh?urt|mozzarella|parmesan|feta|haloumi|ricotta|mascarpone|creme fraiche|custard)\b/],
+  ["Dairy",    /\b(milk|cream|cheese|parma blend|butter|egg|yogh?urt|mozzarella|parmesan|feta|haloumi|ricotta|mascarpone|creme fraiche|custard)\b/],
   ["Seafood",  /\b(salmon|prawn|fish|squid|calamari|octopus|mussel|oyster|scallop|barramundi|tuna|anchov\w*)\b/],
   ["Meat",     /\b(beef|chicken|pork|lamb|bacon|rasher|ham|salami\w*|prosciutto|chorizo|sausage|mince|steak|rump|brisket|turkey|duck|pancetta|wing ding|nugget|schnitzel|kransky|meatball)\b/],
-  ["Bakery",   /\b(bread|bun|roll|sourdough|baguette|ciabatta|brioche|croissant|muffin|pastry|focaccia|bagel|wrap|tortilla|pita)\b/],
+  ["Bakery",   /\b(bread|bun|roll|sourdough|baguette|ciabatta|brioche|croissant|muffin|pastry|focaccia|bagel|wrap|tortilla|pita|waffle|pancake|crumpet|scone|donut|doughnut|slice)\b/],
   /* Vocabulary widened from the live catalogue on 14 Sep 2026 — everything here was
      sitting in Uncategorised on a real Cambridge order list. */
-  ["Produce",  /\b(tomato|lettuce|cos|mesclun|roquette|rocket|onion|shallot|leek|potato|carrot|spinach|cucumber|capsicum|mushroom|avocado|lemon|lime|orange|apple|pear|banana|berry|grape|melon|honeydew|rockmelon|watermelon|peach|nectarine|plum|mango|pineapple|kiwi|herb|basil|parsley|coriander|mint|thyme|rosemary|dill|chive|garlic|ginger|chilli|broccoli|cauliflower|zucchini|eggplant|pumpkin|cabbage|wombok|celery|kale|asparagus|bean|pea|corn|radish|beetroot|parsnip|swede|turnip|sprout|salad|slaw|fruit|veg)\b/],
+  ["Produce",  /\b(tomato|lettuce|cos|mesclun|roquette|rocket|onion|shallot|leek|potato|carrot|spinach|cucumber|capsicum|mushroom|avocado|lemon|lime|orange|apple|pear|banana|berry|grape|melon|honeydew|rockmelon|watermelon|peach|nectarine|plum|mango|pineapple|kiwi|herb|basil|parsley|coriander|mint|thyme|rosemary|dill|chive|garlic|ginger|chilli|chilly|broccoli|cauliflower|zucchini|eggplant|pumpkin|cabbage|wombok|celery|kale|asparagus|bean|pea|corn|radish|beetroot|parsnip|swede|turnip|sprout|salad|slaw|fruit|veg)\b/],
   ["Beverage", /\b(juice|soft drink|cola|lemonade|water|soda|kombucha|beer|wine|cider|syrup|cordial|tea|energy drink|tonic)\b/],
   ["Packaging",/\b(cup|lid|napkin|serviette|container|box|bag|tray|straw|cutlery|film|foil|takeaway|clamshell|paper towel)\b/],
   ["Cleaning", /\b(detergent|sanitis\w*|sanitiz\w*|degreas\w*|bleach|cleaner|chemical|glove|dishwash\w*|rinse aid|soap|scourer|bin liner)\b/],
-  ["Dry Goods",/\b(flour|sugar|rice|pasta|oil|vinegar|salt|pepper|spice|sauce|stock|tin|canned|chickpea|lentil|noodle|honey|jam|mayonnaise|mustard|oat|cereal|nut|seed|olive|chip|fry|fries|wedge|hash brown|crouton|polenta|couscous|quinoa|syrup)\b/]
+  ["Dry Goods",/\b(flour|sugar|rice|pasta|oil|vinegar|salt|pepper|spice|sauce|stock|tin|canned|chickpea|lentil|noodle|honey|jam|mayonnaise|mustard|oat|cereal|nut|seed|olive|chip|fry|fries|wedge|hash brown|crouton|polenta|couscous|quinoa|syrup|dim sim|dimsum|spring roll|samosa)\b/]
 ];
 /* Matched against the SINGULARISED description, not the raw one. "Cherry Tomatoes" has to
    hit the same rule as "cherry tomato", and a rule list that spelled out every plural
