@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Builder</title>
+<style>
+  :root {
+    --ink:#111; --paper:#f7f6f3; --line:#ddd; --red:#c8102e; --dim:#777; --green:#1a7f37; --amber:#b45309;
+    --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--paper);color:var(--ink)}
+  header{background:var(--ink);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:6}
+  header .sq{width:13px;height:13px;background:var(--red)}
+  header h1{font-size:16px;font-weight:700;white-space:nowrap}
+  header .crumb{font-size:12px;color:#aaa;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  header button, header a.hbtn{background:none;border:1px solid #555;color:#fff;border-radius:6px;padding:6px 11px;font-size:12px;cursor:pointer;text-decoration:none}
+  header .spacer{margin-left:auto}
+  #filters{background:#fff;border-bottom:1px solid var(--line);padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;top:49px;z-index:5}
+  .chip{border:1px solid var(--line);border-radius:99px;padding:7px 14px;font-size:13px;cursor:pointer;background:#fff;font-weight:600}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .chip.sm{padding:5px 11px;font-size:12px}
+  main{max-width:1240px;margin:0 auto;padding:14px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+  .label{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+  .note{font-size:11px;color:var(--dim);line-height:1.5;margin-top:8px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:1px solid var(--line)}
+  td{padding:8px;border-bottom:1px solid #f0efec;vertical-align:middle}
+  tr.click{cursor:pointer}
+  tr.click:hover{background:#faf9f6}
+  tr.picked{background:#fffbe9}
+  .num{text-align:right;font-family:var(--mono);white-space:nowrap}
+  .up{color:var(--red);font-weight:600}
+  .down{color:var(--green);font-weight:600}
+  .pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em;background:#eee;color:#555}
+  .pill.warn{background:var(--red);color:#fff}
+  .pill.ok{background:var(--green);color:#fff}
+  input[type=search],input[type=text],input[type=number],select{border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:15px;background:#fff;font-family:inherit}
+  input[type=search]{width:100%}
+  .back{display:inline-block;margin-bottom:10px;font-size:14px;color:var(--ink);text-decoration:none;font-weight:600;cursor:pointer}
+  .back:before{content:"← "}
+  .btn{display:inline-block;background:var(--ink);color:#fff;border:none;border-radius:8px;padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center}
+  .btn.outline{background:#fff;color:var(--ink);border:2px solid var(--ink);padding:9px 14px}
+  .btn.danger{background:var(--red)}
+  .btn[disabled]{opacity:.4;cursor:not-allowed}
+  .err{border:1px solid var(--red);color:var(--red);border-radius:10px;padding:12px;font-size:14px;background:#fff;margin-bottom:12px}
+  #status{padding:40px 0;text-align:center;color:var(--dim);font-size:14px}
+
+  /* ---- top summary bar ---- */
+  .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+  .tile{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .tile .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .tile .v{font-size:26px;font-weight:700;font-family:var(--mono);line-height:1.15;margin-top:2px}
+  .tile .sub{font-size:11px;color:var(--dim);margin-top:3px;line-height:1.4}
+  .tile.over .v{color:var(--red)}
+  .tile.good .v{color:var(--green)}
+  .bar{height:12px;border-radius:99px;background:#eee;overflow:hidden;display:flex;margin-top:8px}
+  .bar i{display:block;height:100%}
+  .bar .b1{background:var(--ink)}
+  .bar .b2{background:#8a8a8a}
+  .bar .b3{background:var(--red)}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:6px}
+  .legend span:before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
+  .legend .l1:before{background:var(--ink)} .legend .l2:before{background:#8a8a8a} .legend .l3:before{background:var(--red)}
+
+  /* ---- dual panel ---- */
+  .panels{display:grid;grid-template-columns:1fr 380px;gap:12px;align-items:start}
+  .draft{position:sticky;top:110px}
+  @media (max-width:900px){ .panels{grid-template-columns:1fr} .draft{position:static} .summary{grid-template-columns:1fr} }
+  @media (max-width:600px){ .hide-sm{display:none} td,th{padding:7px 5px} #filters{position:static} }
+
+  /* ---- qty stepper ---- */
+  .qty{display:inline-flex;align-items:center;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .qty button{width:38px;height:38px;border:none;background:#fff;font-size:19px;font-weight:700;cursor:pointer;color:var(--ink);line-height:1}
+  .qty button:active{background:#eee}
+  .qty input{width:52px;height:38px;border:none;border-left:1px solid var(--line);border-right:1px solid var(--line);text-align:center;font-family:var(--mono);font-size:15px;padding:0;border-radius:0}
+  .qty.on{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+  .dline{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #f0efec;font-size:13px}
+  .dline .g{flex:1;min-width:0}
+  .dline .g b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis}
+  .tot{display:flex;justify-content:space-between;font-size:13px;padding:3px 0}
+  .tot.big{font-size:17px;font-weight:700;font-family:var(--mono);border-top:1px solid var(--line);margin-top:6px;padding-top:8px}
+  textarea{width:100%;min-height:190px;border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px;line-height:1.5}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal .box{background:#fff;border-radius:12px;padding:18px;max-width:640px;width:100%;max-height:88vh;overflow:auto}
+  @media print { header,#filters,.draft,.btn{display:none!important} body{background:#fff} .card{border:none;padding:0} }
+</style>
+</head>
+<body>
+<header>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Order Builder</h1><span id="buildtag" style="font-size:9px;color:#666;margin-left:6px"></span></a>
+  <div class="crumb" id="crumb"></div>
+  <span class="spacer"></span>
+  <a class="hbtn" onclick="go('placed')" style="cursor:pointer">Placed</a>
+  <a class="hbtn" onclick="go('set')" style="cursor:pointer">⚙ Targets</a>
+  <button onclick="loadAll()">↻ refresh</button>
+</header>
+<div id="filters"></div>
+<main id="app"><div id="status">Loading data…</div></main>
+
+<script>
+/* =====================================================================================
+   ORDER BUILDER — stock ordering + weekly spend tracking for Red Square / Luma.
+
+   Reads BG Ops Data (invoices, invoice lines, supplier config, manual purchases, orders)
+   and BG Sales Data (POS sales feed) over gviz, exactly as the other dashboards do.
+   Writes placed orders back through an Apps Script web app (Orders.gs).
+
+   The page is PUBLIC. Never put a credential in it.
+   ===================================================================================== */
+const BUILD_ID = "build-141030"; console.log("Order Builder " + BUILD_ID);
+{ const el=document.getElementById("buildtag"); if(el) el.textContent=BUILD_ID; }
+
+const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
+const SALES_SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
+/* From this date, daily sales come from the ImPOS feed. Before it, from the weekly form
+   sheets. The Sales tab is deliberately NOT read: it is the same figures as the forms by
+   another path (verified 8 Sep 2026, zero dollar differences on 176 week-rows per venue),
+   and reading both double-counted every pre-cutover week in the supplier explorer. */
+const SALES_CUTOVER  = "2026-08-03";
+const WEEKLY_SOURCES = [
+  { id:"10e898xL_QX9THVnxE3UJPdIe5uY7qBvC6PJfdn4k6qQ", gid:"345653728", weekEnd:1,
+    venues:[{name:"Red Square Cambridge", sales:2, wages:3},
+            {name:"Luma Kitchen",         sales:4, wages:5}] },
+  { id:"1WQF6KzCH8JqV3q2ssr0RE8Qsn1fwF6lI6g0NAoMLWUo", gid:"369747867", weekEnd:1,
+    venues:[{name:"Red Square Glenorchy", sales:2, wages:3}] }
+];
+
+/* The /exec URL of the Orders.gs deployment. Empty = the page still builds and dispatches
+   orders (email / copy / print all work), but "mark as placed" cannot log to the sheet,
+   so committed spend won't survive a refresh. Set it once Orders.gs is deployed. */
+const WEBAPP_URL = "";
+
+const COMPANY_BLOCK = ["B & G Fitness Pty Ltd", "Red Square Cafe | Luma Kitchen",
+                       "accounts@redsquarecafe.com.au"];
+const SELF_COPY_TO  = "accounts@redsquarecafe.com.au";
+
+/* Delivery addresses. Cambridge and Luma share 66 Kennedy Drive — the unit numbers you
+   see on paperwork are per-supplier, not universal (Elders call Luma Unit 22; Cambridge
+   has no unit number at all), so no unit number is printed here. Never detect a venue
+   from address text: these two collide. */
+const VENUE_ADDR = {
+  "Red Square Cambridge": "66 Kennedy Drive, Cambridge TAS 7170",
+  "Luma Kitchen":         "66 Kennedy Drive, Cambridge TAS 7170",
+  "Red Square Glenorchy": "2 Howard Road, Glenorchy TAS 7010"
+};
+/* Stock pools where labour does not: Luma draws on Cambridge's fridge, same building, one
+   delivery. So the default ordering site covers both. Glenorchy stands alone. */
+const SITES = [
+  { key:"kennedy",   label:"Cambridge + Luma", venues:["Red Square Cambridge","Luma Kitchen"] },
+  { key:"glenorchy", label:"Glenorchy",        venues:["Red Square Glenorchy"] },
+  { key:"all",       label:"All venues",       venues:[] }
+];
+
+const CAT_DAYS   = 180;  // an item appears in the catalogue if bought in this window
+const RATE_DAYS  = 90;   // suggested quantities and weekly rates are measured over this
+const DOW_WEEKS  = 6;    // weeks of history behind the day-of-week sales profile
+const MATCH_DAYS = 14;   // a placed order stops counting as committed after this long
+
+/* ================= STATE ================= */
+let INV=[], LINES=[], CFG={}, PMERGE={}, ORDERS=[], OSET={}, TARGETS={}, SALES=[], VENUE_LIST=[];
+let SALES_OK=false, LOAD_WARN=[];
+let SITE=SITES[0], WEEK_OFF=0, SUPPLIER="", CATFILT="", SEARCH="";
+let DRAFTS={};              // supplier -> { venue, qty:{key:n}, note }
+let LOCAL_ORDERS=[];        // orders placed this session that the sheet hasn't echoed yet
+
+/* ================= SMALL HELPERS (shared with the other dashboards) ================= */
+const norm  = s => String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+const money = v => (v==null||v==="")?"":"$"+Number(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+const money0= v => "$"+Math.round(Number(v)||0).toLocaleString("en-AU");
+const pct1  = v => (Math.round(v*10)/10)+"%";
+const fmtD  = d => d ? d.toLocaleDateString("en-AU") : "";
+const fmtISO= d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const mid   = d => { const x=new Date(d); x.setHours(0,0,0,0); return x; };
+const addD  = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+n); return x; };
+const weekStart = d => { const x=mid(d); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }; // Monday
+const vShort = v => String(v||"").replace("Red Square ","RS ").replace("Luma Kitchen","Luma");
+const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num_ = v => +String(v||"").replace(/[^0-9.\-]/g,"")||0;
+
+function gvizDate(v){
+  if (v instanceof Date) return v;
+  const s=String(v||"").trim();
+  let m=/Date\((\d+),(\d+),(\d+)/.exec(s);
+  if (m) return new Date(+m[1],+m[2],+m[3]);
+  m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return new Date(+m[1],+m[2]-1,+m[3]);
+  m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);   // dd/mm/yyyy from CSV (AU locale)
+  if (m) return new Date(+m[3],+m[2]-1,+m[1]);
+  return null;
+}
+
+const UNIT_ALIAS={each:"ea",ea:"ea",unit:"ea",units:"ea",pack:"ea",carton:"ctn",cartons:"ctn",ctn:"ctn",ct:"ctn",cs:"ctn",case:"ctn",box:"box",bx:"box",pkt:"pkt",packet:"pkt",pk:"pkt",sleeve:"slv",slv:"slv",bottle:"btl",btl:"btl",kg:"kg",g:"g",l:"l",ltr:"l",litre:"l",tray:"tray",bag:"bag",tub:"tub",doz:"doz",dozen:"doz"};
+function unitNorm(u){ const n=norm(u); return UNIT_ALIAS[n]||n; }
+/* Identical to the supplier explorer's keying, so a product means the same thing in both
+   tools. Codeless identity is the description with keying artefacts stripped. */
+function descNorm(desc){
+  let s=String(desc||"").toLowerCase().trim();
+  s=s.replace(/\s+(?:each|ea)\b\s*(?:x\s*\d+|\(?\s*\d+\s*\)?)?\s*$/,"");
+  s=s.replace(/\s*\(\s*\d+\s*\)\s*$/,"");
+  return norm(s)||norm(desc);
+}
+function prodKey(supplier,code,desc,unit){
+  const hasCode=!!norm(code);
+  let id=hasCode?norm(code):descNorm(desc);
+  const sk=norm(supplier);
+  const g = PMERGE[sk+"|"+norm(code)] || PMERGE[sk+"|"+norm(desc)] || PMERGE[sk+"|"+descNorm(desc)] || PMERGE[sk+"|"+id];
+  const merged=!!g;
+  if(merged) id="grp:"+norm(g);
+  const unitPart=(hasCode||merged)?"":unitNorm(unit||"");
+  return sk+"|"+id+"|"+unitPart;
+}
+
+/* COGS is an EXCLUSION list, not a whitelist — a category the extractor invents lands in
+   COGS and shows up as unmapped, rather than silently vanishing from the number. */
+const NON_COGS=new Set(["cleaning","equipment","repairs","maintenance","utilities","energy",
+  "overheads","admin","insurance","rent","subscriptions","freight","waste","misc","other"]);
+function supGroup(name){ const c=CFG[norm(name)]; return (c&&c.group)||"Ungrouped"; }
+function supActive(name){ const c=CFG[norm(name)]; return c?c.active:true; }
+function rowGroup(r){ const g=supGroup(r.supplier); return g!=="Ungrouped"?g:(r.category||"Ungrouped"); }
+function isCogs(r){ return !NON_COGS.has(String(rowGroup(r)||"").trim().toLowerCase()); }
+
+/* ================= FETCH ================= */
+/* gviz does NOT error on a sheet name that does not exist — it serves the FIRST sheet in
+   the workbook (here, Invoices). The only reliable guard is the header row, so every tab
+   declares the columns its reader needs. A NEW fetchTab call gets no protection until its
+   tab is added here. "Sales" and "Invoices" share a venue column, so a weaker "does any
+   expected column appear" test is not enough. */
+const TAB_COLUMNS = {
+  "Invoices":        ["invoice_number","invoice_date","total"],
+  "InvoiceLines":    ["invoice_number","description","line_total"],
+  "SupplierConfig":  ["supplier","merge_into"],
+  "ProductMerge":    ["supplier","match","into"],
+  "ManualPurchases": ["date","shop","venue","amount"],
+  "Orders":          ["order_id","supplier","venue","order_date"],
+  "OrderSettings":   ["supplier","channel"],
+  "OrderTargets":    ["venue","cogs_pct"]
+};
+async function fetchTab(name){
+  const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(name)}`;
+  const res=await fetch(url);
+  const txt=await res.text();
+  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("tab '"+name+"' not found or not shared");
+  const rows=parseCsv(txt);
+  if(!rows.length) return [];
+  const cols=rows[0].map(c=>String(c||"").toLowerCase().trim());
+  const need=TAB_COLUMNS[name];
+  /* An undeclared tab gets NO protection from the header check, which is how the trap
+     survives a new fetchTab call. Every call site here is known, so an undeclared name is
+     a bug in this file rather than a possibility to tolerate. */
+  if(!need) throw new Error("fetchTab('"+name+"'): no column signature declared in TAB_COLUMNS");
+  const missing=need.filter(c=>cols.indexOf(c)===-1);
+  if(missing.length){
+    console.warn("fetchTab: '"+name+"' answered with columns ["+cols.join(", ")+"] - missing ["
+      +missing.join(", ")+"]. gviz serves the first sheet when a tab is absent.");
+    throw new Error("tab '"+name+"' did not answer with its own columns (missing: "+missing.join(", ")+")");
+  }
+  return rows.slice(1).map(r=>{ const o={}; cols.forEach((c,i)=>{ o[c]= r[i]!==undefined ? r[i] : null; }); return o; });
+}
+
+/* Daily sales from the POS feed, summed server-side by gviz: ~3 rows a day instead of the
+   12k+ item rows behind them. No WHERE clause — column B types as datetime and comparing
+   it to a bare date matched nothing. */
+async function fetchSalesDaily(){
+  const q="select B, C, sum(H) group by B, C label B 'date', C 'venue', sum(H) 'sales'";
+  const url=`https://docs.google.com/spreadsheets/d/${SALES_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=SalesFeed&tq=${encodeURIComponent(q)}`;
+  const res=await fetch(url);
+  const txt=await res.text();
+  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("sales feed not readable");
+  const rows=parseCsv(txt);
+  if(rows.length<2) return [];
+  return rows.slice(1).map(r=>({ date:gvizDate(r[0]), venue:String(r[1]||"").trim(), sales:num_(r[2]) }))
+                      .filter(r=>r.date&&r.venue);
+}
+
+/* Weekly form responses, spread evenly across the seven days ending on Week Ending.
+   Used for dates BEFORE the cutover only. */
+async function fetchWeekly(){
+  const out=[];
+  for(const src of WEEKLY_SOURCES){
+    let rows;
+    try{
+      const url=`https://docs.google.com/spreadsheets/d/${src.id}/gviz/tq?tqx=out:csv&gid=${src.gid}`;
+      const res=await fetch(url);
+      const txt=await res.text();
+      if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("weekly sheet not readable");
+      rows=parseCsv(txt);
+    }catch(e){ console.warn("weekly source skipped:", src.id, e.message); continue; }
+    rows.slice(1).forEach(r=>{
+      const wk=gvizDate(r[src.weekEnd]); if(!wk) return;
+      src.venues.forEach(v=>{
+        const sales=num_(r[v.sales]); if(!sales) return;
+        for(let i=6;i>=0;i--) out.push({date:addD(wk,-i), venue:v.name, sales:sales/7});
+      });
+    });
+  }
+  return out;
+}
+
+function parseCsv(text){
+  const rows=[]; let row=[], field="", inQ=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(inQ){
+      if(ch==='"'){ if(text[i+1]==='"'){field+='"';i++;} else inQ=false; }
+      else field+=ch;
+    }else{
+      if(ch==='"') inQ=true;
+      else if(ch===","){ row.push(field); field=""; }
+      else if(ch==="\n"||ch==="\r"){
+        if(ch==="\r"&&text[i+1]==="\n") i++;
+        row.push(field); field="";
+        if(row.length>1||row[0]!=="") rows.push(row);
+        row=[];
+      }
+      else field+=ch;
+    }
+  }
+  if(field!==""||row.length){ row.push(field); if(row.length>1||row[0]!=="") rows.push(row); }
+  return rows;
+}
+
+/* ================= LOAD ================= */
+async function loadAll(){
+  const app=document.getElementById("app");
+  app.innerHTML='<div id="status">Loading data…</div>';
+  LOAD_WARN=[];
+  try{
+    const warn=(label)=>(e)=>{ LOAD_WARN.push(label+": "+e.message); return []; };
+    const [inv,lines,cfgRows,pmRows,manualRows,orderRows,setRows,tgtRows,feed,weekly]=await Promise.all([
+      fetchTab("Invoices"),
+      fetchTab("InvoiceLines"),
+      fetchTab("SupplierConfig").catch(warn("SupplierConfig")),
+      fetchTab("ProductMerge").catch(()=>[]),      // optional variant-folding map
+      fetchTab("ManualPurchases").catch(warn("ManualPurchases")),
+      fetchTab("Orders").catch(()=>[]),          // absent until the first order is placed
+      fetchTab("OrderSettings").catch(()=>[]),
+      fetchTab("OrderTargets").catch(()=>[]),
+      fetchSalesDaily().catch(warn("sales feed")),
+      fetchWeekly().catch(warn("weekly forms"))
+    ]);
+
+    CFG={};
+    cfgRows.forEach(r=>{
+      const key=norm(r.supplier); if(!key) return;
+      CFG[key]={merge:String(r.merge_into||"").trim(), group:String(r.group||"").trim(),
+                active:String(r.active||"").trim().toLowerCase()!=="no"};
+    });
+    const applyCfg=name=>{ let n=name, seen={}; while(true){ const c=CFG[norm(n)]; if(c&&c.merge&&!seen[norm(c.merge)]){seen[norm(n)]=true;n=c.merge;} else break; } return n; };
+
+    INV=inv.map(r=>({
+      venue:r.venue||"", supplier:r.supplier||"", number:String(r.invoice_number||""),
+      date:gvizDate(r.invoice_date)||gvizDate(r.scanned),
+      scanned:gvizDate(r.scanned)||gvizDate(r.invoice_date),
+      subtotal:num_(r.subtotal), gst:num_(r.gst), total:num_(r.total),
+      category:r.category||"", type:r.type||"invoice", src:r.source||""
+    })).filter(r=>r.supplier&&r.date&&r.type!=="superseded");
+
+    // Canonical spelling per supplier: the variant that appears most often wins.
+    const variants={};
+    INV.forEach(r=>{const k=norm(r.supplier);(variants[k]=variants[k]||{})[r.supplier]=(variants[k][r.supplier]||0)+1;});
+    const canon={};
+    Object.entries(variants).forEach(([k,v])=>{canon[k]=Object.entries(v).sort((a,b)=>b[1]-a[1])[0][0];});
+    INV.forEach(r=>{ r.supplier=applyCfg(canon[norm(r.supplier)]||r.supplier); });
+
+    // Manual purchases carry a single amount and no lines: they move spend and COGS, and
+    // never appear in the catalogue.
+    manualRows.forEach(r=>{
+      const amt=num_(r.amount), d=gvizDate(r.date), shop=String(r.shop||"").trim();
+      if(!amt||!d||!shop) return;
+      INV.push({venue:r.venue||"", supplier:shop, number:"", date:d, scanned:d, subtotal:amt, gst:0,
+                total:amt, category:(r.category||"").trim()||"Food", type:"manual", src:""});
+    });
+
+    const byNumber={};
+    INV.forEach(r=>byNumber[norm(r.supplier)+"|"+norm(r.number)]=r);
+    LINES=lines.map(r=>{
+      const cs=applyCfg(canon[norm(r.supplier)]||r.supplier||"");
+      const iv=byNumber[norm(cs)+"|"+norm(String(r.invoice_number||""))];
+      return { number:String(r.invoice_number||""), supplier:cs, venue:r.venue||"",
+               code:String(r.item_code||""), desc:r.description||"", qty:num_(r.qty), unit:r.unit||"",
+               price:num_(r.unit_price), total:num_(r.line_total), date:iv?iv.date:null };
+    }).filter(r=>r.supplier&&r.date);
+
+    PMERGE={};
+    const unwrap=v=>String(v==null?"":v).replace(/^="?|"?$/g,"").trim();
+    pmRows.forEach(r=>{ const s=unwrap(r.supplier), m=unwrap(r.match), i=unwrap(r.into);
+      if(s&&m&&i) PMERGE[norm(s)+"|"+norm(m)]=i; });
+
+    OSET={};
+    setRows.forEach(r=>{
+      const k=norm(r.supplier); if(!k) return;
+      OSET[k]={ email:String(r.email||"").trim(), channel:String(r.channel||"").trim().toLowerCase(),
+                phone:String(r.phone||"").trim(), cutoff:String(r.cutoff||"").trim(),
+                delivery_days:String(r.delivery_days||"").trim(), min_order:num_(r.min_order),
+                account:String(r.account||"").trim(), note:String(r.note||"").trim() };
+    });
+
+    TARGETS={};
+    tgtRows.forEach(r=>{
+      const v=String(r.venue||"").trim(); if(!v) return;
+      TARGETS[v]={ cogs_pct:num_(r.cogs_pct), weekly_budget:num_(r.weekly_budget) };
+    });
+
+    ORDERS=parseOrders(orderRows);
+
+    // Sales: feed from the cutover, weekly forms before it. Never both for the same day.
+    const cut=gvizDate(SALES_CUTOVER);
+    SALES=[];
+    weekly.forEach(w=>{ if(!cut||w.date<cut) SALES.push(w); });
+    feed.forEach(f=>{ if(!cut||f.date>=cut) SALES.push(f); });
+    SALES_OK=feed.length>0;
+    if(!SALES_OK) LOAD_WARN.push("the POS sales feed returned nothing, so COGS % and any target based on sales are unavailable");
+
+    VENUE_LIST=[...new Set(INV.map(r=>r.venue).filter(Boolean))].sort();
+    loadDrafts();
+    renderFilters();
+    route();
+  }catch(e){
+    app.innerHTML=`<div class="err">Couldn't load the sheet: ${esc(e.message)}<br><br>Check SHEET_ID, and that the workbook is shared as "Anyone with the link – Viewer".</div>`;
+  }
+}
+
+/* Orders is append-only, one row per event, so the last row for an order_id wins.
+   Keeping the history means a mis-tick can be corrected without editing the sheet. */
+function parseOrders(rows){
+  const byId={};
+  rows.forEach(r=>{
+    const id=String(r.order_id||"").trim(); if(!id) return;
+    const d=gvizDate(r.order_date);
+    const logged=gvizDate(r.logged_at)||d;
+    const prev=byId[id];
+    const rec={ id, action:String(r.action||"place").trim().toLowerCase(), supplier:String(r.supplier||"").trim(),
+                venue:String(r.venue||"").trim(), date:d, total:num_(r.total), subtotal:num_(r.subtotal),
+                gst:num_(r.gst), channel:String(r.channel||"").trim(), by:String(r.placed_by||"").trim(),
+                logged:logged };
+    if(!prev || (logged&&prev.logged&&logged>=prev.logged) || !prev.logged) byId[id]=Object.assign({},prev||{},rec);
+  });
+  return Object.values(byId).filter(o=>o.date&&o.supplier&&o.action!=="cancel");
+}
+
+/* ================= WEEK, SALES, BUDGET ================= */
+function scopeVenues(){ return SITE.venues.length?SITE.venues:VENUE_LIST.slice(); }
+function inScopeVenue(v){ return !SITE.venues.length || SITE.venues.indexOf(v)>=0; }
+function currentWeek(today){
+  const s=addD(weekStart(today||new Date()), WEEK_OFF*7);
+  const e=addD(s,6); e.setHours(23,59,59,999);
+  return {start:s, end:e};
+}
+function weekLabel(wk){ return fmtD(wk.start)+" – "+fmtD(wk.end)+(WEEK_OFF===0?" (this week)":WEEK_OFF===-1?" (last week)":""); }
+
+/* Daily sales for the venues in scope, keyed yyyy-mm-dd. */
+function dailySales(rows, venues){
+  const m={};
+  (rows||[]).forEach(r=>{
+    if(!r.date) return;
+    if(venues.length && venues.indexOf(r.venue)===-1) return;
+    const k=fmtISO(r.date); m[k]=(m[k]||0)+(r.sales||0);
+  });
+  return m;
+}
+/* Average takings by day of week over the weeks BEFORE this one. A day with no rows at
+   all is "no data", not "zero takings" — a closed day has no feed rows, so counting it as
+   zero would drag the profile down; skipping it means a day closed every week profiles at
+   0 (n stays 0) while an occasional closure averages the days that did trade. */
+function dowProfile(map, weekStartDate, weeks){
+  const acc=Array.from({length:7},()=>({s:0,n:0}));
+  for(let w=1;w<=weeks;w++) for(let d=0;d<7;d++){
+    const v=map[fmtISO(addD(weekStartDate,-7*w+d))];
+    if(v===undefined) continue;
+    acc[d].s+=v; acc[d].n++;
+  }
+  return acc.map(a=>a.n?a.s/a.n:0);
+}
+/* Week takings: actual for finished days, the day-of-week average for days still to come.
+   Today takes whichever is larger — the feed is live day-to-date, so by mid-afternoon the
+   actual is real but incomplete, and by close it beats the average. */
+function forecastWeek(map, wk, today, profile){
+  const t=mid(today||new Date()); let actual=0, forecast=0; const days=[];
+  for(let d=0;d<7;d++){
+    const dt=addD(wk.start,d), iso=fmtISO(dt), a=map[iso]||0;
+    const isToday=+dt===+t, past=+dt<+t;
+    const used = past ? a : (isToday ? Math.max(a, profile[d]||0) : (profile[d]||0));
+    actual+=a; forecast+=used;
+    days.push({iso, dow:d, actual:a, used, past, isToday, est:!past&&!(isToday&&a>=(profile[d]||0))});
+  }
+  return {actual, forecast, days};
+}
+/* Spend already captured this week: invoices dated inside the week, COGS groups only.
+   Capture lag is real — an invoice emailed on Friday can land on Monday — so this
+   UNDERSTATES a week still running. Orders placed through this tool are what close that
+   gap, which is the whole point of tracking them. */
+function capturedSpend(inv, venues, wk){
+  let cogs=0, all=0, n=0;
+  (inv||[]).forEach(r=>{
+    if(!r.date||r.date<wk.start||r.date>wk.end) return;
+    if(venues.length && venues.indexOf(r.venue)===-1) return;
+    if(!supActive(r.supplier)) return;
+    all+=r.total; n++;
+    if(isCogs(r)) cogs+=r.total;
+  });
+  return {cogs, all, n};
+}
+/* A placed order counts as committed spend until its invoice turns up. Four ways it
+   stops counting, all approximations and all visible on the Placed screen:
+     1. it was ticked received;
+     2. MATCH_DAYS have passed — an order that old is either invoiced under a name we
+        didn't match or it never happened;
+     3. an invoice from that supplier and venue is dated AFTER the order date;
+     4. or dated the SAME day and within a quarter of the order's value.
+
+   Rules 3 and 4 are one rule split by a limitation: the sheet holds invoice dates, not
+   times, so same-day cannot be ordered by the clock. Closing on a bare same-day match
+   made an order placed this afternoon vanish against a delivery that arrived this
+   morning — money spent, showing nowhere. Requiring the amounts to agree keeps the usual
+   same-day delivery closing correctly while an unrelated second order stays counted.
+
+   An invoice settles at most ONE order, oldest first. Without that, two orders to the
+   same supplier in a week are both closed by the first invoice to arrive.
+
+   Double counting is the failure that matters: committed plus captured for one delivery
+   shows a budget blown that isn't, and the tool gets ignored. */
+function openOrders(orders, inv, venues, wk, today){
+  const now=mid(today||new Date());
+  const cands=(orders||[]).filter(o=>
+      o.date && o.date>=wk.start && o.date<=wk.end &&
+      (!venues.length||venues.indexOf(o.venue)>=0) &&
+      o.action!=="receive" &&
+      (+now - +mid(o.date))/864e5 <= MATCH_DAYS
+    ).sort((a,b)=>a.date-b.date);
+  const pool=(inv||[]).filter(r=>r.date&&(!venues.length||venues.indexOf(r.venue)>=0))
+                      .map(r=>({r, used:false}));
+  const out=[];
+  cands.forEach(o=>{
+    const od=+mid(o.date), tol=Math.max(o.total*0.25, 20);
+    const hit=pool.find(p=>{
+      if(p.used) return false;
+      if(norm(p.r.supplier)!==norm(o.supplier) || p.r.venue!==o.venue) return false;
+      const id=+mid(p.r.date), gap=(id-od)/864e5;
+      if(gap<0 || gap>MATCH_DAYS) return false;
+      return gap>0 || Math.abs(p.r.total-o.total)<=tol;
+    });
+    if(hit){ hit.used=true; return; }
+    out.push(o);
+  });
+  return out;
+}
+/* Target for the site: a fixed weekly dollar budget wins if one is set, else target COGS %
+   of forecast takings. With neither set the tool shows the trailing actual as a placeholder
+   and says so — an invented target is worse than a visible blank. */
+function targetFor(venues){
+  let pct=0, fixed=0, src=[];
+  (venues.length?venues:VENUE_LIST).forEach(v=>{
+    const t=TARGETS[v]; if(!t) return;
+    if(t.weekly_budget>0){ fixed+=t.weekly_budget; src.push(v); }
+    if(t.cogs_pct>0){ pct=Math.max(pct,t.cogs_pct); src.push(v); }
+  });
+  const local=localTarget();
+  if(!fixed && !pct && local>0) return {cogs_pct:local, weekly_budget:0, basis:"local"};
+  if(fixed) return {cogs_pct:pct, weekly_budget:fixed, basis:"sheet-fixed"};
+  if(pct)   return {cogs_pct:pct, weekly_budget:0, basis:"sheet-pct"};
+  return {cogs_pct:0, weekly_budget:0, basis:"none"};
+}
+function localTarget(){ try{ return +localStorage.getItem("ob_target_"+SITE.key)||0; }catch(e){ return 0; } }
+function setLocalTarget(v){ try{ localStorage.setItem("ob_target_"+SITE.key, String(v||"")); }catch(e){} }
+/* Trailing actual COGS %, used as the placeholder when no target exists. */
+function trailingCogsPct(inv, sales, venues, wk, weeks){
+  const from=addD(wk.start,-7*weeks), to=addD(wk.start,-1);
+  let spend=0, take=0;
+  (inv||[]).forEach(r=>{ if(!r.date||r.date<from||r.date>to) return;
+    if(venues.length&&venues.indexOf(r.venue)===-1) return;
+    if(!supActive(r.supplier)||!isCogs(r)) return; spend+=r.total; });
+  (sales||[]).forEach(s=>{ if(!s.date||s.date<from||s.date>to) return;
+    if(venues.length&&venues.indexOf(s.venue)===-1) return; take+=s.sales; });
+  return take>0 ? spend/take*100 : 0;
+}
+
+/* ================= GST ================= */
+/* Invoice lines carry no GST, so it is estimated per supplier from that supplier's own
+   invoices: sum(gst) / sum(subtotal). Fresh produce suppliers land near 0 and packaging
+   near 10%, which is right — a flat 10% would overstate a fruit and veg order by a tenth.
+   It is an estimate at the ORDER level: a mixed supplier (taxable and GST-free lines)
+   gets their blended rate, not a per-item one, so the label always says "est". */
+function gstRate(supplier){
+  let sub=0, gst=0;
+  const since=Date.now()-CAT_DAYS*864e5;
+  INV.forEach(r=>{
+    if(norm(r.supplier)!==norm(supplier)||r.type==="manual") return;
+    if(!r.date||+r.date<since) return;
+    if(!(r.subtotal>0)) return;
+    sub+=r.subtotal; gst+=r.gst;
+  });
+  if(!(sub>0)) return 0.1;                       // nothing to learn from: assume taxable
+  const r=gst/sub;
+  return r<0.005 ? 0 : Math.min(0.1, Math.round(r*1000)/1000);
+}
+
+/* ================= CATALOGUE ================= */
+/* Derived from InvoiceLines. There is no master product list anywhere in the platform —
+   what you actually buy IS the catalogue, and it stays current with no maintenance.
+   Delivery, freight and levy lines are stripped: they are charges, not stock. */
+function deriveCatalogue(lines, supplier, venues, now, opts){
+  opts=opts||{};
+  const listDays=opts.listDays||CAT_DAYS, rateDays=opts.rateDays||RATE_DAYS;
+  const FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|admin\s*fee/i;
+  const t=+(now||new Date()), listFrom=t-listDays*864e5, rateFrom=t-rateDays*864e5;
+  const map={};
+  (lines||[]).forEach(l=>{
+    if(supplier && l.supplier!==supplier) return;
+    if(!(l.price>0)||!(l.qty>0)||!l.date) return;
+    if(venues.length && venues.indexOf(l.venue)===-1) return;
+    if(FEE.test(l.desc)) return;
+    if(+l.date<listFrom) return;
+    const k=prodKey(l.supplier,l.code,l.desc,l.unit);
+    const p=map[k]||(map[k]={key:k,supplier:l.supplier,code:l.code,desc:l.desc,unit:l.unit,buys:[]});
+    p.desc=l.desc; p.unit=l.unit; p.buys.push(l);
+  });
+  return Object.values(map).map(p=>{
+    p.buys.sort((a,b)=>a.date-b.date);
+    const recent=p.buys.filter(b=>+b.date>=rateFrom);
+    const base=recent.length?recent:p.buys;
+    const qty=base.reduce((s,b)=>s+b.qty,0);
+    const orders=new Set(base.map(b=>norm(b.number))).size||1;
+    /* Rate is measured over the span of the buys themselves, floored at a week — the same
+       basis the supplier explorer uses, so the two tools agree. It reads high for an item
+       first bought late in the window; that is known and deliberate. */
+    const span=Math.max(7,(+base[base.length-1].date - +base[0].date)/864e5+1);
+    p.last=p.buys[p.buys.length-1];
+    p.price=p.last.price;
+    p.lastQty=p.last.qty;
+    p.avgPerOrder=qty/orders;
+    p.avgQtyWk=qty/(span/7);
+    p.ordersPerWk=orders/(span/7);
+    p.daysSince=Math.round((t-+p.last.date)/864e5);
+    p.stale=+p.last.date<rateFrom;
+    p.suggested=Math.max(1,Math.round(p.avgPerOrder));
+    p.prevPrice=null;
+    for(let i=p.buys.length-2;i>=0;i--){ if(p.buys[i].price!==p.price){ p.prevPrice=p.buys[i].price; break; } }
+    p.change=p.prevPrice?(p.price-p.prevPrice)/p.prevPrice*100:null;
+    return p;
+  }).sort((a,b)=> b.ordersPerWk-a.ordersPerWk || a.desc.localeCompare(b.desc));
+}
+
+/* Suppliers worth showing in the picker: anything bought from in the catalogue window. */
+function supplierList(venues, now){
+  const t=+(now||new Date()), from=t-CAT_DAYS*864e5, m={};
+  INV.forEach(r=>{
+    if(r.type==="manual"||!r.date||+r.date<from) return;
+    if(venues.length&&venues.indexOf(r.venue)===-1) return;
+    if(!supActive(r.supplier)) return;
+    const s=m[r.supplier]||(m[r.supplier]={name:r.supplier,spend:0,n:0,last:null});
+    s.spend+=r.total; s.n++;
+    if(!s.last||r.date>s.last) s.last=r.date;
+  });
+  const wks=CAT_DAYS/7;
+  return Object.values(m).map(s=>{
+    s.group=supGroup(s.name);
+    s.avgWk=s.spend/wks;
+    s.daysSince=Math.round((t-+s.last)/864e5);
+    s.lines=LINES.some(l=>l.supplier===s.name);
+    return s;
+  }).sort((a,b)=>b.avgWk-a.avgWk);
+}
+
+/* Supplier ordering email: an OrderSettings row wins, else the address seen most often on
+   that supplier's own invoice emails, preferring real mailboxes over no-reply relays. */
+function supplierEmail(name){
+  const cfg=OSET[norm(name)];
+  if(cfg&&cfg.email) return cfg.email;
+  const tally={};
+  INV.filter(r=>r.supplier===name).forEach(r=>{
+    (String(r.src||"").match(/[\w.+-]+@[\w.-]+\.\w+/g)||[]).forEach(e=>{
+      e=e.toLowerCase();
+      if(/redsquarecafe|beckitt|bgfitness|lumakitchen/.test(e)) return;
+      const w=/sent-via|noreply|no-reply|donotreply|notifications?@|mailer|bounce/.test(e)?1:10;
+      tally[e]=(tally[e]||0)+w;
+    });
+  });
+  const best=Object.entries(tally).sort((a,b)=>b[1]-a[1])[0];
+  return best?best[0]:"";
+}
+
+/* ================= DRAFTS ================= */
+const DRAFT_KEY="ob_drafts_v2";
+function loadDrafts(){
+  try{ DRAFTS=JSON.parse(localStorage.getItem(DRAFT_KEY)||"{}")||{}; }catch(e){ DRAFTS={}; }
+}
+function saveDrafts(){ try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(DRAFTS)); }catch(e){} }
+function draft(supplier){
+  const d=DRAFTS[supplier]||(DRAFTS[supplier]={venue:defaultVenue(), qty:{}, note:""});
+  if(!d.venue||VENUE_LIST.indexOf(d.venue)===-1) d.venue=defaultVenue();
+  return d;
+}
+function defaultVenue(){ const v=scopeVenues(); return v[0]||VENUE_LIST[0]||""; }
+function setQty(supplier,key,n){
+  const d=draft(supplier);
+  n=Math.max(0,Math.round(Number(n)||0));
+  if(n) d.qty[key]=n; else delete d.qty[key];
+  saveDrafts();
+}
+function draftLines(supplier){
+  const d=DRAFTS[supplier]; if(!d) return [];
+  const cat=deriveCatalogue(LINES, supplier, scopeVenues(), new Date());
+  const by={}; cat.forEach(p=>by[p.key]=p);
+  return Object.keys(d.qty).map(k=>{
+    const p=by[k]; if(!p) return null;
+    const qty=d.qty[k];
+    return {key:k, code:p.code, desc:p.desc, unit:p.unit, qty, price:p.price, total:qty*p.price};
+  }).filter(Boolean);
+}
+function orderTotals(supplier){
+  const lines=draftLines(supplier), rate=gstRate(supplier);
+  const sub=lines.reduce((s,l)=>s+l.total,0);
+  const gst=sub*rate;
+  return {lines, sub, gst, total:sub+gst, rate};
+}
+/* Every draft on screen counts against the week, not just the supplier being edited —
+   otherwise the countdown lies the moment you start a second order. */
+function allDraftTotal(){
+  let t=0;
+  Object.keys(DRAFTS).forEach(s=>{
+    const d=DRAFTS[s]; if(!d||!inScopeVenue(d.venue)) return;
+    t+=orderTotals(s).total;
+  });
+  return t;
+}
+
+/* ================= MODEL FOR THE SUMMARY BAR ================= */
+function weekModel(today){
+  const venues=scopeVenues(), wk=currentWeek(today), now=today||new Date();
+  const map=dailySales(SALES, venues);
+  const profile=dowProfile(map, wk.start, DOW_WEEKS);
+  const sales=forecastWeek(map, wk, now, profile);
+  const cap=capturedSpend(INV, venues, wk);
+  const open=openOrders(ORDERS.concat(LOCAL_ORDERS), INV, venues, wk, now);
+  const committed=open.reduce((s,o)=>s+o.total,0);
+  const drafted=allDraftTotal();
+  const tgt=targetFor(SITE.venues);
+  let budget=0, basis=tgt.basis, pctTarget=tgt.cogs_pct;
+  if(tgt.weekly_budget>0) budget=tgt.weekly_budget;
+  else if(tgt.cogs_pct>0) budget=sales.forecast*tgt.cogs_pct/100;
+  else {
+    pctTarget=trailingCogsPct(INV, SALES, venues, wk, 8);
+    budget=sales.forecast*pctTarget/100;
+    basis="placeholder";
+  }
+  const used=cap.cogs+committed+drafted;
+  return {wk, venues, sales, cap, open, committed, drafted, used, budget, basis, pctTarget,
+          remaining:budget-used,
+          cogsActual: sales.actual>0 ? cap.cogs/sales.actual*100 : 0,
+          cogsProjected: sales.forecast>0 ? used/sales.forecast*100 : 0};
+}
+
+/* ================= RENDER: FILTER BAR ================= */
+function renderFilters(){
+  const f=document.getElementById("filters");
+  f.innerHTML=`
+    ${SITES.map(s=>`<span class="chip ${SITE.key===s.key?"on":""}" onclick="setSite('${s.key}')">${esc(s.label)}</span>`).join("")}
+    <span style="flex:1"></span>
+    <span class="chip sm" onclick="stepWeek(-1)">‹</span>
+    <span class="chip sm on" style="cursor:default">${esc(weekLabel(currentWeek()))}</span>
+    <span class="chip sm" onclick="stepWeek(1)" ${WEEK_OFF>=0?'style="opacity:.35"':""}>›</span>`;
+}
+function setSite(k){ SITE=SITES.find(s=>s.key===k)||SITES[0]; SUPPLIER=""; renderFilters(); route(); }
+function stepWeek(d){ if(WEEK_OFF+d>0) return; WEEK_OFF+=d; renderFilters(); route(); }
+function go(hash){ location.hash=hash; route(); }
+function crumb(t){ document.getElementById("crumb").textContent=t||""; }
+
+/* ================= RENDER: SUMMARY BAR ================= */
+function summaryBar(m){
+  const b=Math.max(m.budget,1);
+  const seg=v=>Math.max(0,Math.min(100,v/b*100));
+  const over=m.used>m.budget&&m.budget>0;
+  const tgtNote = m.basis==="placeholder"
+      ? `No target set. Showing your own last 8 weeks (${pct1(m.pctTarget)}) as a placeholder — <a onclick="go('set')" style="cursor:pointer;text-decoration:underline">set a real one</a>.`
+      : m.basis==="sheet-fixed" ? `Fixed weekly budget from OrderTargets.`
+      : m.basis==="local" ? `Target ${pct1(m.pctTarget)} of takings (this browser only — <a onclick="go('set')" style="cursor:pointer;text-decoration:underline">save it to the sheet</a>).`
+      : `Target ${pct1(m.pctTarget)} of takings.`;
+  const cogsCls = m.pctTarget>0 ? (m.cogsProjected<=m.pctTarget?"good":"over") : "";
+  return `
+  <div class="summary">
+    <div class="tile ${over?"over":""}">
+      <div class="k">Left to spend this week</div>
+      <div class="v">${m.budget>0?money0(m.remaining):"—"}</div>
+      <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i></div>
+      <div class="legend">
+        <span class="l1">Invoiced ${money0(m.cap.cogs)}</span>
+        <span class="l2">Ordered ${money0(m.committed)}</span>
+        <span class="l3">This draft ${money0(m.drafted)}</span>
+      </div>
+      <div class="sub">${money0(m.used)} of ${money0(m.budget)} budget${over?" — <b style='color:var(--red)'>over</b>":""}</div>
+    </div>
+    <div class="tile ${cogsCls}">
+      <div class="k">COGS % — projected</div>
+      <div class="v">${m.sales.forecast>0?pct1(m.cogsProjected):"—"}</div>
+      <div class="sub">${m.sales.actual>0?`${pct1(m.cogsActual)} on takings so far (${money0(m.sales.actual)}).`:""}
+        Week forecast ${money0(m.sales.forecast)}.<br>${tgtNote}</div>
+    </div>
+    <div class="tile">
+      <div class="k">Orders on the go</div>
+      <div class="v">${money0(m.drafted)}</div>
+      <div class="sub">${Object.keys(DRAFTS).filter(s=>Object.keys(DRAFTS[s].qty||{}).length).length} draft(s) open ·
+        ${m.open.length} placed, not yet invoiced (${money0(m.committed)})</div>
+    </div>
+  </div>`;
+}
+
+function warnBar(){
+  if(!LOAD_WARN.length) return "";
+  return `<div class="err"><b>Some data didn't load.</b><br>${LOAD_WARN.map(esc).join("<br>")}</div>`;
+}
+
+/* ================= ROUTING ================= */
+function route(){
+  const h=decodeURIComponent(location.hash.slice(1));
+  if(h==="set") return renderTargets();
+  if(h==="placed") return renderPlaced();
+  if(h.startsWith("s::")){ SUPPLIER=h.slice(3); return renderBuilder(); }
+  SUPPLIER=""; renderHome();
+}
+
+/* ================= HOME: pick a supplier ================= */
+function renderHome(){
+  crumb("");
+  const m=weekModel();
+  const sups=supplierList(scopeVenues());
+  const groups=[...new Set(sups.map(s=>s.group))].filter(g=>g&&g!=="Ungrouped").sort();
+  const shown=sups.filter(s=>!CATFILT||s.group===CATFILT);
+  document.getElementById("app").innerHTML=`
+    ${warnBar()}
+    ${summaryBar(m)}
+    <div class="card">
+      <div class="label">Start an order — ${esc(SITE.label)}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <span class="chip sm ${CATFILT?"":"on"}" onclick="setCat('')">All</span>
+        ${groups.map(g=>`<span class="chip sm ${CATFILT===g?"on":""}" onclick="setCat('${esc(g)}')">${esc(g)}</span>`).join("")}
+      </div>
+      <table>
+        <thead><tr><th>Supplier</th><th class="num hide-sm">Avg spend/wk</th><th class="num hide-sm">Last delivery</th><th class="num">Draft</th></tr></thead>
+        <tbody>${shown.map(s=>{
+          const d=DRAFTS[s.name], n=d?Object.keys(d.qty||{}).length:0;
+          return `<tr class="click ${n?"picked":""}" onclick="go('s::${encodeURIComponent(s.name)}')">
+            <td><b>${esc(s.name)}</b>${s.group!=="Ungrouped"?` <span class="pill">${esc(s.group)}</span>`:""}
+                ${s.lines?"":' <span class="pill warn">no line items</span>'}</td>
+            <td class="num hide-sm">${money(s.avgWk)}</td>
+            <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
+            <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
+          </tr>`;}).join("")}</tbody>
+      </table>
+      <div class="note">Suppliers you have bought from in the last ${CAT_DAYS} days, busiest first. A supplier
+        marked <b>no line items</b> has invoices but no itemised lines captured, so there is nothing to build an
+        order from — order it the old way and log it under Placed.</div>
+    </div>`;
+}
+function setCat(g){ CATFILT=g; route(); }
+
+/* ================= BUILDER ================= */
+function renderBuilder(){
+  const name=SUPPLIER;
+  crumb(name);
+  const m=weekModel();
+  const cat=deriveCatalogue(LINES, name, scopeVenues(), new Date());
+  const d=draft(name);
+  const q=SEARCH.trim().toLowerCase();
+  const rows=cat.filter(p=>!q||p.desc.toLowerCase().includes(q)||String(p.code).toLowerCase().includes(q));
+  const cfg=OSET[norm(name)]||{};
+  const email=supplierEmail(name);
+  const t=orderTotals(name);
+
+  document.getElementById("app").innerHTML=`
+    ${warnBar()}
+    ${summaryBar(m)}
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="panels">
+      <div>
+        <div class="card">
+          <div class="label">${esc(name)} — catalogue</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+            <input type="search" id="csearch" placeholder="Find an item…" value="${esc(SEARCH)}" style="flex:1;min-width:180px">
+            <span class="chip sm" onclick="suggestAll()">Fill suggested</span>
+            <span class="chip sm" onclick="clearDraft()">Clear</span>
+          </div>
+          ${cfg.delivery_days||cfg.cutoff||cfg.min_order?`<div class="note" style="margin:0 0 8px">
+            ${cfg.delivery_days?`Delivers: <b>${esc(cfg.delivery_days)}</b>. `:""}
+            ${cfg.cutoff?`Cut-off: <b>${esc(cfg.cutoff)}</b>. `:""}
+            ${cfg.min_order?`Minimum order <b>${money(cfg.min_order)}</b>. `:""}
+            ${cfg.account?`Account ${esc(cfg.account)}.`:""}</div>`:""}
+          <table>
+            <thead><tr><th>Item</th><th class="num hide-sm">Price</th><th class="num hide-sm">Usual</th><th class="num hide-sm">Last</th><th class="num">Qty</th></tr></thead>
+            <tbody>${rows.map(p=>`
+              <tr class="${d.qty[p.key]?"picked":""}">
+                <td><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}
+                    ${p.code?`<br><span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(p.code)}</span>`:""}
+                    ${p.stale?' <span class="pill">not bought lately</span>':""}</td>
+                <td class="num hide-sm">${money(p.price)}${p.change!=null?`<br><span class="${p.change>0?"up":"down"}" style="font-size:11px">${(p.change>0?"+":"")+Math.round(p.change*10)/10}%</span>`:""}</td>
+                <td class="num hide-sm">${Math.round(p.avgPerOrder*10)/10}<br><span style="color:var(--dim);font-size:11px">${Math.round(p.avgQtyWk*10)/10}/wk</span></td>
+                <td class="num hide-sm">${p.daysSince}d<br><span style="color:var(--dim);font-size:11px">${p.lastQty} ${esc(p.unit||"")}</span></td>
+                <td class="num">
+                  <span class="qty ${d.qty[p.key]?"on":""}">
+                    <button onclick="bump('${esc(p.key)}',-1)">−</button>
+                    <input type="number" min="0" step="1" value="${d.qty[p.key]||0}" data-k="${esc(p.key)}" onchange="typed(this)">
+                    <button onclick="bump('${esc(p.key)}',1)">+</button>
+                  </span>
+                  <div style="font-size:11px;color:var(--dim);margin-top:2px">${d.qty[p.key]?money(d.qty[p.key]*p.price):"&nbsp;"}</div>
+                </td>
+              </tr>`).join("")}</tbody>
+          </table>
+          ${rows.length?"":'<div class="note">Nothing bought from this supplier for this site in the last '+CAT_DAYS+' days.</div>'}
+          <div class="note">Prices are what you last paid, from the invoice lines. <b>Usual</b> is your average
+            quantity per order over ${RATE_DAYS} days, and the per-week figure under it. No stock count exists,
+            so these are buying rates, not shelf levels.</div>
+        </div>
+      </div>
+
+      <div class="draft">
+        <div class="card">
+          <div class="label">This order</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+            <span style="font-size:12px;color:var(--dim)">Deliver to</span>
+            <select onchange="setDraftVenue(this.value)" style="flex:1;font-size:13px;padding:7px 9px">
+              ${VENUE_LIST.map(v=>`<option ${d.venue===v?"selected":""}>${esc(v)}</option>`).join("")}
+            </select>
+          </div>
+          ${t.lines.length?`
+            <div style="max-height:38vh;overflow:auto">
+              ${t.lines.map(l=>`<div class="dline">
+                <div class="g"><b>${esc(l.desc)}</b>
+                  <span style="color:var(--dim);font-size:11px">${l.qty} × ${money(l.price)} ${esc(l.unit||"")}</span></div>
+                <div class="num" style="font-size:13px">${money(l.total)}</div>
+                <div><button onclick="setQty(SUPPLIER,'${esc(l.key)}',0);route()" title="Remove" style="border:none;background:none;font-size:15px;color:var(--dim);cursor:pointer;padding:2px 4px">✕</button></div>
+              </div>`).join("")}
+            </div>
+            <div style="margin-top:10px">
+              <div class="tot"><span>Subtotal</span><span class="num">${money(t.sub)}</span></div>
+              <div class="tot"><span>GST est. (${Math.round(t.rate*1000)/10}%)</span><span class="num">${money(t.gst)}</span></div>
+              <div class="tot big"><span>Total</span><span>${money(t.total)}</span></div>
+            </div>
+            ${t.total>m.remaining&&m.budget>0?`<div class="note" style="color:var(--red)"><b>This order takes the week ${money0(t.total-m.remaining)} over budget.</b></div>`:
+              m.budget>0?`<div class="note">Leaves ${money0(m.remaining)} for the rest of the week.</div>`:""}
+            ${cfg.min_order&&t.total<cfg.min_order?`<div class="note" style="color:var(--amber)">Under this supplier's ${money(cfg.min_order)} minimum.</div>`:""}
+            <div style="display:grid;gap:8px;margin-top:12px">
+              ${email&&WEBAPP_URL?`<a class="btn" onclick="sendNow()" style="cursor:pointer">✉ Send to ${esc(email)}</a>`:""}
+              ${email?`<a class="btn ${WEBAPP_URL?"outline":""}" onclick="dispatch('email')" style="cursor:pointer">✉ ${WEBAPP_URL?"Open in my mail app instead":"Email "+esc(email)}</a>`
+                     :`<div class="note">No ordering email known for this supplier. Add one in the OrderSettings tab, or copy the text below.</div>`}
+              <a class="btn outline" onclick="dispatch('copy')" style="cursor:pointer">⧉ Copy for SMS / WhatsApp / portal</a>
+              <a class="btn outline" onclick="dispatch('self')" style="cursor:pointer">✉ Email a copy to me</a>
+              <a class="btn outline" onclick="markPlaced()" style="cursor:pointer">✓ Mark as placed</a>
+            </div>
+            <div class="note">Sending does not log the order. Tick <b>Mark as placed</b> so it counts against the
+              week until the invoice arrives.${WEBAPP_URL?"":" <b>WEBAPP_URL is not set</b>, so placed orders live in this browser only."}</div>
+          `:`<div class="note">Nothing added yet. Tap + against an item, or <a onclick="suggestAll()" style="cursor:pointer;text-decoration:underline">fill your usual quantities</a>.</div>`}
+        </div>
+      </div>
+    </div>`;
+  const s=document.getElementById("csearch");
+  if(s) s.addEventListener("input",e=>{ SEARCH=e.target.value; clearTimeout(window.__st); window.__st=setTimeout(route,140); });
+}
+function bump(key,d){
+  const cur=(DRAFTS[SUPPLIER]&&DRAFTS[SUPPLIER].qty[key])||0;
+  setQty(SUPPLIER,key,cur+d); route();
+}
+function typed(el){ setQty(SUPPLIER, el.dataset.k, el.value); route(); }
+function setDraftVenue(v){ draft(SUPPLIER).venue=v; saveDrafts(); route(); }
+function suggestAll(){
+  const cat=deriveCatalogue(LINES, SUPPLIER, scopeVenues(), new Date());
+  cat.filter(p=>!p.stale).forEach(p=>setQty(SUPPLIER,p.key,p.suggested));
+  route();
+}
+function clearDraft(){ if(DRAFTS[SUPPLIER]){ DRAFTS[SUPPLIER].qty={}; saveDrafts(); } route(); }
+
+/* ================= DISPATCH ================= */
+function orderText(supplier, opts){
+  opts=opts||{};
+  const d=draft(supplier), t=orderTotals(supplier);
+  const when=new Date();
+  const pad=s=>String(s);
+  const lines=t.lines.map(l=>{
+    const left=`${l.qty} x ${l.unit||"ea"}`;
+    return `- ${pad(left)}  ${l.desc}${l.code?" ["+l.code+"]":""}`+(opts.prices?`   ${money(l.price)} ea`:"");
+  });
+  const head=[
+    `Order — ${d.venue}`,
+    `Date: ${fmtD(when)}`,
+    VENUE_ADDR[d.venue]?`Deliver to: ${VENUE_ADDR[d.venue]}`:"",
+    (OSET[norm(supplier)]&&OSET[norm(supplier)].account)?`Account: ${OSET[norm(supplier)].account}`:""
+  ].filter(Boolean);
+  const tail=opts.prices?[``,`Estimated ${money(t.sub)} + ${money(t.gst)} GST = ${money(t.total)}`]:[];
+  const note=d.note?[``,d.note]:[];
+  return head.join("\n")+"\n\n"+lines.join("\n")+tail.join("\n")+note.join("\n");
+}
+function orderEmailBody(supplier){
+  const d=draft(supplier);
+  return `Hi ${supplier},\n\nCould we please order the following for ${d.venue}:\n\n`
+       + orderText(supplier,{prices:false}).split("\n\n").slice(1).join("\n\n")
+       + `\n\nPlease confirm availability and delivery day.\n\nThanks,\n${identity().user||"Red Square"}\n`
+       + COMPANY_BLOCK.join("\n");
+}
+function mailto(to,subject,body){ return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`; }
+function dispatch(how){
+  const t=orderTotals(SUPPLIER);
+  if(!t.lines.length){ alert("Nothing in this order yet."); return; }
+  const d=draft(SUPPLIER);
+  if(how==="email"){
+    const to=supplierEmail(SUPPLIER);
+    location.href=mailto(to, `Order — ${d.venue} — ${fmtD(new Date())}`, orderEmailBody(SUPPLIER));
+  }else if(how==="self"){
+    location.href=mailto(SELF_COPY_TO, `Order copy — ${SUPPLIER} — ${d.venue}`, orderText(SUPPLIER,{prices:true}));
+  }else{
+    const txt=orderText(SUPPLIER,{prices:false});
+    copyText(txt);
+  }
+}
+function copyText(txt){
+  const done=()=>toast("Copied — paste it into the message.");
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done,()=>showCopyBox(txt));
+  }else showCopyBox(txt);
+}
+function showCopyBox(txt){
+  modal(`<div class="label">Copy this order</div><textarea id="cpbox">${esc(txt)}</textarea>
+    <div style="margin-top:10px"><a class="btn" onclick="closeModal()" style="cursor:pointer">Done</a></div>`);
+  const el=document.getElementById("cpbox"); if(el){ el.focus(); el.select(); }
+}
+function toast(msg){
+  const el=document.createElement("div");
+  el.textContent=msg;
+  el.style.cssText="position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#111;color:#fff;padding:11px 18px;border-radius:8px;font-size:14px;z-index:30";
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(),2400);
+}
+function modal(html){
+  closeModal();
+  const w=document.createElement("div");
+  w.className="modal"; w.id="obmodal";
+  w.innerHTML=`<div class="box">${html}</div>`;
+  w.addEventListener("click",e=>{ if(e.target===w) closeModal(); });
+  document.body.appendChild(w);
+}
+function closeModal(){ const m=document.getElementById("obmodal"); if(m) m.remove(); }
+
+/* ================= PLACING (writes to the sheet) ================= */
+function identity(){
+  try{ return JSON.parse(localStorage.getItem("ob_identity")||"{}")||{}; }catch(e){ return {}; }
+}
+function askIdentity(){
+  const id=identity();
+  if(id.user&&id.pin) return Promise.resolve(id);
+  return new Promise(res=>{
+    modal(`<div class="label">Who is placing this order?</div>
+      <div style="display:grid;gap:8px">
+        <input type="text" id="obname" placeholder="Your name" value="${esc(id.user||"")}">
+        <input type="text" id="obpin" placeholder="Shared PIN" value="${esc(id.pin||"")}">
+        <a class="btn" id="obok" style="cursor:pointer">Save</a>
+      </div>
+      <div class="note">Your name goes on the order record so there is a trail of who ordered what. The PIN is
+        shared and is a working record, not real security — this page is public.</div>`);
+    document.getElementById("obok").onclick=()=>{
+      const user=document.getElementById("obname").value.trim();
+      const pin=document.getElementById("obpin").value.trim();
+      if(!user||!pin) return;
+      try{ localStorage.setItem("ob_identity",JSON.stringify({user,pin})); }catch(e){}
+      closeModal(); res({user,pin});
+    };
+  });
+}
+async function post(payload){
+  if(!WEBAPP_URL) throw new Error("no-webapp");
+  const id=await askIdentity();
+  let res;
+  try{
+    /* A string body sends as text/plain: a "simple" request needing no CORS preflight,
+       which an Apps Script web app cannot answer. A JSON content-type fails. */
+    res=await fetch(WEBAPP_URL,{method:"POST",body:JSON.stringify(Object.assign({pin:id.pin,user:id.user},payload)),redirect:"follow"});
+  }catch(e){
+    throw new Error("Couldn't reach the save endpoint. In Apps Script check Deploy → Manage deployments → edit: "
+      +"'Who has access' must be Anyone, and the /exec URL must be the current version. Nothing was saved.");
+  }
+  const txt=await res.text();
+  let j; try{ j=JSON.parse(txt); }catch(e){ throw new Error("Unexpected reply from the web app (not JSON). Is the deployment set to 'Anyone'?"); }
+  if(!j.ok) throw new Error(j.error||"save failed");
+  return j;
+}
+function buildPayload(action){
+  const t=orderTotals(SUPPLIER), d=draft(SUPPLIER);
+  return { order_id:"o"+Date.now().toString(36), action:action, supplier:SUPPLIER, venue:d.venue,
+           order_date:fmtISO(new Date()), subtotal:t.sub, gst:t.gst, total:t.total,
+           channel:(OSET[norm(SUPPLIER)]||{}).channel||"email", note:d.note||"",
+           lines:t.lines.map((l,i)=>({line_no:i+1,item_code:l.code,description:l.desc,unit:l.unit,
+                                      qty:l.qty,unit_price:l.price,line_total:l.total})) };
+}
+function localRecord(order){
+  return { id:order.order_id, action:"place", supplier:order.supplier, venue:order.venue,
+           date:mid(new Date()), total:order.total, subtotal:order.subtotal, gst:order.gst,
+           channel:order.channel, by:identity().user||"", logged:new Date() };
+}
+/* Sends through Orders.gs, which resolves the address from the sheet itself — the address
+   shown here is a preview of what it will pick, not an instruction it will follow. */
+function sendNow(){
+  const t=orderTotals(SUPPLIER);
+  if(!t.lines.length){ alert("Nothing in this order yet."); return; }
+  const d=draft(SUPPLIER);
+  modal(`<div class="label">Send this order?</div>
+    <div style="font-size:13px;margin-bottom:6px">To <b>${esc(supplierEmail(SUPPLIER))}</b> · ${esc(d.venue)} · ${money(t.total)} inc GST est.</div>
+    <textarea readonly>${esc(orderEmailBody(SUPPLIER))}</textarea>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <a class="btn" id="obsend" style="cursor:pointer">Send and log it</a>
+      <a class="btn outline" onclick="closeModal()" style="cursor:pointer">Cancel</a>
+    </div>
+    <div class="note">A copy is bcc'd to ${esc(SELF_COPY_TO)}.</div>`);
+  document.getElementById("obsend").onclick=async()=>{
+    closeModal();
+    const order=buildPayload("send");
+    try{
+      const j=await post(order);
+      LOCAL_ORDERS.push(localRecord(order));
+      DRAFTS[SUPPLIER]={venue:order.venue,qty:{},note:""}; saveDrafts();
+      toast(j.sent?("Sent to "+j.to+" and logged."):(j.error||"Logged, but not sent."));
+      go("");
+    }catch(e){ alert(e.message==="no-webapp"?"WEBAPP_URL is not set, so this page can't send. Use the mail app button.":e.message); }
+  };
+}
+async function markPlaced(){
+  const t=orderTotals(SUPPLIER);
+  if(!t.lines.length){ alert("Nothing in this order yet."); return; }
+  const d=draft(SUPPLIER);
+  const order=buildPayload("place");
+  const local=localRecord(order);
+  try{
+    await post(order);
+    LOCAL_ORDERS.push(local);
+    DRAFTS[SUPPLIER]={venue:d.venue,qty:{},note:""}; saveDrafts();
+    toast("Order logged.");
+    go("");
+  }catch(e){
+    if(e.message==="no-webapp"){
+      LOCAL_ORDERS.push(local);
+      DRAFTS[SUPPLIER]={venue:d.venue,qty:{},note:""}; saveDrafts();
+      toast("Logged in this browser only — WEBAPP_URL is not set.");
+      go("");
+    }else{
+      alert(e.message);
+    }
+  }
+}
+async function markReceived(id){
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
+  try{
+    await post({order_id:id, action:"receive", supplier:o.supplier, venue:o.venue,
+                order_date:fmtISO(o.date), subtotal:o.subtotal, gst:o.gst, total:o.total});
+  }catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
+  o.action="receive";
+  route();
+}
+
+/* ================= PLACED ORDERS ================= */
+function renderPlaced(){
+  crumb("placed orders");
+  const m=weekModel();
+  const all=ORDERS.concat(LOCAL_ORDERS)
+    .filter(o=>inScopeVenue(o.venue)&&o.date>=addD(m.wk.start,-28))
+    .sort((a,b)=>b.date-a.date);
+  const openIds=new Set(m.open.map(o=>o.id));
+  document.getElementById("app").innerHTML=`
+    ${warnBar()}
+    ${summaryBar(m)}
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="card">
+      <div class="label">Orders placed — last 4 weeks · ${esc(SITE.label)}</div>
+      <table>
+        <thead><tr><th>Date</th><th>Supplier</th><th class="hide-sm">Venue</th><th class="num">Total</th><th class="num">Status</th></tr></thead>
+        <tbody>${all.map(o=>`<tr>
+          <td>${fmtD(o.date)}</td>
+          <td><b>${esc(o.supplier)}</b>${o.by?`<br><span style="color:var(--dim);font-size:11px">${esc(o.by)}</span>`:""}</td>
+          <td class="hide-sm">${esc(vShort(o.venue))}</td>
+          <td class="num">${money(o.total)}</td>
+          <td class="num">${openIds.has(o.id)
+            ? `<span class="pill">counting</span> <a class="chip sm" onclick="markReceived('${esc(o.id)}')" style="cursor:pointer">Received</a>`
+            : `<span class="pill ok">closed</span>`}</td>
+        </tr>`).join("")}</tbody>
+      </table>
+      ${all.length?"":'<div class="note">No orders logged yet for this site.</div>'}
+      <div class="note">An order counts against the week's budget until its invoice arrives, it is ticked
+        received, or ${MATCH_DAYS} days pass. Matching is by supplier, venue and date — close enough to stop
+        double counting, not an exact receipt match.</div>
+    </div>`;
+}
+
+/* ================= TARGETS ================= */
+function renderTargets(){
+  crumb("targets");
+  const m=weekModel();
+  const t=targetFor(SITE.venues);
+  document.getElementById("app").innerHTML=`
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="card">
+      <div class="label">Weekly target — ${esc(SITE.label)}</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:13px">Target COGS %</span>
+        <input type="number" id="tgtpct" min="0" max="100" step="0.5" value="${t.cogs_pct||Math.round(m.pctTarget*10)/10}" style="width:90px">
+        <a class="btn" onclick="saveTarget()" style="cursor:pointer">Save</a>
+      </div>
+      <div class="note">
+        At ${pct1(t.cogs_pct||m.pctTarget)} of a ${money0(m.sales.forecast)} forecast week that is a budget of
+        about <b>${money0(m.sales.forecast*(t.cogs_pct||m.pctTarget)/100)}</b>.<br><br>
+        ${WEBAPP_URL?`Saving writes a row per venue to the <b>OrderTargets</b> tab, so everyone sees the same
+        target.`:`Saving keeps it in this browser only — WEBAPP_URL is not set. For a target the whole team
+        sees, add rows to the <b>OrderTargets</b> tab of BG Ops Data: <b>venue | cogs_pct | weekly_budget</b>.`}
+        A weekly_budget in dollars wins over a percentage.<br><br>
+        Your own last 8 weeks ran at <b>${pct1(trailingCogsPct(INV,SALES,scopeVenues(),m.wk,8))}</b> COGS for this site —
+        that is what the tool falls back to when no target is set. Note the group-wide goal on record is
+        prime cost (COGS + wages) of 30%, which is not the same number as a COGS target.
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">Where the numbers come from</div>
+      <div class="note">
+        <b>Takings</b>: the ImPOS feed from ${esc(SALES_CUTOVER)}, the weekly report forms before that.
+        Today is live and still filling, so the forecast uses the larger of today's takings and its
+        ${DOW_WEEKS}-week day-of-week average.<br>
+        <b>Spend</b>: invoices and manual purchases dated inside the week, COGS groups only — cleaning,
+        equipment, energy, rent and the rest are excluded. Invoices arrive by email over the following days,
+        so a week still running always reads light until the orders you place here fill the gap.<br>
+        <b>GST</b>: estimated per supplier from their own invoices (sum of GST over sum of subtotal), because
+        invoice lines carry no GST. Fresh produce lands near zero, packaging near 10%.<br>
+        <b>No stock count exists</b> anywhere in the platform, so every quantity here is a buying rate, not a
+        shelf level.
+      </div>
+    </div>`;
+}
+async function saveTarget(){
+  const v=+(document.getElementById("tgtpct")||{}).value||0;
+  if(!(v>0&&v<=100)){ alert("Enter a target between 0 and 100."); return; }
+  setLocalTarget(v);
+  if(!WEBAPP_URL){ toast("Target saved for this browser."); route(); return; }
+  try{
+    for(const venue of scopeVenues()){
+      await post({action:"target", venue, cogs_pct:v, weekly_budget:0});
+      TARGETS[venue]={cogs_pct:v, weekly_budget:0};
+    }
+    toast("Target saved to the sheet.");
+  }catch(e){
+    if(e.message!=="no-webapp") alert(e.message+"\n\nIt is still saved in this browser.");
+  }
+  route();
+}
+
+/* ================= GO ================= */
+window.addEventListener("hashchange",route);
+if(!window.__OB_NO_AUTOLOAD) loadAll();
+</script>
+</body>
+</html>
