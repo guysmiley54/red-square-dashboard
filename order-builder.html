@@ -119,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v7-1900"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v8-1945"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -406,6 +406,7 @@ const TAB_COLUMNS={
   "ProductMerge":["supplier","match","into"],
   "ManualPurchases":["date","shop","venue","amount"],
   "Orders":["order_id","supplier","venue","order_date"],
+  "OrderLines":["order_id","description","qty"],
   "SupplierSettings":["supplier","rep_email"],
   "Favourites":["fav_id","fav_name","venue"],
   "FavouriteLines":["fav_id","item_key","qty"],
@@ -479,13 +480,14 @@ async function loadAll(){
   LOAD_WARN=[];
   try{
     const warn=l=>e=>{LOAD_WARN.push(l+": "+e.message);return [];};
-    const [inv,lines,cfgRows,pmRows,manRows,ordRows,setRows,favRows,favLineRows,covRows,feed,weekly]=await Promise.all([
+    const [inv,lines,cfgRows,pmRows,manRows,ordRows,ordLineRows,setRows,favRows,favLineRows,covRows,feed,weekly]=await Promise.all([
       fetchTab("Invoices"),
       fetchTab("InvoiceLines"),
       fetchTab("SupplierConfig").catch(warn("SupplierConfig")),
       fetchTab("ProductMerge").catch(()=>[]),
       fetchTab("ManualPurchases").catch(warn("ManualPurchases")),
       fetchTab("Orders").catch(()=>[]),
+      fetchTab("OrderLines").catch(()=>[]),
       fetchTab("SupplierSettings").catch(()=>[]),
       fetchTab("Favourites").catch(()=>[]),
       fetchTab("FavouriteLines").catch(()=>[]),
@@ -577,7 +579,7 @@ async function loadAll(){
       by:String(r.created_by||"").trim(),lines:favLines[String(r.fav_id||"").trim()]||[]}))
       .filter(f=>f.id&&f.name);   // scoped to a store at render time, by f.venue
 
-    ORDERS=parseOrders(ordRows);
+    ORDERS=parseOrders(ordRows,ordLineRows);
     const cut=gvizDate(SALES_CUTOVER);
     SALES=weekly.concat(feed.filter(f=>!cut||f.date>=cut));
     SALES_OK=SALES.length>0;
@@ -611,7 +613,19 @@ function applyFuzzyFold(){
     if(to) l.foldTo=to;
   });
 }
-function parseOrders(rows){
+/* OrderLines has been written since the first version but never read back. Reading it is
+   what makes a past order repeatable: every order placed here already holds exactly what
+   was on it. The stored line has no product key — it has the code, description and unit the
+   order was built from, and prodKey() is deterministic, so the key rebuilds from those and
+   matches the catalogue without a schema change. */
+function parseOrders(rows,lineRows){
+  const lines={};
+  (lineRows||[]).forEach(r=>{
+    const id=String(r.order_id||"").trim(); if(!id) return;
+    const qty=num_(r.qty); if(!(qty>0)) return;
+    (lines[id]=lines[id]||[]).push({code:String(r.item_code||""),desc:String(r.description||""),
+      unit:String(r.unit||""),qty,price:num_(r.unit_price)});
+  });
   const byId={};
   rows.forEach(r=>{
     const id=String(r.order_id||"").trim(); if(!id) return;
@@ -624,6 +638,7 @@ function parseOrders(rows){
       channel:String(r.channel||"").trim(),by:String(r.placed_by||"").trim(),logged};
     if(!prev||(logged&&prev.logged&&logged>=prev.logged)||!prev.logged) byId[id]=Object.assign({},prev||{},rec);
   });
+  Object.values(byId).forEach(o=>{ o.lines=lines[o.id]||[]; });
   return Object.values(byId).filter(o=>o.date&&o.supplier&&o.action!=="cancel");
 }
 
@@ -858,7 +873,9 @@ function draft(supplier,venue){
 }
 function setQty(supplier,key,n,venue){
   const d=draft(supplier,venue);
-  n=Math.max(0,Math.round(Number(n)||0));
+  /* Two decimals, not whole units: plenty of lines are priced per kg and a last quantity of
+     1.5kg must come back as 1.5, not 2. */
+  n=Math.max(0,Math.round((Number(n)||0)*100)/100);
   if(n) d.qty[key]=n; else delete d.qty[key];
   saveDrafts();
 }
@@ -1075,10 +1092,13 @@ function renderBuilder(){
             ${COVER[p.key]?'<br><span style="font-size:10px;color:var(--dim)">set by hand</span>':""}</td>
           <td class="num">${money(p.price)}${p.change!=null?`<br><span class="${p.change>0?"up":"down"}" style="font-size:11px">${(p.change>0?"+":"")+Math.round(p.change*10)/10}%</span>`:""}</td>
           <td class="num hide-sm">${fmtD(p.lastDate)}<br><span style="color:var(--dim);font-size:11px">${p.daysSince}d</span></td>
-          <td class="num hide-sm">${p.lastQty} ${esc(p.unit||"")}<br><span style="color:var(--dim);font-size:11px">usual ${Math.round(p.avgPerOrder*100)/100} → fill ${p.fillQty}</span></td>
+          <td class="num hide-sm click" onclick="setQty(SUPPLIER,'${esc(p.key)}',${p.lastQty});route()"
+              title="Order this quantity again" style="cursor:pointer">
+            <b style="border-bottom:1px dashed #bbb">${p.lastQty} ${esc(p.unit||"")}</b>
+            <br><span style="color:var(--dim);font-size:11px">usual ${Math.round(p.avgPerOrder*100)/100} → fill ${p.fillQty}</span></td>
           <td class="num"><span class="qty ${d.qty[p.key]?"on":""}">
             <button onclick="bump('${esc(p.key)}',-1)">−</button>
-            <input type="number" min="0" step="1" value="${d.qty[p.key]||0}" data-k="${esc(p.key)}" onchange="typed(this)">
+            <input type="number" min="0" step="any" value="${d.qty[p.key]||0}" data-k="${esc(p.key)}" onchange="typed(this)">
             <button onclick="bump('${esc(p.key)}',1)">+</button></span>
             <div style="font-size:11px;color:var(--dim);margin-top:2px">${d.qty[p.key]?money(d.qty[p.key]*p.price):"&nbsp;"}</div></td>
         </tr>`).join("")}
@@ -1504,15 +1524,42 @@ function renderPlaced(){
   document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
     <a class="back" onclick="go('')">All suppliers</a>
     <div class="card"><div class="label">Orders placed — last 4 weeks · ${esc(TAG.name)}</div>
-      <table><thead><tr><th>Date</th><th>Supplier</th><th class="num">Total</th><th class="num">Status</th></tr></thead>
+      <table><thead><tr><th>Date</th><th>Supplier</th><th class="num hide-sm">Items</th><th class="num">Total</th>
+        <th class="num">Status</th><th class="num"></th></tr></thead>
       <tbody>${rows.map(o=>`<tr><td>${fmtD(o.date)}</td>
         <td><b>${esc(o.supplier)}</b>${o.by?`<br><span style="color:var(--dim);font-size:11px">${esc(o.by)}</span>`:""}</td>
+        <td class="num hide-sm">${(o.lines||[]).length||'<span style="color:var(--dim)">—</span>'}</td>
         <td class="num">${money(o.total)}</td>
-        <td class="num">${openIds.has(o.id)?'<span class="pill">counting</span>':'<span class="pill ok">invoiced</span>'}</td></tr>`).join("")}</tbody></table>
+        <td class="num">${openIds.has(o.id)?'<span class="pill">counting</span>':'<span class="pill ok">invoiced</span>'}</td>
+        <td class="num">${(o.lines||[]).length?`<a class="chip sm" onclick="reorder('${esc(o.id)}')">Order again</a>`:""}</td></tr>`).join("")}</tbody></table>
       ${rows.length?"":'<div class="note">No orders logged for this store yet.</div>'}
       <div class="note">An order counts against the week until its invoice arrives or ${MATCH_DAYS} days pass.
-        The budget it counts against is the shared one — only this list is per store.</div>
+        The budget it counts against is the shared one — only this list is per store.
+        <b>Order again</b> loads any past order back into the cart as an editable draft, whether or not it was
+        ever saved as a favourite.</div>
     </div>`;
+}
+
+/* Load a past order back into the cart. Prices come from the CURRENT catalogue, never from
+   what was paid at the time — reordering at last quarter's price would quietly understate
+   the cart against this week's budget. Items that have since left the catalogue are skipped
+   and counted rather than invented. */
+function reorder(id){
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id);
+  if(!o||!(o.lines||[]).length) return;
+  const known={};
+  deriveCatalogue(LINES,o.supplier,new Date(),{venue:o.venue}).forEach(p=>known[p.key]=p);
+  let loaded=0, miss=0;
+  o.lines.forEach(l=>{
+    const key=prodKey(o.supplier,l.code,l.desc,l.unit);
+    if(known[key]){ setQty(o.supplier,key,l.qty,o.venue); loaded++; } else miss++;
+  });
+  TAG=tagByName(o.venue); SUPPLIER=o.supplier;
+  renderTagPicker(); renderFilters();
+  location.hash="s::"+encodeURIComponent(o.supplier);
+  route();
+  toast(miss?`Loaded ${loaded} item(s) from ${fmtD(o.date)} — ${miss} no longer in the catalogue.`
+            :`Loaded all ${loaded} item(s) from the ${fmtD(o.date)} order.`);
 }
 
 /* ================= FAVOURITES ================= */
