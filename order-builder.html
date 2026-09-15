@@ -119,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v12-1300"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v13-1345"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1012,7 +1012,16 @@ function summaryBar(m){
   const b=Math.max(m.budget,1), seg=v=>Math.max(0,Math.min(100,v/b*100));
   const over=m.used>m.budget&&m.budget>0;
   const cls=m.cogsProjected<=TARGET_COGS_PCT?"good":"over";
+  /* Left to right the way the question is actually asked: what have we spent, what is left,
+     what is coming in, and what does that make the percentage. Spend first because it is the
+     number being controlled; the COGS % last because it is the consequence of the other
+     three rather than something you act on directly. */
   return `<div class="summary">
+    <div class="tile">
+      <div class="k">Spent so far</div>
+      <div class="v">${money0(m.cap.cogs)}</div>
+      <div class="sub">${m.cap.n} invoice(s) captured${m.committed?` · ${money0(m.committed)} awaiting invoice`:""}${m.drafted?` · ${money0(m.drafted)} in drafts`:""}</div>
+    </div>
     <div class="tile ${over?"over":""}">
       <div class="k">Left to spend — ${esc(ENTITY)}</div>
       <div class="v">${m.budget>0?money0(m.remaining):"—"}</div>
@@ -1020,20 +1029,15 @@ function summaryBar(m){
       <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Awaiting invoice ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span></div>
       <div class="sub">${money0(m.used)} of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${over?" — <b style='color:var(--red)'>over</b>":""}</div>
     </div>
-    <div class="tile ${m.sales.forecast>0?cls:""}">
-      <div class="k">COGS % — projected vs ${TARGET_COGS_PCT}%</div>
-      <div class="v">${m.sales.forecast>0?pct1(m.cogsProjected):"—"}</div>
-      <div class="sub">${m.sales.actual>0?`${pct1(m.cogsActual)} on income so far. `:""}Both kitchens, one set of books.</div>
-    </div>
-    <div class="tile">
-      <div class="k">Spent so far</div>
-      <div class="v">${money0(m.cap.cogs)}</div>
-      <div class="sub">${m.cap.n} invoice(s) captured${m.committed?` · ${money0(m.committed)} awaiting invoice`:""}${m.drafted?` · ${money0(m.drafted)} in drafts`:""}</div>
-    </div>
     <div class="tile">
       <div class="k">Income this week</div>
       <div class="v">${money0(m.sales.actual)}</div>
       <div class="sub">Forecast ${money0(m.sales.forecast)} · both kitchens</div>
+    </div>
+    <div class="tile ${m.sales.forecast>0?cls:""}">
+      <div class="k">COGS % — projected vs ${TARGET_COGS_PCT}%</div>
+      <div class="v">${m.sales.forecast>0?pct1(m.cogsProjected):"—"}</div>
+      <div class="sub">${m.sales.actual>0?`${pct1(m.cogsActual)} on income so far. `:""}Both kitchens, one set of books.</div>
     </div></div>`;
 }
 
