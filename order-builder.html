@@ -119,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v13-1345"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v13-1430"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -157,6 +157,10 @@ let INV=[],LINES=[],CFG={},PMERGE={},ORDERS=[],SSET={},FAVS=[],COVER={},HIDDEN={
 let SALES_OK=false;
 let TAG=TAGS[0], WEEK_OFF=0, SUPPLIER="", CATFILT="", SEARCH="", HIDE_PORTAL=true;
 let SHOW_HIDDEN=false, PICKED={};      // PICKED: item_key -> true, for bulk category edits
+/* Typing re-renders the page, which destroys the search box and rebuilds it — so focus and
+   the caret have to be carried across by hand or the field goes dead after every keystroke
+   and has to be clicked again. */
+let SEARCH_FOCUS=false, SEARCH_CARET=0;
 let HOME_INV=null;                     // supplier whose invoices are open on the order list
 let SORT={col:"name",dir:1};
 let RANGE={preset:"8w",from:null,to:null};
@@ -1235,7 +1239,21 @@ function renderBuilder(){
     </div>
     ${invoicePanel(name,TAG.name,25)}`;
   const s=document.getElementById("csearch");
-  if(s) s.addEventListener("input",e=>{SEARCH=e.target.value;clearTimeout(window.__st);window.__st=setTimeout(route,140);});
+  if(s){
+    s.addEventListener("input",e=>{
+      SEARCH=e.target.value;
+      SEARCH_CARET=e.target.selectionStart;
+      clearTimeout(window.__st);
+      window.__st=setTimeout(()=>{ SEARCH_FOCUS=true; route(); },140);
+    });
+    if(SEARCH_FOCUS){
+      s.focus();
+      /* Restore where the cursor actually was, not the end: otherwise editing the middle of
+         a search term throws you to the back of it. */
+      try{ s.setSelectionRange(SEARCH_CARET,SEARCH_CARET); }catch(e){}
+      SEARCH_FOCUS=false;
+    }
+  }
 }
 function setCat(c){ CATFILT=c; route(); }
 /* Jump from a line in the order to that product in the catalogue. Any active category chip
