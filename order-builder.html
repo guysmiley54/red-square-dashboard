@@ -119,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v6-1720"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v7-1900"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -284,9 +284,9 @@ function catText(desc){
    roll towel — all three were reading as food on live data. Constraining a packaging house
    to packaging and cleaning categories fixes every one at a stroke, without a keyword list
    that would have to grow forever. */
-const CATEGORIES = ["Produce","Meat","Seafood","Dairy / Cold Storage","Bakery","Dry Goods",
+const CATEGORIES = ["Produce","Meat","Seafood","Dairy / Cold Storage","Frozen","Bakery","Dry Goods",
   "Beverage","Coffee","Hot Containers","Cold Containers","Packaging","Cleaning & Chemicals","Uncategorised"];
-const FOOD_CATS = ["Produce","Meat","Seafood","Dairy / Cold Storage","Bakery","Dry Goods","Beverage","Coffee"];
+const FOOD_CATS = ["Produce","Meat","Seafood","Dairy / Cold Storage","Frozen","Bakery","Dry Goods","Beverage","Coffee"];
 const PACK_CATS = ["Hot Containers","Cold Containers","Packaging","Cleaning & Chemicals"];
 
 const CLEANING_RE = /\b(jasol|detergent|sanitis\w*|sanitiz\w*|degreas\w*|bleach|cleaner|chemical|glove|dishwash\w*|rinse|soap|scourer|bin liner|garbage bag|mop|wipe|wiper|methylated|spirit|sterakleen|firedog|spot aid|tecwash|unox|glaze|descaler|oven cleaner|hand towel|roll towel|paper towel)\b/;
@@ -295,18 +295,33 @@ const HOT_RE  = /\b(hot cup|hot lid|cpla|single wall|double wall|coffee cup|pizz
 const COLD_RE = /\b(cold cup|cold lid|dome lid|salad bowl|pet|pet bowl|pet lid|pla cold|clam shell|clamshell|tumbler|rectangular|round container|round lid|sauce container|smoothie|sundae|deli)\b/;
 const PACK_RE = /\b(cup|lid|napkin|serviette|container|box|bag|tray|straw|cutlery|knife|fork|spoon|teaspoon|film|foil|takeaway|carton|liner|docket|register roll|copy paper|tape)\b/;
 
+/* Frozen is a place, not a food type, so it is asked first: a chef ordering wants to know
+   what comes out of the freezer, whatever it is made of. That means frozen chicken reads as
+   Frozen rather than Meat, and ice cream as Frozen rather than Dairy.
+
+   It only fires on an EXPLICIT signal — the word frozen, FRZ, IQF, or ice cream and its
+   relatives. On the live data that is 21 products, every one certainly frozen. Another ~69
+   are frozen in reality but say so nowhere in their name (McCain chips, hash browns, dim
+   sims), and guessing by product type would sweep in Onepac's sandwich wedge CONTAINERS.
+   Those are for the bulk tool: local knowledge, set once, kept for everyone. */
+const FROZEN_RE = /\b(frozen|froz|frz|iqf|ice cream|icecream|gelato|sorbet)\b/;
+
 const CATEGORY_RULES=[
   ["Cleaning & Chemicals", CLEANING_RE],
-  ["Coffee",   /\b(coffee bean|espresso|arabica|robusta|chai latte)\b/],
-  ["Dairy / Cold Storage", /\b(milk|cream|cheese|cheer|parma blend|butter|egg|yogh?urt|mozzarella|parmesan|feta|haloumi|ricotta|mascarpone|creme fraiche|custard)\b/],
+  ["Frozen", FROZEN_RE],
+  ["Coffee",   /\b(coffee bean|espresso|arabica|robusta|single origin)\b/],
+  ["Dairy / Cold Storage", /\b(milk|cream|cheese|cheer|parma blend|butter|egg|yogh?urt|mozzarella|parmesan|parmigiano|grana|pecorino|feta|fetta|gorgonzola|burrata|haloumi|ricotta|mascarpone|creme fraiche|custard)\b/],
   ["Seafood",  /\b(salmon|prawn|fish|squid|calamari|octopus|mussel|oyster|scallop|barramundi|tuna|anchov\w*)\b/],
   ["Meat",     /\b(beef|chicken|pork|lamb|bacon|rasher|ham|salami\w*|prosciutto|chorizo|sausage|mince|steak|rump|brisket|turkey|duck|pancetta|wing ding|nugget|schnitzel|kransky|meatball)\b/],
   ["Bakery",   /\b(bread|bread roll|dinner roll|bun|sourdough|baguette|ciabatta|brioche|croissant|muffin|pastry|focaccia|bagel|tortilla|pita|waffle|pancake|crumpet|scone|donut|doughnut)\b/],
   /* Sauces and oils before produce: "Tomato Sauce Heinz" and "Oil Veg / Olive Blend" were
      both landing in Produce on live data. */
-  ["Dry Goods",/\b(sauce|oil|vinegar|flour|sugar|rice|pasta|salt|pepper|spice|stock|tin|canned|chickpea|lentil|noodle|honey|jam|mayonnaise|mustard|oat|cereal|nut|seed|olive|chip|fry|fries|wedge|hash brown|crouton|polenta|couscous|quinoa|syrup|dim sim|dimsum|spring roll|samosa)\b/],
+  ["Dry Goods",/\b(sauce|topping|syrup|sweetener|drinking chocolate|marmalade|soft serve|oil|vinegar|mirin|cooking wine|flour|semolina|yeast|sugar|rice|pasta|salt|pepper|spice|anise|cinnamon|clove|cumin|paprika|turmeric|sesame|bay leaf|tamarind|puree|stock|tin|canned|chickpea|lentil|noodle|honey|jam|mayonnaise|mustard|oat|cereal|nut|cashew|walnut|almond|pistachio|seed|olive|chip|fry|fries|wedge|hash brown|crouton|savoiardi|polenta|couscous|quinoa|dim sim|dimsum|spring roll|samosa)\b/],
   ["Produce",  /\b(tomato|lettuce|cos|mesclun|roquette|rocket|onion|shallot|leek|potato|carrot|spinach|cucumber|capsicum|mushroom|avocado|lemon|lime|orange|apple|pear|banana|berry|grape|melon|honeydew|rockmelon|watermelon|peach|nectarine|plum|mango|pineapple|kiwi|herb|basil|parsley|coriander|mint|thyme|rosemary|dill|chive|garlic|ginger|chilli|chilly|broccoli|cauliflower|zucchini|eggplant|pumpkin|cabbage|wombok|wom bok|celery|kale|asparagus|bean|pea|corn|radish|beetroot|parsnip|swede|turnip|sprout|salad|coleslaw|slaw|fruit|veg)\b/],
-  ["Beverage", /\b(juice|soft drink|cola|lemonade|water|soda|kombucha|beer|wine|cider|cordial|tea|energy drink|tonic)\b/],
+  /* No bare "beer" or "wine": in a kitchen catalogue those words are far more often "beer
+     battered chips" and "beef red wine pie" than a drink. Verified on the live data — adding
+     them moved both into Beverage. */
+  ["Beverage", /\b(juice|soft drink|cola|lemonade|soda|kombucha|cider|cordial|tea|chai|earl grey|english breakfast|chamomile|red bull|energy drink|tonic)\b/],
   ["Hot Containers",  HOT_RE],
   ["Cold Containers", COLD_RE],
   ["Packaging", PACK_RE]
@@ -319,6 +334,14 @@ const SUPPLIER_PROFILES=[
        and anything unmatched is Packaging rather than Uncategorised. */
     rules:[["Cleaning & Chemicals",CLEANING_RE],["Hot Containers",HOT_RE],["Cold Containers",COLD_RE]],
     allow:PACK_CATS, fallback:"Packaging" },
+  { match:/doppio/i,
+    /* A coffee roaster that also broadlines meat, dairy and dry goods, so no allow list —
+       just the roaster vocabulary, which is blend and bean names rather than the word
+       "coffee". Without it "Woolloomooloo Blend" read as Beverage and "Decaf Beans" as
+       Produce, because "bean" is a vegetable everywhere else. Cleaning runs first so
+       "Espresso Machine Cleaner" doesn't become Coffee. */
+    rules:[["Cleaning & Chemicals",CLEANING_RE],
+           ["Coffee",/\b(blend|bean|roast|roasted|decaf|single origin|toby)\b/]] },
   { match:/fresh cut/i,
     /* Fruit, veg and cold goods. "Cheer Tasty 96 Slices" is sliced cheese, not a cake slice,
        and was reading as Bakery. Packaging categories are off so "Pineapple Pieces BOX"
@@ -338,8 +361,12 @@ function categorise(supplier,desc,fallback,key){
     return cat;
   }
   if(prof&&prof.fallback) return prof.fallback;
-  const f=String(fallback||"").trim();
-  return f&&f.toLowerCase()!=="food"?f:"Uncategorised";
+  /* No fallback to the invoice's own category. It is set per INVOICE, not per line, so on a
+     broadline supplier it labels everything unmatched with whatever that delivery was filed
+     under — at Doppio that put coffee blends and caramel topping in "Beverage" and Earl Grey
+     in "Coffee". A confident wrong answer is worse than an honest blank: Uncategorised is
+     visible, filterable, and fixable in bulk. */
+  return "Uncategorised";
 }
 
 function prodKey(supplier,code,desc,unit){

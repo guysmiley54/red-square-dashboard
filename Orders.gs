@@ -31,7 +31,7 @@ var OB_STORES = ["Red Square Cambridge", "Luma Kitchen"];
    was no way to tell from outside which code was actually live. doGet reports this, so the
    dashboard (and anyone with the URL) can see at a glance whether the deployment matches
    the repo. */
-var OB_BUILD = "gs-v5-1545";
+var OB_BUILD = "gs-v7-1900";
 
 var OB = {
   SHEET_ID:     "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4",   // BG Ops Data
@@ -60,7 +60,7 @@ var COVER_HEADER  = ["item_key","supplier","description","category","hidden","up
 
 /* The categories the dashboard knows how to render. A free-text category would save fine
    and then show up as a chip nobody can filter on, so the list is closed. */
-var OB_CATEGORIES = ["Produce","Meat","Seafood","Dairy / Cold Storage","Bakery","Dry Goods",
+var OB_CATEGORIES = ["Produce","Meat","Seafood","Dairy / Cold Storage","Frozen","Bakery","Dry Goods",
   "Beverage","Coffee","Hot Containers","Cold Containers","Packaging","Cleaning & Chemicals","Uncategorised"];
 
 /* Only these settings can be written, and each value is checked. The endpoint is public
