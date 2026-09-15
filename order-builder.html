@@ -66,7 +66,7 @@
   .tile .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
   .tile .v{font-size:26px;font-weight:700;font-family:var(--mono);line-height:1.15;margin-top:2px}
   .tile .sub{font-size:11px;color:var(--dim);margin-top:3px;line-height:1.45}
-  .tile.over .v{color:var(--red)} .tile.good .v{color:var(--green)}
+  .tile.over .v{color:var(--red)} .tile.good .v{color:var(--green)} .tile.amber .v{color:var(--amber)}
   .bar{height:12px;border-radius:99px;background:#eee;overflow:hidden;display:flex;margin-top:8px}
   .bar i{display:block;height:100%}
   .bar .b1{background:var(--ink)} .bar .b2{background:#8a8a8a} .bar .b3{background:var(--red)}
@@ -129,7 +129,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v18-1010"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v19-1120"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1020,6 +1020,7 @@ function renderTagPicker(){
 }
 function setTag(k){
   TAG=TAGS.find(t=>t.key===k)||TAGS[0];
+  SALES_PROD_VENUE=null;
   /* A category chosen for one store's catalogue rarely exists in the other's, and leaving
      it set showed an empty list with no obvious cause. */
   CATFILT=""; GCAT_FILT=""; PICKED={}; clearCatalogueCache();
@@ -1829,7 +1830,14 @@ async function loadSalesWeek(wk){
    Time of day only means anything for ONE DAY. A week of hours averaged together hides the
    Saturday that behaves nothing like the Tuesday, so the day picker drives the whole tab
    and the chart disappears on the week view rather than quietly showing a blend. */
-let SALES_DAY=null, SALES_PERIOD="day", SALES_SORT={col:"sales",dir:-1}, SALES_Q="", SALES_QF=false;
+let SALES_DAY=null, SALES_PERIOD="week", SALES_SORT={col:"sales",dir:-1}, SALES_Q="", SALES_QF=false;
+/* Products follow the header store toggle — the one place on the Sales tab that does. The
+   rest of the tab is combined by instruction; the product list is where "what did WE sell"
+   is a per-kitchen question. "both" is offered as a local override and resets whenever the
+   header toggle is used, so the toggle always wins when someone reaches for it. */
+let SALES_PROD_VENUE=null;
+const salesProdVenue=()=>SALES_PROD_VENUE===null?TAG.name:SALES_PROD_VENUE;
+function setProdVenue(v){ SALES_PROD_VENUE=v; route(); }
 const sdSales=rows=>rows.filter(r=>r.group!==LANE_KITCHEN);
 function salesWindow(){
   if(!SALES_DAY) SALES_DAY=fmtISO(mid(new Date()));
@@ -1846,6 +1854,7 @@ function stepDay(n){
 }
 function setSalesPeriod(p){ SALES_PERIOD=p; route(); }
 function setSalesDay(v){ if(gvizDate(v)) SALES_DAY=v; route(); }
+function pickDay(k){ SALES_DAY=k; SALES_PERIOD="day"; route(); }
 
 function renderSales(){
   const m=weekModel(), w=salesWindow(), k=sdKey(w);
@@ -1859,13 +1868,34 @@ function renderSales(){
   }
   const all=SD[k], rows=sdSales(all), kitchen=all.length-rows.length;
   const revenue=rows.reduce((t,r)=>t+r.sales,0);
+  /* Spend for the same window: invoices dated inside it, both kitchens, cost of goods only
+     (INV already is). On a single day this is lumpy — a Monday delivery lands on Monday
+     while Monday's sales are a seventh of the week — so the day view says so rather than
+     letting one big drop read as a 200% COGS day. */
+  const spend=INV.filter(r=>r.date&&r.date>=w.start&&r.date<=w.end&&supActive(r.supplier)).reduce((t,r)=>t+r.total,0);
+  const cogs=revenue>0?spend/revenue*100:null;
+  const cogsCls=cogs===null?"":cogs<=TARGET_COGS_PCT-2?"good":cogs<=TARGET_COGS_PCT+2?"amber":"over";
   document.getElementById("app").innerHTML=`${warnBar()}${salesBar(w)}
     ${SD_ERR?`<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div>`:""}
-    <div class="card" style="text-align:center;padding:16px 14px">
-      <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">Combined sales — both kitchens</div>
-      <div style="font-size:40px;font-weight:700;font-family:var(--mono);line-height:1.1;margin:4px 0">${money0(revenue)}</div>
-      <div style="font-size:12px;color:var(--dim)">${esc(w.label)} ·
-        ${LEDGER_VENUES.map(v=>`${esc(vShort(v))} ${money0(rows.filter(r=>r.venue===v).reduce((t,r)=>t+r.sales,0))}`).join(" · ")}</div>
+    <div class="summary" style="grid-template-columns:2fr 1fr 1fr">
+      <div class="tile" style="text-align:center;padding:16px 14px">
+        <div class="k">Combined sales — both kitchens</div>
+        <div class="v" style="font-size:40px">${money0(revenue)}</div>
+        <div class="sub">${esc(w.label)} ·
+          ${LEDGER_VENUES.map(v=>`${esc(vShort(v))} ${money0(rows.filter(r=>r.venue===v).reduce((t,r)=>t+r.sales,0))}`).join(" · ")}</div>
+      </div>
+      <div class="tile" style="text-align:center;padding:16px 14px">
+        <div class="k">Spend — ${w.day?"this day":"this week"}</div>
+        <div class="v" style="font-size:30px">${money0(spend)}</div>
+        <div class="sub">invoices dated in the period · both kitchens</div>
+      </div>
+      <div class="tile ${cogsCls}" style="text-align:center;padding:16px 14px">
+        <div class="k">COGS % vs ${TARGET_COGS_PCT}%</div>
+        <div class="v" style="font-size:30px">${cogs===null?"—":pct1(cogs)}</div>
+        <div class="sub">${cogs===null?"no income in the period":
+          w.day?"single day — deliveries are lumpy, read the week instead":
+          cogs<=TARGET_COGS_PCT?(TARGET_COGS_PCT-cogs).toFixed(1)+" points under target":(cogs-TARGET_COGS_PCT).toFixed(1)+" points over target"}</div>
+      </div>
     </div>
     ${w.day?sdHourCard(rows,w):sdDayCard(rows,w)}
     ${sdCatCard(rows,revenue)}
@@ -1940,7 +1970,7 @@ function sdDayCard(rows,w){
   const total=traded.reduce((t,k)=>t+days[k],0);
   const best=traded.reduce((mx,k)=>days[k]>days[mx]?k:mx,traded[0]);
   const dm=k=>{const d=gvizDate(k);return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0");};
-  const cols=keys.map(k=>`<div class="col" title="${dm(k)} — ${money(days[k]||0)}">
+  const cols=keys.map(k=>`<div class="col" style="cursor:pointer" onclick="pickDay('${k}')" title="${dm(k)} — ${money(days[k]||0)} · click to open the day">
       <div class="bx" style="height:${Math.round((days[k]||0)/max*140)}px"></div>
       <div class="lb">${dm(k)}</div></div>`).join("");
   const met=(k,v,sub)=>`<div class="metric"><div class="k">${k}</div><div class="val">${v}</div><div class="sub">${sub}</div></div>`;
@@ -1982,7 +2012,10 @@ function sdCatCard(rows,revenue){
 
 function sdProdCard(rows,w){
   const m={};
+  const pv=salesProdVenue();
+  if(pv!=="both") rows=rows.filter(r=>r.venue===pv);
   if(SALES_CATDRILL) rows=rows.filter(r=>prodType(r)===SALES_CATDRILL);
+  const cols=pv==="both"?LEDGER_VENUES:[pv];
   rows.forEach(r=>{
     const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",sales:0,qty:0});
     o.sales+=r.sales; o.qty+=r.qty;
@@ -1998,17 +2031,20 @@ function sdProdCard(rows,w){
   const head=(c,l,cls)=>{const on=SALES_SORT.col===c;
     return `<th class="s ${cls||""} ${on?"act":""}" onclick="setSalesSort('${c}')">${l}${on?(d>0?" ▲":" ▼"):""}</th>`;};
   return `<div class="card"><div class="label">Products (${Object.keys(m).length})
-      ${SALES_CATDRILL?`<span class="chip sm on" onclick="drillCat('${esc(SALES_CATDRILL)}')" style="margin-left:8px">${esc(SALES_CATDRILL)} ✕</span>`:""}</div>
+      ${SALES_CATDRILL?`<span class="chip sm on" onclick="drillCat('${esc(SALES_CATDRILL)}')" style="margin-left:8px">${esc(SALES_CATDRILL)} ✕</span>`:""}
+      <span style="float:right;display:flex;gap:5px">
+        ${TAGS.map(t=>`<span class="chip sm ${pv===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
+        <span class="chip sm ${pv==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span></div>
     <div style="font-size:12px;color:var(--dim);margin-bottom:8px">tap a column to sort ·
       ${Object.keys(SD_ITEM||{}).length} names merged · ${Object.keys((SD_OVER||{}).item||{}).length+Object.keys((SD_OVER||{}).dept||{}).length} overrides applied</div>
     <input type="search" id="psearch" placeholder="Search products…" value="${esc(SALES_Q)}">
     <table style="margin-top:8px"><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}
-      ${LEDGER_VENUES.map(v=>`<th class="num hide-sm">${esc(vShort(v))}</th>`).join("")}
+      ${cols.length>1?cols.map(v=>`<th class="num hide-sm">${esc(vShort(v))}</th>`).join(""):""}
       ${head("qty","Sold","num")}<th class="num hide-sm">Per day</th>${head("sales","Revenue","num")}</tr></thead>
     <tbody>${list.slice(0,150).map(o=>`<tr>
       <td><b>${esc(o.name)}</b></td>
       <td class="hide-sm" style="color:var(--dim)">${esc(o.group)}</td>
-      ${LEDGER_VENUES.map(v=>`<td class="num hide-sm">${o[v]?money0(o[v]):'<span style="color:var(--dim)">—</span>'}</td>`).join("")}
+      ${cols.length>1?cols.map(v=>`<td class="num hide-sm">${o[v]?money0(o[v]):'<span style="color:var(--dim)">—</span>'}</td>`).join(""):""}
       <td class="num">${Math.round(o.qty*100)/100}</td>
       <td class="num hide-sm" style="color:var(--dim)">${Math.round(o.qty/w.days*10)/10}</td>
       <td class="num"><b>${money(o.sales)}</b></td></tr>`).join("")}</tbody></table>
