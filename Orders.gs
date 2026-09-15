@@ -31,7 +31,7 @@ var OB_STORES = ["Red Square Cambridge", "Luma Kitchen"];
    was no way to tell from outside which code was actually live. doGet reports this, so the
    dashboard (and anyone with the URL) can see at a glance whether the deployment matches
    the repo. */
-var OB_BUILD = "gs-v7-1900";
+var OB_BUILD = "gs-v9-2130";
 
 var OB = {
   SHEET_ID:     "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4",   // BG Ops Data
@@ -50,7 +50,7 @@ var OB = {
 };
 
 var ORDERS_HEADER = ["order_id","action","supplier","venue","order_date","subtotal","gst","total",
-                     "channel","placed_by","note","logged_at"];
+                     "channel","placed_by","note","logged_at","delivery_date"];
 var LINES_HEADER  = ["order_id","line_no","item_code","description","unit","qty","unit_price","line_total"];
 var TARGETS_HEADER= ["venue","cogs_pct","weekly_budget","updated_by","updated_at"];
 var SUPSET_HEADER = ["supplier","rep_email","visible","portal_only","cc","note","updated_by","updated_at"];
@@ -109,6 +109,9 @@ function doPost(e) {
       case "send":    return out(send_(body, user));
       case "receive": return out(mark_(body, user, "receive"));
       case "cancel":  return out(mark_(body, user, "cancel"));
+      /* A hand match: the invoice number rides in the note. Append-only like the others, so
+         a wrong match is corrected by a later row, never by editing history. */
+      case "match":   return out(mark_(body, user, "match"));
       case "target":  return out(target_(body, user));
       case "supplier_setting":  return out(supplierSetting_(body, user));
       case "favourite":         return out(favourite_(body, user));
@@ -137,7 +140,7 @@ function place_(body, user) {
 
   var now = new Date();
   sh.appendRow([o.order_id, "place", o.supplier, o.venue, o.order_date, o.subtotal, o.gst, o.total,
-                o.channel, user, o.note, now]);
+                o.channel, user, o.note, now, o.delivery_date]);
 
   if (o.lines.length) {
     var ls = tab_(OB.LINES_TAB, LINES_HEADER);
@@ -197,9 +200,10 @@ function mark_(body, user, action) {
   var id = trim_(body.order_id);
   if (!id) return { ok:false, error:"no order_id" };
   var sh = tab_(OB.ORDERS_TAB, ORDERS_HEADER);
+  if (action === "match" && !trim_(body.note)) return { ok:false, error:"a match needs the invoice number in note" };
   sh.appendRow([id, action, trim_(body.supplier), trim_(body.venue), trim_(body.order_date),
                 num_(body.subtotal), num_(body.gst), num_(body.total), "", user,
-                trim_(body.note), new Date()]);
+                trim_(body.note).slice(0, 200), new Date(), ""]);
   return { ok:true, order_id:id, action:action };
 }
 
@@ -423,8 +427,10 @@ function validateOrder_(body) {
     total:      num_(body.total),
     channel:    trim_(body.channel).slice(0, 30) || "email",
     note:       trim_(body.note).slice(0, 500),
+    delivery_date: trim_(body.delivery_date).slice(0, 10),
     lines: []
   };
+  if (o.delivery_date && !/^\d{4}-\d{2}-\d{2}$/.test(o.delivery_date)) return { error:"delivery_date must be yyyy-mm-dd" };
   if (!o.order_id)  return { error:"no order_id" };
   if (!o.supplier)  return { error:"no supplier" };
   if (!o.venue)     return { error:"no venue" };
@@ -518,6 +524,21 @@ function tab_(name, header) {
     sh.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight("bold");
     sh.setFrozenRows(1);
     return sh;
+  }
+  /* A header that is a strict PREFIX of the expected one is extended in place. Adding a
+     column at the END shifts nothing, so it is safe with data present; "delivery_date"
+     joined Orders this way. */
+  if (sh.getLastRow() > 1) {
+    var have = sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0]
+                 .map(function (h) { return String(h).trim().toLowerCase(); })
+                 .filter(function (h) { return h; });
+    var isPrefix = have.length < header.length;
+    for (var p = 0; p < have.length && isPrefix; p++) if (have[p] !== header[p]) isPrefix = false;
+    if (isPrefix) {
+      sh.getRange(1, have.length + 1, 1, header.length - have.length)
+        .setValues([header.slice(have.length)]).setFontWeight("bold");
+      Logger.log("extended '" + name + "' header with: " + header.slice(have.length).join(", "));
+    }
   }
   if (sh.getLastRow() <= 1) {                       // absent or header-only: safe to re-head
     sh.getRange(1, 1, 1, sh.getLastColumn() || header.length).clearContent();

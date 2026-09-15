@@ -119,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v8-1945"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v9-2130"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -175,6 +175,13 @@ const weekStart=d=>{const x=mid(d);x.setDate(x.getDate()-((x.getDay()+6)%7));ret
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const num_=v=>+String(v||"").replace(/[^0-9.\-]/g,"")||0;
 const tagByName=n=>TAGS.find(t=>t.name===n)||TAGS[0];
+/* Next weekday. Saturday and Sunday are skipped; suppliers who do deliver on a Saturday
+   can have the date changed on the order. */
+function nextBusinessDay(from){
+  let d=addD(mid(from||new Date()),1);
+  while(d.getDay()===0||d.getDay()===6) d=addD(d,1);
+  return d;
+}
 const vShort=v=>String(v||"").replace("Red Square ","RS ").replace("Luma Kitchen","Luma");
 
 function gvizDate(v){
@@ -633,10 +640,17 @@ function parseOrders(rows,lineRows){
     if(LEDGER_VENUES.indexOf(venue)===-1) return;
     const d=gvizDate(r.order_date), logged=gvizDate(r.logged_at)||d;
     const prev=byId[id];
-    const rec={id,action:String(r.action||"place").trim().toLowerCase(),supplier:String(r.supplier||"").trim(),
+    const action=String(r.action||"place").trim().toLowerCase();
+    const rec={id,action,supplier:String(r.supplier||"").trim(),
       venue,date:d,total:num_(r.total),subtotal:num_(r.subtotal),gst:num_(r.gst),
-      channel:String(r.channel||"").trim(),by:String(r.placed_by||"").trim(),logged};
-    if(!prev||(logged&&prev.logged&&logged>=prev.logged)||!prev.logged) byId[id]=Object.assign({},prev||{},rec);
+      channel:String(r.channel||"").trim(),by:String(r.placed_by||"").trim(),logged,
+      delivery:gvizDate(r.delivery_date)||null};
+    /* A manual match row carries the invoice number in its note; every other field on it may
+       be blank, so it is layered onto the place row rather than replacing it. */
+    if(action==="match"){ rec.matchedTo=String(r.note||"").trim(); delete rec.total; delete rec.subtotal; delete rec.gst; delete rec.delivery; }
+    if(action==="sent"){ delete rec.action; }               // a send row is not a status change
+    const keep=Object.fromEntries(Object.entries(rec).filter(([k,v])=>v!==undefined&&v!==null&&!(k==="delivery"&&!v)));
+    if(!prev||(logged&&prev.logged&&logged>=prev.logged)||!prev.logged) byId[id]=Object.assign({},prev||{},keep);
   });
   Object.values(byId).forEach(o=>{ o.lines=lines[o.id]||[]; });
   return Object.values(byId).filter(o=>o.date&&o.supplier&&o.action!=="cancel");
@@ -684,30 +698,61 @@ function capturedSpend(inv,wk){
   });
   return {cogs,n};
 }
-/* A placed order holds its slot until its invoice lands. Same-day needs the amounts to
-   agree, because the sheet holds dates without times and an order placed this afternoon
-   must not be closed by a delivery that arrived this morning. One invoice settles one
-   order, oldest first. The Luma tag is ignored: one ledger, and a delivery tagged Luma can
-   be invoiced to either venue. */
-function openOrders(orders,inv,wk,today){
+/* RECONCILIATION. A placed order holds its slot in the budget until its invoice lands;
+   when it does, the order stops counting and the invoice counts instead. Get this wrong in
+   one direction and a delivery is charged twice; in the other, money vanishes.
+
+   Three ways an order closes, in order of authority:
+     1. someone matched it to an invoice by hand (a "match" row naming the invoice);
+     2. someone marked it received;
+     3. the tool found the invoice itself.
+
+   Auto-matching anchors on the DELIVERY date, since that is what the supplier dates the
+   invoice, and falls back to the order date when none was given. Within a window of a day
+   before to MATCH_DAYS after, it takes the invoice from that supplier whose total is
+   CLOSEST to the order's, and accepts only if the two agree within a third. The old rule
+   accepted any later invoice regardless of amount, which let a $2,000 delivery close a
+   $200 order and left the $2,000 uncounted. Anything that fails the amount test stays open
+   and is shown with its nearest candidate, so a human can match it in two clicks.
+
+   One invoice settles one order, oldest first. Manual matches are honoured before the
+   automatic pass so a hand-matched invoice can never also close a second order. Orders not
+   placed through this tool have no row here at all: their invoices simply count as spend,
+   which is correct and needs nothing. */
+const MATCH_TOL=0.35;
+function reconcile(orders,inv,wk,today){
   const now=mid(today||new Date());
-  const cands=(orders||[]).filter(o=>o.date&&o.date>=wk.start&&o.date<=wk.end
-    &&o.action!=="receive"&&(+now-+mid(o.date))/864e5<=MATCH_DAYS).sort((a,b)=>a.date-b.date);
-  const pool=(inv||[]).filter(r=>r.date).map(r=>({r,used:false}));
-  const out=[];
-  cands.forEach(o=>{
-    const od=+mid(o.date),tol=Math.max(o.total*0.25,20);
-    const hit=pool.find(p=>{
-      if(p.used||norm(p.r.supplier)!==norm(o.supplier)) return false;
-      const gap=(+mid(p.r.date)-od)/864e5;
-      if(gap<0||gap>MATCH_DAYS) return false;
-      return gap>0||Math.abs(p.r.total-o.total)<=tol;
-    });
-    if(hit){hit.used=true;return;}
-    out.push(o);
+  const inWeek=(orders||[]).filter(o=>o.date&&o.date>=wk.start&&o.date<=wk.end).sort((a,b)=>a.date-b.date);
+  const pool=(inv||[]).filter(r=>r.date&&r.type!=="manual").map(r=>({r,used:false}));
+  const byNum=n=>pool.find(p=>norm(p.r.number)===norm(n)&&!p.used);
+  const closed=[], open=[];
+  // 1. manual matches first, so their invoices are off the table
+  inWeek.forEach(o=>{
+    if(!o.matchedTo) return;
+    const p=byNum(o.matchedTo);
+    if(p) p.used=true;
+    closed.push({o,inv:p?p.r:null,how:"matched by hand"});
   });
-  return out;
+  inWeek.forEach(o=>{
+    if(o.matchedTo) return;
+    if(o.action==="receive"){ closed.push({o,inv:null,how:"marked received"}); return; }
+    const anchor=+mid(o.delivery||o.date);
+    if((+now-anchor)/864e5>MATCH_DAYS){ closed.push({o,inv:null,how:"expired after "+MATCH_DAYS+" days"}); return; }
+    let best=null, bestDiff=Infinity;
+    pool.forEach(p=>{
+      if(p.used||norm(p.r.supplier)!==norm(o.supplier)) return;
+      const gap=(+mid(p.r.date)-anchor)/864e5;
+      if(gap<-1||gap>MATCH_DAYS) return;
+      const diff=Math.abs(p.r.total-o.total);
+      if(diff<bestDiff){ best=p; bestDiff=diff; }
+    });
+    if(best&&bestDiff<=o.total*MATCH_TOL){ best.used=true; closed.push({o,inv:best.r,how:"matched automatically"}); }
+    else open.push(Object.assign({},o,{nearest:best?best.r:null}));
+  });
+  return {open,closed};
 }
+/* Kept for the countdown and the tests: just the orders still holding a slot. */
+function openOrders(orders,inv,wk,today){ return reconcile(orders,inv,wk,today).open; }
 function gstRate(supplier){
   let sub=0,gst=0; const since=Date.now()-CAT_DAYS*864e5;
   INV.forEach(r=>{ if(norm(r.supplier)!==norm(supplier)||r.type==="manual") return;
@@ -869,8 +914,11 @@ function saveDrafts(){ try{localStorage.setItem(DRAFT_KEY,JSON.stringify(DRAFTS)
 const draftId=(supplier,venue)=>(venue||TAG.name)+"::"+supplier;
 function draft(supplier,venue){
   const id=draftId(supplier,venue);
-  return DRAFTS[id]||(DRAFTS[id]={supplier,tag:venue||TAG.name,qty:{},note:""});
+  const d=DRAFTS[id]||(DRAFTS[id]={supplier,tag:venue||TAG.name,qty:{},note:""});
+  if(!d.delivery||gvizDate(d.delivery)<mid(new Date())) d.delivery=fmtISO(nextBusinessDay());
+  return d;
 }
+function setDelivery(v){ const d=draft(SUPPLIER); if(gvizDate(v)) d.delivery=v; saveDrafts(); route(); }
 function setQty(supplier,key,n,venue){
   const d=draft(supplier,venue);
   /* Two decimals, not whole units: plenty of lines are priced per kg and a last quantity of
@@ -936,7 +984,7 @@ function summaryBar(m){
       <div class="k">Left to spend — ${esc(ENTITY)}</div>
       <div class="v">${m.budget>0?money0(m.remaining):"—"}</div>
       <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i></div>
-      <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Ordered ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span></div>
+      <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Awaiting invoice ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span></div>
       <div class="sub">${money0(m.used)} of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${over?" — <b style='color:var(--red)'>over</b>":""}</div>
     </div>
     <div class="tile ${m.sales.forecast>0?cls:""}">
@@ -947,7 +995,7 @@ function summaryBar(m){
     <div class="tile">
       <div class="k">Spent so far</div>
       <div class="v">${money0(m.cap.cogs)}</div>
-      <div class="sub">${m.cap.n} invoice(s) captured${m.committed?` · ${money0(m.committed)} ordered, not yet invoiced`:""}${m.drafted?` · ${money0(m.drafted)} in drafts`:""}</div>
+      <div class="sub">${m.cap.n} invoice(s) captured${m.committed?` · ${money0(m.committed)} awaiting invoice`:""}${m.drafted?` · ${money0(m.drafted)} in drafts`:""}</div>
     </div>
     <div class="tile">
       <div class="k">Income this week</div>
@@ -1115,6 +1163,9 @@ function renderBuilder(){
       <div class="draft"><div class="card">
         <div class="label">This order</div>
         <div style="font-size:12px;color:var(--dim);margin-bottom:8px">Tagged <b>${esc(d.tag||TAG.name)}</b> · billed to ${esc(ENTITY)}</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:12px;color:var(--dim)">Deliver on
+          <input type="date" value="${esc(d.delivery)}" min="${fmtISO(mid(new Date()))}" onchange="setDelivery(this.value)" style="font-size:13px;padding:6px 8px">
+          <span title="The invoice will carry this date, so it is what the order is reconciled against">${gvizDate(d.delivery)?esc(gvizDate(d.delivery).toLocaleDateString("en-AU",{weekday:"short"})):""}</span></div>
         ${t.lines.length?`
           <div style="max-height:36vh;overflow:auto">
           ${t.lines.map(l=>`<div class="dline"><div class="g" style="cursor:pointer" title="Show this item in the catalogue" onclick="focusProduct('${esc(l.key)}')"><b>${esc(l.desc)}</b>
@@ -1516,28 +1567,95 @@ function invoiceTable(supplier,venue,limit){
 
 /* ================= PLACED ORDERS ================= */
 /* Per store, like everything else about ordering. */
+let OPEN_ORDER=null;
+function toggleOrder(id){ OPEN_ORDER = OPEN_ORDER===id ? null : id; route(); }
 function renderPlaced(){
   const m=weekModel();
-  const openIds=new Set(m.open.map(o=>o.id));
+  const rec=reconcile(ORDERS.concat(LOCAL_ORDERS),INV,{start:addD(m.wk.start,-28),end:m.wk.end},new Date());
+  const status={};
+  rec.open.forEach(o=>status[o.id]={state:"open",nearest:o.nearest});
+  rec.closed.forEach(c=>status[c.o.id]={state:"closed",inv:c.inv,how:c.how});
   const rows=ORDERS.concat(LOCAL_ORDERS).filter(o=>o.venue===TAG.name&&o.date>=addD(m.wk.start,-28))
                    .sort((a,b)=>b.date-a.date);
   document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
     <a class="back" onclick="go('')">All suppliers</a>
     <div class="card"><div class="label">Orders placed — last 4 weeks · ${esc(TAG.name)}</div>
-      <table><thead><tr><th>Date</th><th>Supplier</th><th class="num hide-sm">Items</th><th class="num">Total</th>
-        <th class="num">Status</th><th class="num"></th></tr></thead>
-      <tbody>${rows.map(o=>`<tr><td>${fmtD(o.date)}</td>
-        <td><b>${esc(o.supplier)}</b>${o.by?`<br><span style="color:var(--dim);font-size:11px">${esc(o.by)}</span>`:""}</td>
-        <td class="num hide-sm">${(o.lines||[]).length||'<span style="color:var(--dim)">—</span>'}</td>
-        <td class="num">${money(o.total)}</td>
-        <td class="num">${openIds.has(o.id)?'<span class="pill">counting</span>':'<span class="pill ok">invoiced</span>'}</td>
-        <td class="num">${(o.lines||[]).length?`<a class="chip sm" onclick="reorder('${esc(o.id)}')">Order again</a>`:""}</td></tr>`).join("")}</tbody></table>
+      <table><thead><tr><th>Placed</th><th>Supplier</th><th class="hide-sm">Deliver</th><th class="num hide-sm">Items</th>
+        <th class="num">Total</th><th>Reconciliation</th><th class="num"></th></tr></thead>
+      <tbody>${rows.map(o=>{
+        const st=status[o.id]||{state:"closed",how:"outside this window"};
+        const open=OPEN_ORDER===o.id;
+        let pill;
+        if(st.state==="open") pill=`<span class="pill">awaiting invoice</span>`+(st.nearest?`<br><span style="font-size:11px;color:var(--dim)">nearest: ${money(st.nearest.total)} on ${fmtD(st.nearest.date)}</span>`:"");
+        else if(st.inv) pill=`<span class="pill ok">invoiced</span><br><span style="font-size:11px;color:var(--dim)">#${esc(st.inv.number)} · ${money(st.inv.total)} · ${fmtD(st.inv.date)} · ${esc(st.how)}</span>`;
+        else pill=`<span class="pill ok">${esc(st.how||"closed")}</span>`;
+        return `<tr class="click ${open?"picked":""}" onclick="toggleOrder('${esc(o.id)}')">
+          <td>${open?"▾ ":"▸ "}${fmtD(o.date)}</td>
+          <td><b>${esc(o.supplier)}</b>${o.by?`<br><span style="color:var(--dim);font-size:11px">${esc(o.by)}</span>`:""}</td>
+          <td class="hide-sm">${o.delivery?fmtD(o.delivery):'<span style="color:var(--dim)">—</span>'}</td>
+          <td class="num hide-sm">${(o.lines||[]).length||'<span style="color:var(--dim)">—</span>'}</td>
+          <td class="num">${money(o.total)}</td>
+          <td>${pill}</td>
+          <td class="num">${(o.lines||[]).length?`<a class="chip sm" onclick="event.stopPropagation();reorder('${esc(o.id)}')">Order again</a>`:""}</td></tr>`
+        + (open?`<tr><td colspan="7" style="background:#faf9f6;padding:0 8px 12px">
+            ${(o.lines||[]).length?`<table style="margin-top:6px"><thead><tr><th>Line</th><th class="num">Qty</th><th class="num">Unit price then</th><th class="num">Line</th></tr></thead>
+              <tbody>${o.lines.map(l=>`<tr><td>${esc(l.desc)}${l.code?` <span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(l.code)}</span>`:""}</td>
+                <td class="num">${l.qty} ${esc(l.unit||"")}</td><td class="num">${money(l.price)}</td><td class="num">${money(l.qty*l.price)}</td></tr>`).join("")}</tbody></table>`
+              :`<div class="note">No line detail was stored for this order.</div>`}
+            ${st.state==="open"?`
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+                <span style="font-size:12px;color:var(--dim)">Still counting against the week.</span>
+                <a class="chip sm" onclick="event.stopPropagation();matchPicker('${esc(o.id)}')">Match to an invoice…</a>
+                <a class="chip sm" onclick="event.stopPropagation();markReceived('${esc(o.id)}')">Mark received</a>
+              </div>`:""}
+          </td></tr>`:"");
+      }).join("")}</tbody></table>
       ${rows.length?"":'<div class="note">No orders logged for this store yet.</div>'}
-      <div class="note">An order counts against the week until its invoice arrives or ${MATCH_DAYS} days pass.
-        The budget it counts against is the shared one — only this list is per store.
-        <b>Order again</b> loads any past order back into the cart as an editable draft, whether or not it was
-        ever saved as a favourite.</div>
+      <div class="note">
+        <b>Awaiting invoice</b> — the order is holding its slot in the week's budget. When its invoice arrives the
+        order stops counting and the invoice counts instead, so a delivery is never charged twice.<br>
+        <b>Invoiced</b> — the tool found that invoice: the same supplier, dated on or after the delivery day, and
+        the closest in value to the order, within a third. If nothing is that close the order stays open and shows
+        its nearest candidate, so you can match it by hand.<br>
+        Orders placed outside this tool have no row here. Their invoices simply count as spend, which is right.
+      </div>
     </div>`;
+}
+/* Pick the invoice by hand. Offered: that supplier's invoices from a week before the order
+   to today, unmatched, nearest in value first. */
+function matchPicker(id){
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
+  const used=new Set();
+  reconcile(ORDERS.concat(LOCAL_ORDERS),INV,{start:addD(o.date,-60),end:addD(new Date(),1)},new Date())
+    .closed.forEach(c=>{ if(c.inv) used.add(norm(c.inv.number)); });
+  const cands=INV.filter(r=>r.supplier===o.supplier&&r.type!=="manual"&&r.number&&r.date>=addD(o.date,-7)&&!used.has(norm(r.number)))
+                 .sort((a,b)=>Math.abs(a.total-o.total)-Math.abs(b.total-o.total)).slice(0,12);
+  modal(`<div class="label">Match this order to an invoice</div>
+    <div style="font-size:13px;margin-bottom:8px">${esc(o.supplier)} · ordered ${fmtD(o.date)} · ${money(o.total)}</div>
+    ${cands.length?`<table><thead><tr><th>Date</th><th class="hide-sm">Invoice</th><th class="num">Total</th><th class="num">Diff</th><th></th></tr></thead>
+      <tbody>${cands.map(r=>`<tr><td>${fmtD(r.date)}</td><td class="hide-sm" style="font-family:var(--mono);font-size:11px">${esc(r.number)}</td>
+        <td class="num">${money(r.total)}</td><td class="num ${Math.abs(r.total-o.total)>o.total*MATCH_TOL?"up":""}">${money(r.total-o.total)}</td>
+        <td class="num"><a class="chip sm" onclick="matchTo('${esc(o.id)}','${esc(r.number)}')">This one</a></td></tr>`).join("")}</tbody></table>`
+      :`<div class="note">No unmatched invoices from ${esc(o.supplier)} since ${fmtD(addD(o.date,-7))}. It may not have arrived yet.</div>`}
+    <div style="margin-top:12px"><a class="btn outline" onclick="closeModal()">Cancel</a></div>`);
+}
+async function matchTo(id,invoiceNumber){
+  closeModal();
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
+  try{ await post({action:"match",order_id:id,supplier:o.supplier,venue:o.venue,order_date:fmtISO(o.date),
+                   note:invoiceNumber}); }
+  catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
+  o.matchedTo=invoiceNumber;
+  toast("Matched to invoice "+invoiceNumber+".");
+  route();
+}
+async function markReceived(id){
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
+  try{ await post({action:"receive",order_id:id,supplier:o.supplier,venue:o.venue,order_date:fmtISO(o.date),
+                   subtotal:o.subtotal,gst:o.gst,total:o.total}); }
+  catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
+  o.action="receive";
+  route();
 }
 
 /* Load a past order back into the cart. Prices come from the CURRENT catalogue, never from
@@ -1665,7 +1783,8 @@ function orderText(supplier,opts){
   opts=opts||{};
   const t=orderTotals(supplier), d=draft(supplier), tag=tagByName(d.tag||TAG.name);
   const lines=t.lines.map(l=>`- ${l.qty} x ${l.unit||"ea"}  ${l.desc}${l.code?" ["+l.code+"]":""}`+(opts.prices?`   ${money(l.price)} ea`:""));
-  const head=[`Order — ${tag.name}`,`Date: ${fmtD(new Date())}`,`Deliver to: ${tag.addr}`];
+  const head=[`Order — ${tag.name}`,`Date: ${fmtD(new Date())}`,
+              d.delivery?`Deliver on: ${fmtD(gvizDate(d.delivery))}`:"", `Deliver to: ${tag.addr}`].filter(Boolean);
   const tail=opts.prices?["",`Estimated ${money(t.sub)} + ${money(t.gst)} GST = ${money(t.total)}`]:[];
   return head.join("\n")+"\n\n"+lines.join("\n")+tail.join("\n");
 }
@@ -1749,12 +1868,13 @@ async function post(payload){
 function buildPayload(action){
   const t=orderTotals(SUPPLIER), d=draft(SUPPLIER);
   return {order_id:"o"+Date.now().toString(36),action,supplier:SUPPLIER,venue:d.tag||TAG.name,
-    order_date:fmtISO(new Date()),subtotal:t.sub,gst:t.gst,total:t.total,
+    order_date:fmtISO(new Date()),delivery_date:d.delivery||"",subtotal:t.sub,gst:t.gst,total:t.total,
     channel:sset(SUPPLIER).portal_only?"portal":"email",
     lines:t.lines.map((l,i)=>({line_no:i+1,item_code:l.code,description:l.desc,unit:l.unit,
                                qty:l.qty,unit_price:l.price,line_total:l.total}))};
 }
 const localRecord=o=>({id:o.order_id,action:"place",supplier:o.supplier,venue:o.venue,date:mid(new Date()),
+  delivery:gvizDate(o.delivery_date)||null,lines:(o.lines||[]).map(l=>({code:l.item_code,desc:l.description,unit:l.unit,qty:l.qty,price:l.unit_price})),
   total:o.total,subtotal:o.subtotal,gst:o.gst,channel:o.channel,by:identity().user||"",logged:new Date()});
 async function markPlaced(){
   const t=orderTotals(SUPPLIER);
