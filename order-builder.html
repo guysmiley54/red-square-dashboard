@@ -36,6 +36,8 @@
   td{padding:8px;border-bottom:1px solid #f0efec;vertical-align:middle}
   tr.click{cursor:pointer} tr.click:hover{background:#faf9f6}
   tr.picked{background:#fffbe9}
+  @keyframes flashrow{0%{background:#ffe9a8}60%{background:#ffe9a8}100%{background:transparent}}
+  tr.flash{animation:flashrow 1.6s ease-out}
   .num{text-align:right;font-family:var(--mono);white-space:nowrap}
   .up{color:var(--red);font-weight:600} .down{color:var(--green);font-weight:600}
   .pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em;background:#eee;color:#555}
@@ -117,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v5-1545"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v6-1630"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1031,7 +1033,7 @@ function renderBuilder(){
           ${sortHead("name","Product")}${sortHead("cat","Category","hide-sm")}${sortHead("price","Unit price","num")}
           ${sortHead("last","Last ordered","num hide-sm")}${sortHead("qty","Last qty","num hide-sm")}<th class="num">Qty</th>
         </tr></thead><tbody>
-        ${rows.map(p=>`<tr class="${d.qty[p.key]?"picked":""}" style="${p.hidden?"opacity:.5":""}">
+        ${rows.map(p=>`<tr data-pk="${esc(p.key)}" class="${d.qty[p.key]?"picked":""}" style="${p.hidden?"opacity:.5":""}">
           <td><input type="checkbox" ${PICKED[p.key]?"checked":""} onchange="pick('${esc(p.key)}',this.checked)"></td>
           <td class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')"><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}
             ${p.code?`<br><span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(p.code)}</span>`:""}
@@ -1064,7 +1066,7 @@ function renderBuilder(){
         <div style="font-size:12px;color:var(--dim);margin-bottom:8px">Tagged <b>${esc(d.tag||TAG.name)}</b> · billed to ${esc(ENTITY)}</div>
         ${t.lines.length?`
           <div style="max-height:36vh;overflow:auto">
-          ${t.lines.map(l=>`<div class="dline"><div class="g"><b>${esc(l.desc)}</b>
+          ${t.lines.map(l=>`<div class="dline"><div class="g" style="cursor:pointer" title="Show this item in the catalogue" onclick="focusProduct('${esc(l.key)}')"><b>${esc(l.desc)}</b>
             <span style="color:var(--dim);font-size:11px">${l.qty} × ${money(l.price)} ${esc(l.unit||"")}</span></div>
             <div class="num" style="font-size:13px">${money(l.total)}</div>
             <div><button onclick="setQty(SUPPLIER,'${esc(l.key)}',0);route()" style="border:none;background:none;font-size:15px;color:var(--dim);cursor:pointer;padding:2px 4px">✕</button></div>
@@ -1093,6 +1095,21 @@ function renderBuilder(){
   if(s) s.addEventListener("input",e=>{SEARCH=e.target.value;clearTimeout(window.__st);window.__st=setTimeout(route,140);});
 }
 function setCat(c){ CATFILT=c; route(); }
+/* Jump from a line in the order to that product in the catalogue. Any active category chip
+   or search box is cleared first — otherwise the row you are being sent to may not be on
+   screen at all, and the jump silently does nothing. */
+function focusProduct(key){
+  CATFILT=""; SEARCH=""; SHOW_HIDDEN=true;
+  route();
+  const raf = typeof requestAnimationFrame==="function" ? requestAnimationFrame : (f=>setTimeout(f,0));
+  raf(()=>{
+    const row=document.querySelector(`tr[data-pk="${String(key).replace(/"/g,'\\"')}"]`);
+    if(!row) return;
+    row.scrollIntoView({behavior:"smooth",block:"center"});
+    row.classList.add("flash");
+    setTimeout(()=>row.classList.remove("flash"),1600);
+  });
+}
 function toggleHidden(){ SHOW_HIDDEN=!SHOW_HIDDEN; route(); }
 function pick(k,on){ if(on) PICKED[k]=true; else delete PICKED[k]; route(); }
 function clearPicked(){ PICKED={}; route(); }
@@ -1145,29 +1162,54 @@ function bump(k,n){ const cur=(DRAFTS[draftId(SUPPLIER,TAG.name)]||{qty:{}}).qty
 function typed(el){ setQty(SUPPLIER,el.dataset.k,el.value); route(); }
 function clearDraft(){ const d=DRAFTS[draftId(SUPPLIER,TAG.name)]; if(d){d.qty={};saveDrafts();} route(); }
 
-/* Fill Usual with the budget safeguard. Items go in most-frequently-bought first and stop at
-   whatever is left of the week's 30% budget, so a supplier with 200 catalogue lines can't
-   produce a four-figure order from one tap. Anything skipped is reported, not silently
-   dropped. */
-function fillUsualPlan(cat,budgetLeft,rate){
+/* What a USUAL order from this supplier is worth: the median of their recent delivery
+   totals. Median, not mean, so one quarterly bulk drop doesn't licence a four-figure fill. */
+function usualOrderValue(supplier,venue){
+  const since=Date.now()-CAT_DAYS*864e5;
+  const totals=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)
+                            &&r.type!=="manual"&&r.date&&+r.date>=since&&r.total>0)
+                  .map(r=>r.total).sort((a,b)=>a-b);
+  if(!totals.length) return 0;
+  const m=Math.floor(totals.length/2);
+  return totals.length%2 ? totals[m] : (totals[m-1]+totals[m])/2;
+}
+/* Fill Usual. Two things were wrong with the first version, and the screenshot showed both.
+   The cap was the week's REMAINING budget, clamped at zero — so the moment the week was
+   already over target the cap became 0, and `budgetLeft>0` then meant "no limit" rather than
+   "no room". It filled hardest exactly when it should have filled least.
+
+   The deeper error was the cap itself: a whole week's budget belongs to every supplier
+   together, so handing it to one of them was never right. The real bound is this supplier's
+   own usual delivery — filling every line at its 90-day average produces a week of stock in
+   one order, which is not what anyone means by "my usual". The week's remaining budget still
+   applies as a second, tighter ceiling when there is one. */
+function fillUsualPlan(cat,cap,rate){
   const picked=[],skipped=[]; let total=0;
+  /* cap is a hard ceiling, always. A cap of zero means there is no room, so nothing fills —
+     it must never be read as "unlimited", which is precisely how the old guard failed. */
   cat.filter(p=>!p.stale&&p.fillQty>0)
      .sort((a,b)=>b.ordersPerWk-a.ordersPerWk)
      .forEach(p=>{
        const cost=p.fillQty*p.price*(1+(rate||0));
-       if(budgetLeft>0&&total+cost>budgetLeft){ skipped.push(p); return; }
+       if(cap<=0||total+cost>cap){ skipped.push(p); return; }
        picked.push(p); total+=cost;
      });
-  return {picked,skipped,total};
+  return {picked,skipped,total,cap};
 }
 function fillUsual(){
   const m=weekModel(), cat=deriveCatalogue(LINES,SUPPLIER,new Date());
-  const plan=fillUsualPlan(cat,Math.max(0,m.remaining),gstRate(SUPPLIER));
+  const usual=usualOrderValue(SUPPLIER,TAG.name);
+  /* No delivery history to learn from: fall back to whatever the week has left, and if the
+     week has nothing left, fill nothing rather than everything. */
+  let cap = usual>0 ? usual : Math.max(0,m.remaining);
+  let reason = usual>0 ? "your usual "+money0(usual)+" order from them" : "the week's remaining budget";
+  if(m.remaining>0&&m.remaining<cap){ cap=m.remaining; reason="the week's remaining "+money0(m.remaining); }
+  const plan=fillUsualPlan(cat,cap,gstRate(SUPPLIER));
   plan.picked.forEach(p=>setQty(SUPPLIER,p.key,p.fillQty));
   route();
   const zeroed=cat.filter(p=>!p.stale&&p.fillQty===0).length;
-  let msg=`Filled ${plan.picked.length} item(s), ${money0(plan.total)}.`;
-  if(plan.skipped.length) msg+=` ${plan.skipped.length} skipped — the week's ${TARGET_COGS_PCT}% budget ran out.`;
+  let msg=`Filled ${plan.picked.length} item(s), ${money0(plan.total)} — capped at ${reason}.`;
+  if(plan.skipped.length) msg+=` ${plan.skipped.length} item(s) left off.`;
   else if(zeroed) msg+=` ${zeroed} below the ${FILL_FLOOR_CUTOFF} cutoff left at zero.`;
   toast(msg);
 }
