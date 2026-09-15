@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Order Builder</title>
+<title>Cambridge Central</title>
 <style>
   :root{--ink:#111;--paper:#f7f6f3;--line:#ddd;--red:#c8102e;--dim:#777;--green:#1a7f37;--amber:#b45309;
         --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
@@ -97,7 +97,7 @@
 <body>
 <header>
   <div class="brand" onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer">
-    <div class="sq"></div><h1>Order Builder</h1>
+    <div class="sq"></div><h1>Cambridge Central</h1>
     <span id="buildtag" style="font-size:9px;color:#666"></span></div>
   <div class="tag" id="tagpick"></div>
   <span class="spacer"></span>
@@ -129,7 +129,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v19-1120"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v20-1240"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1027,6 +1027,9 @@ function setTag(k){
   renderTagPicker(); renderFilters(); route();
 }
 function renderFilters(){
+  /* The Sales tab carries its own period control. Showing the ordering week stepper above it
+     put two date pickers on one screen where only the lower one moved the data. */
+  if(location.hash.slice(1)==="sales"){ document.getElementById("filters").innerHTML=""; return; }
   document.getElementById("filters").innerHTML=`
     <span class="chip sm on" style="cursor:default" title="Ordering for delivery to ${esc(TAG.name)}">Tag: ${esc(TAG.short)}</span>
     <span class="chip sm" style="cursor:default;background:#f7f6f3">Books: ${esc(ENTITY)}</span>
@@ -1077,6 +1080,7 @@ function summaryBar(m){
 /* ================= ROUTER ================= */
 function route(){
   const h=decodeURIComponent(location.hash.slice(1));
+  renderFilters();          // the bar belongs to the route, so it is decided here, once
   if(h==="admin") return renderAdmin();
   if(h==="favs") return renderFavs();
   if(h==="reports") return renderReports();
@@ -1790,7 +1794,7 @@ async function sdLookups(){
     });
   }
 }
-const sdKey=wk=>fmtISO(wk.start);
+const sdKey=wk=>fmtISO(wk.start)+"|"+fmtISO(wk.end);
 async function loadSalesWeek(wk){
   const k=sdKey(wk);
   if(SD[k]||SD_BUSY) return;
@@ -1835,21 +1839,43 @@ let SALES_DAY=null, SALES_PERIOD="week", SALES_SORT={col:"sales",dir:-1}, SALES_
    rest of the tab is combined by instruction; the product list is where "what did WE sell"
    is a per-kitchen question. "both" is offered as a local override and resets whenever the
    header toggle is used, so the toggle always wins when someone reaches for it. */
-let SALES_PROD_VENUE=null;
+let SALES_PROD_VENUE=null, SALES_FROM=null, SALES_TO=null, SALES_GROUP="";
 const salesProdVenue=()=>SALES_PROD_VENUE===null?TAG.name:SALES_PROD_VENUE;
 function setProdVenue(v){ SALES_PROD_VENUE=v; route(); }
 const sdSales=rows=>rows.filter(r=>r.group!==LANE_KITCHEN);
+const SALES_MAX_DAYS=100;   // a custom range wider than this is a download, not a report
 function salesWindow(){
   if(!SALES_DAY) SALES_DAY=fmtISO(mid(new Date()));
   const d=gvizDate(SALES_DAY)||mid(new Date());
+  if(SALES_PERIOD==="custom"&&SALES_FROM&&SALES_TO){
+    const a=gvizDate(SALES_FROM), b=gvizDate(SALES_TO);
+    if(a&&b&&a<=b){
+      const e=new Date(b); e.setHours(23,59,59,999);
+      const days=Math.round((+mid(b)-+mid(a))/864e5)+1;
+      return {start:mid(a),end:e,label:fmtD(a)+" – "+fmtD(b),days,day:days===1,
+              tooWide:days>SALES_MAX_DAYS};
+    }
+  }
+  if(SALES_PERIOD==="month"){
+    const s=new Date(d.getFullYear(),d.getMonth(),1);
+    const e=new Date(d.getFullYear(),d.getMonth()+1,0,23,59,59,999);
+    return {start:s,end:e,label:s.toLocaleDateString("en-AU",{month:"long",year:"numeric"}),
+            days:e.getDate(),day:false};
+  }
   if(SALES_PERIOD==="week"){ const s=weekStart(d), e=addD(s,6); e.setHours(23,59,59,999);
     return {start:s,end:e,label:fmtD(s)+" – "+fmtD(e),days:7,day:false}; }
   const e=new Date(d); e.setHours(23,59,59,999);
   return {start:mid(d),end:e,label:fmtD(d),days:1,day:true};
 }
 function stepDay(n){
-  const w=salesWindow();
-  SALES_DAY=fmtISO(addD(gvizDate(SALES_DAY),SALES_PERIOD==="week"?n*7:n));
+  const d=gvizDate(SALES_DAY)||mid(new Date());
+  if(SALES_PERIOD==="month") SALES_DAY=fmtISO(new Date(d.getFullYear(),d.getMonth()+n,1));
+  else SALES_DAY=fmtISO(addD(d,SALES_PERIOD==="week"?n*7:n));
+  route();
+}
+function applySalesRange(){
+  SALES_FROM=(document.getElementById("sfrom")||{}).value||null;
+  SALES_TO=(document.getElementById("sto")||{}).value||null;
   route();
 }
 function setSalesPeriod(p){ SALES_PERIOD=p; route(); }
@@ -1858,6 +1884,13 @@ function pickDay(k){ SALES_DAY=k; SALES_PERIOD="day"; route(); }
 
 function renderSales(){
   const m=weekModel(), w=salesWindow(), k=sdKey(w);
+  if(w.tooWide){
+    document.getElementById("app").innerHTML=`${salesBar(w)}
+      <div class="card"><div class="note">That range is ${w.days} days. The item feed is 108,000 rows, so
+        anything past ${SALES_MAX_DAYS} days would pull more than the browser can hold — pick a shorter range,
+        or use Month.</div></div>`;
+    return;
+  }
   if(!SD[k]){
     loadSalesWeek(w);
     document.getElementById("app").innerHTML=`${salesBar(w)}
@@ -1916,9 +1949,15 @@ function salesBar(w){
       <span class="label" style="margin:0">Sales</span>
       <span class="chip sm ${SALES_PERIOD==="day"?"on":""}" onclick="setSalesPeriod('day')">Day</span>
       <span class="chip sm ${SALES_PERIOD==="week"?"on":""}" onclick="setSalesPeriod('week')">Week</span>
-      <span class="chip sm" onclick="stepDay(-1)">‹</span>
-      <input type="date" value="${esc(SALES_DAY||fmtISO(mid(new Date())))}" onchange="setSalesDay(this.value)" style="font-size:13px;padding:6px 8px">
-      <span class="chip sm" onclick="stepDay(1)">›</span>
+      <span class="chip sm ${SALES_PERIOD==="month"?"on":""}" onclick="setSalesPeriod('month')">Month</span>
+      <span class="chip sm ${SALES_PERIOD==="custom"?"on":""}" onclick="setSalesPeriod('custom')">Custom</span>
+      ${SALES_PERIOD==="custom"?`
+        <input type="date" id="sfrom" value="${esc(SALES_FROM||fmtISO(w.start))}" style="font-size:13px;padding:6px 8px">
+        <input type="date" id="sto" value="${esc(SALES_TO||fmtISO(w.end))}" style="font-size:13px;padding:6px 8px">
+        <span class="chip sm" onclick="applySalesRange()">apply</span>`
+      :`<span class="chip sm" onclick="stepDay(-1)">‹</span>
+        <input type="date" value="${esc(SALES_DAY||fmtISO(mid(new Date())))}" onchange="setSalesDay(this.value)" style="font-size:13px;padding:6px 8px">
+        <span class="chip sm" onclick="stepDay(1)">›</span>`}
       <span style="flex:1"></span>
       <span style="font-size:12px;color:var(--dim)">${esc(w.label)}</span>
     </div></div>`;
@@ -1986,7 +2025,11 @@ function sdDayCard(rows,w){
 
 /* Tap a category to drill in: products narrow to that type and the card says so. */
 let SALES_CATDRILL="";
-function drillCat(t){ SALES_CATDRILL = SALES_CATDRILL===t ? "" : t; route(); }
+function drillCat(t){ SALES_CATDRILL = SALES_CATDRILL===t ? "" : t; SALES_GROUP=""; route(); }
+/* The product-level category — Coffee & Tea, Breakfast, Lunch — as opposed to the Food /
+   Beverage rollup above it. Clicking one narrows the list to it, which is the question
+   "what did we sell in Breakfast" rather than "what did we sell in Food". */
+function drillGroup(g){ SALES_GROUP = SALES_GROUP===g ? "" : g; SALES_CATDRILL=""; route(); }
 const prodType=r=>(CAT_MAP[r.category.toLowerCase()]||{}).type||r.group||"Uncategorised";
 function sdCatCard(rows,revenue){
   const m={};
@@ -2015,6 +2058,9 @@ function sdProdCard(rows,w){
   const pv=salesProdVenue();
   if(pv!=="both") rows=rows.filter(r=>r.venue===pv);
   if(SALES_CATDRILL) rows=rows.filter(r=>prodType(r)===SALES_CATDRILL);
+  if(SALES_GROUP) rows=rows.filter(r=>(r.group||"")===SALES_GROUP);
+  /* Every group present before the group filter, so the chips don't vanish once you use one. */
+  const groups=[...new Set((SALES_CATDRILL?rows:rows).map(r=>r.group).filter(Boolean))].sort();
   const cols=pv==="both"?LEDGER_VENUES:[pv];
   rows.forEach(r=>{
     const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",sales:0,qty:0});
@@ -2032,18 +2078,23 @@ function sdProdCard(rows,w){
     return `<th class="s ${cls||""} ${on?"act":""}" onclick="setSalesSort('${c}')">${l}${on?(d>0?" ▲":" ▼"):""}</th>`;};
   return `<div class="card"><div class="label">Products (${Object.keys(m).length})
       ${SALES_CATDRILL?`<span class="chip sm on" onclick="drillCat('${esc(SALES_CATDRILL)}')" style="margin-left:8px">${esc(SALES_CATDRILL)} ✕</span>`:""}
+      ${SALES_GROUP?`<span class="chip sm on" onclick="drillGroup('${esc(SALES_GROUP)}')" style="margin-left:8px">${esc(SALES_GROUP)} ✕</span>`:""}
       <span style="float:right;display:flex;gap:5px">
         ${TAGS.map(t=>`<span class="chip sm ${pv===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
         <span class="chip sm ${pv==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span></div>
     <div style="font-size:12px;color:var(--dim);margin-bottom:8px">tap a column to sort ·
       ${Object.keys(SD_ITEM||{}).length} names merged · ${Object.keys((SD_OVER||{}).item||{}).length+Object.keys((SD_OVER||{}).dept||{}).length} overrides applied</div>
     <input type="search" id="psearch" placeholder="Search products…" value="${esc(SALES_Q)}">
+    ${groups.length>1?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <span class="chip sm ${SALES_GROUP?"":"on"}" onclick="drillGroup('${esc(SALES_GROUP)}')">All categories</span>
+      ${groups.map(g=>`<span class="chip sm ${SALES_GROUP===g?"on":""}" onclick="drillGroup('${esc(g)}')">${esc(g)}</span>`).join("")}
+    </div>`:""}
     <table style="margin-top:8px"><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}
       ${cols.length>1?cols.map(v=>`<th class="num hide-sm">${esc(vShort(v))}</th>`).join(""):""}
       ${head("qty","Sold","num")}<th class="num hide-sm">Per day</th>${head("sales","Revenue","num")}</tr></thead>
     <tbody>${list.slice(0,150).map(o=>`<tr>
       <td><b>${esc(o.name)}</b></td>
-      <td class="hide-sm" style="color:var(--dim)">${esc(o.group)}</td>
+      <td class="hide-sm">${o.group?`<span class="pill" style="cursor:pointer" onclick="drillGroup('${esc(o.group)}')" title="Show only ${esc(o.group)}">${esc(o.group)}</span>`:""}</td>
       ${cols.length>1?cols.map(v=>`<td class="num hide-sm">${o[v]?money0(o[v]):'<span style="color:var(--dim)">—</span>'}</td>`).join(""):""}
       <td class="num">${Math.round(o.qty*100)/100}</td>
       <td class="num hide-sm" style="color:var(--dim)">${Math.round(o.qty/w.days*10)/10}</td>
