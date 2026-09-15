@@ -21,6 +21,15 @@
   .pill.edit{cursor:pointer;border:1px dashed #bbb;background:#fff}
   .pill.edit:hover{background:#f0efec}
   .spark{display:block;width:100%;height:80px}
+  .chart{display:flex;align-items:flex-end;gap:3px;height:170px;padding-top:10px}
+  .chart .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+  .chart .col:hover .bx{opacity:.75}
+  .chart .bx{width:100%;background:var(--red);border-radius:3px 3px 0 0;min-height:1px}
+  .chart .lb{font-size:9px;color:var(--dim);white-space:nowrap;font-family:var(--mono);height:12px}
+  .mets{display:flex;gap:26px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:10px;padding-top:12px}
+  .metric .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .metric .val{font-size:26px;font-weight:700;font-family:var(--mono);line-height:1.15}
+  .metric .sub{font-size:11px;color:var(--dim);margin-top:2px}
   #filters{background:#fff;border-bottom:1px solid var(--line);padding:8px 14px;display:flex;flex-wrap:wrap;gap:7px;align-items:center;position:sticky;top:47px;z-index:19}
   main{max-width:1280px;margin:0 auto;padding:14px}
   .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
@@ -120,7 +129,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v16-1900"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v18-1010"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1812,140 +1821,210 @@ async function loadSalesWeek(wk){
 }
 
 /* ================= SALES VIEW =================
-   Combined across both kitchens throughout, by instruction. Kitchen requests are stripped
-   first: staff ring those up to fire a docket to the kitchen printer, so they are not sales
-   and counting them would inflate everything below. Modifiers stay — an extra shot is real
-   revenue. */
-let SALES_TAB="hour", SALES_SORT={col:"sales",dir:-1};
+   Laid out like the sales explorer, because that is the shape people already read. Two
+   differences, both deliberate: Glenorchy never appears (it is not this entity), and the
+   hourly chart is never split by venue — a combined trading curve is the question being
+   asked, and two interleaved series answer a different one.
+
+   Time of day only means anything for ONE DAY. A week of hours averaged together hides the
+   Saturday that behaves nothing like the Tuesday, so the day picker drives the whole tab
+   and the chart disappears on the week view rather than quietly showing a blend. */
+let SALES_DAY=null, SALES_PERIOD="day", SALES_SORT={col:"sales",dir:-1}, SALES_Q="", SALES_QF=false;
 const sdSales=rows=>rows.filter(r=>r.group!==LANE_KITCHEN);
+function salesWindow(){
+  if(!SALES_DAY) SALES_DAY=fmtISO(mid(new Date()));
+  const d=gvizDate(SALES_DAY)||mid(new Date());
+  if(SALES_PERIOD==="week"){ const s=weekStart(d), e=addD(s,6); e.setHours(23,59,59,999);
+    return {start:s,end:e,label:fmtD(s)+" – "+fmtD(e),days:7,day:false}; }
+  const e=new Date(d); e.setHours(23,59,59,999);
+  return {start:mid(d),end:e,label:fmtD(d),days:1,day:true};
+}
+function stepDay(n){
+  const w=salesWindow();
+  SALES_DAY=fmtISO(addD(gvizDate(SALES_DAY),SALES_PERIOD==="week"?n*7:n));
+  route();
+}
+function setSalesPeriod(p){ SALES_PERIOD=p; route(); }
+function setSalesDay(v){ if(gvizDate(v)) SALES_DAY=v; route(); }
+
 function renderSales(){
-  const m=weekModel(), wk=m.wk, k=sdKey(wk);
+  const m=weekModel(), w=salesWindow(), k=sdKey(w);
   if(!SD[k]){
-    loadSalesWeek(wk);
-    document.getElementById("app").innerHTML=`${summaryBar(m)}
-      <div class="card"><div class="label">Sales — ${esc(weekLabel(wk))}</div>
-      <div id="status">Loading the item-level feed for this week…</div>
-      <div class="note">Only this week is fetched, and only when you open this tab — the full
+    loadSalesWeek(w);
+    document.getElementById("app").innerHTML=`${salesBar(w)}
+      <div class="card"><div id="status">Loading the item-level feed…</div>
+      <div class="note">Only the period on screen is fetched, and only when you open this tab — the whole
         feed is 108,000 rows.</div></div>`;
     return;
   }
-  const all=SD[k], rows=sdSales(all);
+  const all=SD[k], rows=sdSales(all), kitchen=all.length-rows.length;
   const revenue=rows.reduce((t,r)=>t+r.sales,0);
-  const units=rows.reduce((t,r)=>t+r.qty,0);
-  const kitchen=all.length-rows.length;
-  const days=[...new Set(rows.map(r=>fmtISO(r.ts)))].length||1;
-  const byVenue={};
-  rows.forEach(r=>byVenue[r.venue]=(byVenue[r.venue]||0)+r.sales);
-
-  const tabs=[["hour","Time of day"],["cat","Category"],["prod","Products"],["waste","Wastage"]];
-  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
+  document.getElementById("app").innerHTML=`${warnBar()}${salesBar(w)}
     ${SD_ERR?`<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div>`:""}
-    <div class="card" style="text-align:center;padding:18px 14px">
-      <div class="k" style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">Combined sales — both kitchens · ${esc(weekLabel(wk))}</div>
+    <div class="card" style="text-align:center;padding:16px 14px">
+      <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">Combined sales — both kitchens</div>
       <div style="font-size:40px;font-weight:700;font-family:var(--mono);line-height:1.1;margin:4px 0">${money0(revenue)}</div>
-      <div class="sub" style="font-size:12px;color:var(--dim)">
-        ${Math.round(units).toLocaleString()} items over ${days} trading day(s) · ${money0(revenue/days)} a day ·
-        ${LEDGER_VENUES.map(v=>`${esc(vShort(v))} ${money0(byVenue[v]||0)}`).join(" · ")}
-        ${kitchen?` · ${kitchen} kitchen request(s) excluded`:""}</div>
+      <div style="font-size:12px;color:var(--dim)">${esc(w.label)} ·
+        ${LEDGER_VENUES.map(v=>`${esc(vShort(v))} ${money0(rows.filter(r=>r.venue===v).reduce((t,r)=>t+r.sales,0))}`).join(" · ")}</div>
     </div>
-    <div class="card">
-      <div class="tabs">${tabs.map(([k2,l])=>`<a class="${SALES_TAB===k2?"on":""}" onclick="setSalesTab('${k2}')">${esc(l)}</a>`).join("")}</div>
-      ${SALES_TAB==="hour"?sdHour(rows,days)
-       :SALES_TAB==="cat"?sdCat(rows,revenue)
-       :SALES_TAB==="prod"?sdProd(rows)
-       :sdWaste(rows)}
-    </div>`;
+    ${w.day?sdHourCard(rows,w):sdDayCard(rows,w)}
+    ${sdCatCard(rows,revenue)}
+    ${kitchen?`<div class="note" style="margin:-4px 2px 12px">${kitchen} kitchen prep request(s) excluded from sales and wastage
+      <span style="color:var(--dim)">(rung up to message the kitchen, never a sale)</span></div>`:""}
+    ${sdProdCard(rows,w)}
+    ${sdWasteCard(rows)}`;
+  const q=document.getElementById("psearch");
+  if(q){
+    q.addEventListener("input",e=>{ SALES_Q=e.target.value;
+      clearTimeout(window.__pt); window.__pt=setTimeout(()=>{ SALES_QF=true; route(); },160); });
+    if(SALES_QF){ q.focus(); try{ q.setSelectionRange(q.value.length,q.value.length); }catch(e){} SALES_QF=false; }
+  }
 }
-function setSalesTab(t){ SALES_TAB=t; SALES_SORT={col:"sales",dir:-1}; route(); }
+function salesBar(w){
+  return `<div class="card" style="padding:10px 14px;margin-bottom:12px">
+    <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+      <span class="label" style="margin:0">Sales</span>
+      <span class="chip sm ${SALES_PERIOD==="day"?"on":""}" onclick="setSalesPeriod('day')">Day</span>
+      <span class="chip sm ${SALES_PERIOD==="week"?"on":""}" onclick="setSalesPeriod('week')">Week</span>
+      <span class="chip sm" onclick="stepDay(-1)">‹</span>
+      <input type="date" value="${esc(SALES_DAY||fmtISO(mid(new Date())))}" onchange="setSalesDay(this.value)" style="font-size:13px;padding:6px 8px">
+      <span class="chip sm" onclick="stepDay(1)">›</span>
+      <span style="flex:1"></span>
+      <span style="font-size:12px;color:var(--dim)">${esc(w.label)}</span>
+    </div></div>`;
+}
+
+/* The trading span is what was actually observed — first hour with a sale to last — not a
+   notional opening time. Quoting "per hour" across a day that only traded ten of them
+   would understate every hour by a third. */
+function sdHourCard(rows,w){
+  const hrs={};
+  rows.forEach(r=>{ const h=r.ts.getHours(); hrs[h]=(hrs[h]||0)+r.sales; });
+  const keys=Object.keys(hrs).map(Number).sort((a,b)=>a-b);
+  if(!keys.length) return `<div class="card"><div class="label">Sales by time of day</div>
+    <div class="note">No sales with a time on them for ${esc(w.label)}.</div></div>`;
+  const lo=keys[0], hi=keys[keys.length-1];
+  const max=Math.max(...keys.map(k=>hrs[k]),1);
+  const total=keys.reduce((t,k)=>t+hrs[k],0);
+  const peak=keys.reduce((mx,k)=>hrs[k]>hrs[mx]?k:mx,keys[0]);
+  const span=hi-lo+1, slots=span;
+  let cols="";
+  for(let h=lo;h<=hi;h++){
+    const v=hrs[h]||0;
+    cols+=`<div class="col" title="${String(h).padStart(2,"0")}:00 — ${money(v)}">
+      <div class="bx" style="height:${Math.round(v/max*140)}px"></div>
+      <div class="lb">${h}</div></div>`;
+  }
+  const met=(k,v,sub)=>`<div class="metric"><div class="k">${k}</div><div class="val">${v}</div><div class="sub">${sub}</div></div>`;
+  return `<div class="card">
+    <div class="label">Sales by time of day <span class="pill">hourly · both kitchens</span></div>
+    <div class="chart">${cols}</div>
+    <div class="mets">
+      ${met("Revenue",money0(total),esc(w.label))}
+      ${met("Per hour",money0(total/span),span.toFixed(1)+" hours trading")}
+      ${met("Busiest hour",String(peak).padStart(2,"0")+":00",money(hrs[peak]))}
+      ${met("Per hour avg",money0(total/slots),slots+" slots")}
+    </div></div>`;
+}
+
+/* The week (or any multi-day window) as one bar per day, the way the explorer draws it.
+   Same axis logic as the hourly chart: revenue per day divides by the days that traded. */
+function sdDayCard(rows,w){
+  const days={};
+  rows.forEach(r=>{ const k=fmtISO(r.ts); days[k]=(days[k]||0)+r.sales; });
+  const keys=[]; for(let d=new Date(w.start);d<=w.end;d=addD(d,1)) keys.push(fmtISO(d));
+  const traded=keys.filter(k=>days[k]>0);
+  if(!traded.length) return `<div class="card"><div class="label">Sales by day</div>
+    <div class="note">No sales for ${esc(w.label)}.</div></div>`;
+  const max=Math.max(...traded.map(k=>days[k]),1);
+  const total=traded.reduce((t,k)=>t+days[k],0);
+  const best=traded.reduce((mx,k)=>days[k]>days[mx]?k:mx,traded[0]);
+  const dm=k=>{const d=gvizDate(k);return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0");};
+  const cols=keys.map(k=>`<div class="col" title="${dm(k)} — ${money(days[k]||0)}">
+      <div class="bx" style="height:${Math.round((days[k]||0)/max*140)}px"></div>
+      <div class="lb">${dm(k)}</div></div>`).join("");
+  const met=(k,v,sub)=>`<div class="metric"><div class="k">${k}</div><div class="val">${v}</div><div class="sub">${sub}</div></div>`;
+  return `<div class="card">
+    <div class="label">Sales by day <span class="pill">both kitchens</span></div>
+    <div class="chart">${cols}</div>
+    <div class="mets">
+      ${met("Revenue",money0(total),esc(w.label))}
+      ${met("Per day",money0(total/traded.length),traded.length+" trading day"+(traded.length===1?"":"s"))}
+      ${met("Best day",dm(best),money(days[best]))}
+    </div></div>`;
+}
+
+/* Tap a category to drill in: products narrow to that type and the card says so. */
+let SALES_CATDRILL="";
+function drillCat(t){ SALES_CATDRILL = SALES_CATDRILL===t ? "" : t; route(); }
+const prodType=r=>(CAT_MAP[r.category.toLowerCase()]||{}).type||r.group||"Uncategorised";
+function sdCatCard(rows,revenue){
+  const m={};
+  rows.forEach(r=>{
+    const t=prodType(r);
+    const o=m[t]||(m[t]={name:t,total:0});
+    o.total+=r.sales;
+    o[r.venue]=(o[r.venue]||0)+r.sales;
+  });
+  const list=Object.values(m).sort((a,b)=>b.total-a.total);
+  return `<div class="card"><div class="label">By category <span class="pill">product type</span>
+      <span style="font-weight:400;color:var(--dim);text-transform:none;letter-spacing:0;margin-left:8px">tap a row to drill in</span></div>
+    <table><thead><tr><th>Product type</th>
+      ${LEDGER_VENUES.map(v=>`<th class="num hide-sm">${esc(vShort(v))}</th>`).join("")}
+      <th class="num">Total</th><th class="num">%</th></tr></thead>
+    <tbody>${list.map(o=>`<tr class="click ${SALES_CATDRILL===o.name?"picked":""}" onclick="drillCat('${esc(o.name)}')"><td><b>${esc(o.name)}</b></td>
+      ${LEDGER_VENUES.map(v=>`<td class="num hide-sm">${o[v]?money0(o[v]):'<span style="color:var(--dim)">—</span>'}</td>`).join("")}
+      <td class="num"><b>${money(o.total)}</b></td>
+      <td class="num" style="color:var(--dim)">${revenue?Math.round(o.total/revenue*100)+"%":""}</td></tr>`).join("")}</tbody></table>
+    <div class="note">Product type comes from the POS category mapping; anything unmapped keeps its own name rather
+      than being folded away.</div></div>`;
+}
+
+function sdProdCard(rows,w){
+  const m={};
+  if(SALES_CATDRILL) rows=rows.filter(r=>prodType(r)===SALES_CATDRILL);
+  rows.forEach(r=>{
+    const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",sales:0,qty:0});
+    o.sales+=r.sales; o.qty+=r.qty;
+    o[r.venue]=(o[r.venue]||0)+r.sales;
+  });
+  let list=Object.values(m);
+  const q=SALES_Q.trim().toLowerCase();
+  if(q) list=list.filter(o=>o.name.toLowerCase().includes(q)||o.group.toLowerCase().includes(q));
+  const d=SALES_SORT.dir;
+  const by={ name:(a,b)=>a.name.localeCompare(b.name), cat:(a,b)=>a.group.localeCompare(b.group),
+             qty:(a,b)=>a.qty-b.qty, sales:(a,b)=>a.sales-b.sales };
+  list=list.slice().sort((a,b)=>d*(by[SALES_SORT.col]||by.sales)(a,b));
+  const head=(c,l,cls)=>{const on=SALES_SORT.col===c;
+    return `<th class="s ${cls||""} ${on?"act":""}" onclick="setSalesSort('${c}')">${l}${on?(d>0?" ▲":" ▼"):""}</th>`;};
+  return `<div class="card"><div class="label">Products (${Object.keys(m).length})
+      ${SALES_CATDRILL?`<span class="chip sm on" onclick="drillCat('${esc(SALES_CATDRILL)}')" style="margin-left:8px">${esc(SALES_CATDRILL)} ✕</span>`:""}</div>
+    <div style="font-size:12px;color:var(--dim);margin-bottom:8px">tap a column to sort ·
+      ${Object.keys(SD_ITEM||{}).length} names merged · ${Object.keys((SD_OVER||{}).item||{}).length+Object.keys((SD_OVER||{}).dept||{}).length} overrides applied</div>
+    <input type="search" id="psearch" placeholder="Search products…" value="${esc(SALES_Q)}">
+    <table style="margin-top:8px"><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}
+      ${LEDGER_VENUES.map(v=>`<th class="num hide-sm">${esc(vShort(v))}</th>`).join("")}
+      ${head("qty","Sold","num")}<th class="num hide-sm">Per day</th>${head("sales","Revenue","num")}</tr></thead>
+    <tbody>${list.slice(0,150).map(o=>`<tr>
+      <td><b>${esc(o.name)}</b></td>
+      <td class="hide-sm" style="color:var(--dim)">${esc(o.group)}</td>
+      ${LEDGER_VENUES.map(v=>`<td class="num hide-sm">${o[v]?money0(o[v]):'<span style="color:var(--dim)">—</span>'}</td>`).join("")}
+      <td class="num">${Math.round(o.qty*100)/100}</td>
+      <td class="num hide-sm" style="color:var(--dim)">${Math.round(o.qty/w.days*10)/10}</td>
+      <td class="num"><b>${money(o.sales)}</b></td></tr>`).join("")}</tbody></table>
+    ${list.length>150?`<div class="note">Showing 150 of ${list.length}.</div>`:""}</div>`;
+}
 function setSalesSort(c){
   if(SALES_SORT.col===c) SALES_SORT.dir*=-1;
-  else SALES_SORT={col:c,dir:(c==="name")?1:-1};
+  else SALES_SORT={col:c,dir:(c==="name"||c==="cat")?1:-1};
   route();
-}
-function sHead(col,label,cls){
-  const on=SALES_SORT.col===col;
-  return `<th class="s ${cls||""} ${on?"act":""}" onclick="setSalesSort('${col}')">${label}${on?(SALES_SORT.dir>0?" ▲":" ▼"):""}</th>`;
-}
-function sdSort(list){
-  const d=SALES_SORT.dir;
-  const by={ name:(a,b)=>a.name.localeCompare(b.name), sales:(a,b)=>a.sales-b.sales,
-             qty:(a,b)=>a.qty-b.qty, price:(a,b)=>(a.qty?a.sales/a.qty:0)-(b.qty?b.sales/b.qty:0) };
-  return list.slice().sort((a,b)=>d*(by[SALES_SORT.col]||by.sales)(a,b));
-}
-
-/* Hourly, both kitchens together. Per-hour figures divide by the number of DAYS that hour
-   actually traded, not by seven — an hour the shop was shut on three of them would
-   otherwise read as a third of its real rate. */
-function sdHour(rows,days){
-  const hrs=Array.from({length:24},()=>({sales:0,qty:0,days:{}}));
-  rows.forEach(r=>{
-    const h=r.ts.getHours();
-    hrs[h].sales+=r.sales; hrs[h].qty+=r.qty; hrs[h].days[fmtISO(r.ts)]=1;
-  });
-  const live=hrs.map((h,i)=>({h,i,n:Object.keys(h.days).length})).filter(x=>x.h.sales>0);
-  if(!live.length) return `<div class="note">No sales rows with a time on them this week.</div>`;
-  const peak=live.slice().sort((a,b)=>b.h.sales-a.h.sales)[0];
-  const max=peak.h.sales;
-  const hh=i=>String(i).padStart(2,"0")+":00";
-  return `<div style="font-size:13px;margin-bottom:10px">Busiest hour <b>${hh(peak.i)}–${hh(peak.i+1)}</b>
-      at ${money0(peak.h.sales)} for the week, ${money0(peak.h.sales/peak.n)} on an average day.</div>
-    <table><thead><tr><th>Hour</th><th class="num">Revenue</th><th class="num hide-sm">Items</th>
-      <th class="num">Per day</th><th class="num hide-sm">Avg item</th><th></th></tr></thead>
-    <tbody>${live.map(x=>`<tr>
-      <td><b>${hh(x.i)}</b></td>
-      <td class="num">${money(x.h.sales)}</td>
-      <td class="num hide-sm">${Math.round(x.h.qty)}</td>
-      <td class="num">${money0(x.h.sales/x.n)}<br><span style="color:var(--dim);font-size:11px">${x.n} day(s)</span></td>
-      <td class="num hide-sm">${x.h.qty?money(x.h.sales/x.h.qty):""}</td>
-      <td style="width:38%"><div style="background:#eee;border-radius:3px;height:10px">
-        <div style="background:var(--ink);height:10px;border-radius:3px;width:${(x.h.sales/max*100).toFixed(1)}%"></div></div></td>
-    </tr>`).join("")}</tbody></table>
-    <div class="note">Both kitchens together. Hours with no sales are left out rather than drawn as empty rows.</div>`;
-}
-
-function sdCat(rows,revenue){
-  const m={};
-  rows.forEach(r=>{
-    const g=r.group||"Uncategorised";
-    const o=m[g]||(m[g]={name:g,sales:0,qty:0});
-    o.sales+=r.sales; o.qty+=r.qty;
-  });
-  const list=sdSort(Object.values(m));
-  return `<table><thead><tr>${sHead("name","Category")}${sHead("sales","Revenue","num")}
-      ${sHead("qty","Items","num hide-sm")}${sHead("price","Avg item","num hide-sm")}<th class="num">% of sales</th></tr></thead>
-    <tbody>${list.map(o=>`<tr>
-      <td><b>${esc(o.name)}</b></td><td class="num">${money(o.sales)}</td>
-      <td class="num hide-sm">${Math.round(o.qty)}</td>
-      <td class="num hide-sm">${o.qty?money(o.sales/o.qty):""}</td>
-      <td class="num">${revenue?pct1(o.sales/revenue*100):""}</td></tr>`).join("")}</tbody></table>
-    <div class="note">Category is the group set in the Overrides tab where there is one, falling back to what the
-      POS sent. Roughly one POS assignment in three is wrong, which is what that tab exists to correct.</div>`;
-}
-
-function sdProd(rows){
-  const m={};
-  rows.forEach(r=>{
-    const o=m[r.item]||(m[r.item]={name:r.item,sales:0,qty:0,group:r.group||""});
-    o.sales+=r.sales; o.qty+=r.qty;
-  });
-  const list=sdSort(Object.values(m)).slice(0,120);
-  return `<table><thead><tr>${sHead("name","Product")}<th class="hide-sm">Category</th>
-      ${sHead("qty","Sold","num")}${sHead("sales","Revenue","num")}${sHead("price","Avg price","num hide-sm")}</tr></thead>
-    <tbody>${list.map(o=>`<tr>
-      <td><b>${esc(o.name)}</b></td>
-      <td class="hide-sm">${o.group?`<span class="pill">${esc(o.group)}</span>`:""}</td>
-      <td class="num">${Math.round(o.qty*100)/100}</td>
-      <td class="num">${money(o.sales)}</td>
-      <td class="num hide-sm">${o.qty?money(o.sales/o.qty):""}</td></tr>`).join("")}</tbody></table>
-    <div class="note">Top 120 by the sorted column. Names are rolled up through the ItemMap tab, so the same
-      product spelled two ways in the POS counts once.</div>`;
 }
 
 /* Wastage: a $0 line in a perishable group is food in the bin. Elsewhere a $0 line usually
    is not — Coffee & Tea is dominated by the loyalty give-away, which costs margin but went
-   to a paying regular. And a $0 line only counts as waste if the SAME item also sells for
-   money this week: something never charged for is a modifier, not a give-away. */
-function sdWaste(rows){
+   to a paying regular. And a $0 line only counts if the SAME item also sells for money in
+   this window: something never charged for is a modifier, not a give-away. */
+function sdWasteCard(rows){
   const paid={};
   rows.forEach(r=>{ if(r.sales>0) paid[r.item.toLowerCase()]=1; });
   const m={};
@@ -1955,24 +2034,26 @@ function sdWaste(rows){
     if(r.sales>0){ o.sold+=r.qty; o.rev+=r.sales; } else o.free+=r.qty;
   });
   let list=Object.values(m).filter(o=>o.free>0&&o.sold>0&&paid[o.name.toLowerCase()]);
-  list.forEach(o=>{ o.price=o.sold?o.rev/o.sold:0; o.value=o.free*o.price;
-                    o.pct=(o.sold+o.free)?o.free/(o.sold+o.free)*100:0; });
+  list.forEach(o=>{ o.price=o.rev/o.sold; o.value=o.free*o.price;
+                    o.pct=o.free/(o.sold+o.free)*100; });
   list.sort((a,b)=>b.value-a.value);
+  if(!list.length) return `<div class="card"><div class="label">Wastage</div>
+    <div class="note">Nothing binned in ${PERISHABLE.join(", ")} for this period — or those items are not in a
+      perishable group in the Overrides tab yet.</div></div>`;
   const units=list.reduce((t,o)=>t+o.free,0), value=list.reduce((t,o)=>t+o.value,0);
-  if(!list.length) return `<div class="note">No wastage found in ${PERISHABLE.join(", ")} this week — either none
-    was rung up, or the Overrides tab has not put these items into a perishable group yet.</div>`;
-  return `<div style="font-size:13px;margin-bottom:10px"><b>${Math.round(units)}</b> items binned,
-      worth <b>${money(value)}</b> at what they were selling for.</div>
+  return `<div class="card"><div class="label">Wastage</div>
+    <div style="font-size:13px;margin-bottom:10px"><b>${Math.round(units)}</b> items binned, worth
+      <b>${money(value)}</b> at what they were selling for.</div>
     <table><thead><tr><th>Product</th><th class="hide-sm">Group</th><th class="num">Binned</th>
       <th class="num hide-sm">Sold</th><th class="num">% wasted</th><th class="num">Value</th></tr></thead>
-    <tbody>${list.map(o=>`<tr>
-      <td><b>${esc(o.name)}</b></td><td class="hide-sm"><span class="pill">${esc(o.group)}</span></td>
+    <tbody>${list.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
+      <td class="hide-sm"><span class="pill">${esc(o.group)}</span></td>
       <td class="num">${Math.round(o.free*100)/100}</td>
       <td class="num hide-sm">${Math.round(o.sold*100)/100}</td>
       <td class="num ${o.pct>=25?"up":""}">${pct1(o.pct)}</td>
       <td class="num">${money(o.value)}</td></tr>`).join("")}</tbody></table>
     <div class="note">Perishable groups only: ${PERISHABLE.join(", ")}. Valued at that item's own average selling
-      price this week. An item that never sold for money is left out — it is a modifier, not waste.</div>`;
+      price in this period.</div></div>`;
 }
 
 /* ================= INVOICES PANEL =================
