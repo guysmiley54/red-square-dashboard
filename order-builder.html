@@ -119,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v13-1430"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v14-1600"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -161,6 +161,21 @@ let SHOW_HIDDEN=false, PICKED={};      // PICKED: item_key -> true, for bulk cat
    the caret have to be carried across by hand or the field goes dead after every keystroke
    and has to be clicked again. */
 let SEARCH_FOCUS=false, SEARCH_CARET=0;
+let GSEARCH="", GFOCUS=false, GCARET=0;
+/* Every supplier's catalogue, built once per store and reused. Deriving twenty catalogues
+   on each keystroke of a search box is the difference between instant and unusable. */
+let GCAT=null, GCAT_FOR=null;
+function globalCatalogue(){
+  if(GCAT&&GCAT_FOR===TAG.name) return GCAT;
+  const out=[];
+  supplierList().forEach(s=>{
+    if(!s.visible) return;
+    deriveCatalogue(LINES,s.name,new Date()).forEach(p=>out.push(p));
+  });
+  GCAT=out; GCAT_FOR=TAG.name;
+  return out;
+}
+function clearCatalogueCache(){ GCAT=null; GCAT_FOR=null; }
 let HOME_INV=null;                     // supplier whose invoices are open on the order list
 let SORT={col:"name",dir:1};
 let RANGE={preset:"8w",from:null,to:null};
@@ -612,6 +627,7 @@ async function loadAll(){
     if(!feed.length) LOAD_WARN.push("the POS sales feed returned nothing, so income from "+SALES_CUTOVER+" is missing");
     if(!weekly.length) LOAD_WARN.push("the Sales tab returned nothing, so income before "+SALES_CUTOVER+" is missing");
 
+    clearCatalogueCache();
     loadDrafts(); renderTagPicker(); renderFilters(); route();
   }catch(e){
     app.innerHTML=`<div class="err">Couldn't load the sheet: ${esc(e.message)}<br><br>Check SHEET_ID and that the workbook is shared as "Anyone with the link – Viewer".</div>`;
@@ -994,7 +1010,7 @@ function setTag(k){
   TAG=TAGS.find(t=>t.key===k)||TAGS[0];
   /* A category chosen for one store's catalogue rarely exists in the other's, and leaving
      it set showed an empty list with no obvious cause. */
-  CATFILT=""; PICKED={};
+  CATFILT=""; PICKED={}; clearCatalogueCache();
   renderTagPicker(); renderFilters(); route();
 }
 function renderFilters(){
@@ -1103,14 +1119,62 @@ function renderHome(){
              ${invoiceTable(s.name,TAG.name,15)}</td></tr>`:"");}).join("")}
       </tbody></table>
       ${shown.length?"":'<div class="note">No suppliers with itemised lines in the last '+CAT_DAYS+' days.</div>'}
-      <div class="note">Ordering is per store — this list, the catalogue, drafts and favourites are
+      <div class="note" id="homenote">Ordering is per store — this list, the catalogue, drafts and favourites are
         <b>${esc(TAG.name)}</b>. Budget and income are pooled across both kitchens.
         <b>Spend so far</b> is this store's invoices for that supplier this week to date. Underneath is how that
         compares with the same day over the last 6 weeks — like for like, because measuring a Tuesday against a
         whole week would show almost every supplier as down until Friday. Cost of goods only.</div>
-    </div>`;
+    </div>
+    ${productSearchCard()}`;
+  const g=document.getElementById("gsearch");
+  if(g){
+    g.addEventListener("input",e=>{
+      GSEARCH=e.target.value; GCARET=e.target.selectionStart;
+      clearTimeout(window.__gt);
+      window.__gt=setTimeout(()=>{ GFOCUS=true; route(); },160);
+    });
+    if(GFOCUS){ g.focus(); try{ g.setSelectionRange(GCARET,GCARET); }catch(e){} GFOCUS=false; }
+  }
 }
 function togglePortal(){ HIDE_PORTAL=!HIDE_PORTAL; route(); }
+
+/* Find a product without knowing who sells it — the question you have standing in the
+   coolroom. Searches every supplier at once, which is the point: the same thing often comes
+   from two of them at two prices, and that is worth seeing side by side. */
+function productSearchCard(){
+  const q=GSEARCH.trim().toLowerCase();
+  let rows=[];
+  if(q.length>=2){
+    rows=globalCatalogue().filter(p=>
+        p.desc.toLowerCase().includes(q)||String(p.code).toLowerCase().includes(q)
+        ||p.cat.toLowerCase().includes(q))
+      .sort((a,b)=>b.ordersPerWk-a.ordersPerWk||a.desc.localeCompare(b.desc));
+  }
+  const shown=rows.slice(0,40);
+  return `<div class="card">
+    <div class="label">Find a product — every supplier</div>
+    <input type="search" id="gsearch" placeholder="Search all products…" value="${esc(GSEARCH)}">
+    ${q.length<2?`<div class="note">Type at least two characters. Searches product names, codes and categories
+        across every supplier for ${esc(TAG.name)}.</div>`
+     :!rows.length?`<div class="note">Nothing matching “${esc(GSEARCH)}” bought at ${esc(TAG.name)} in the last ${CAT_DAYS} days.</div>`
+     :`<table style="margin-top:8px"><thead><tr><th>Product</th><th class="hide-sm">Supplier</th>
+         <th class="hide-sm">Category</th><th class="num">Unit price</th><th class="num hide-sm">90-day qty</th>
+         <th class="num hide-sm">Last bought</th></tr></thead>
+       <tbody>${shown.map(p=>{
+         const q90=p.buys.filter(b=>+b.date>=Date.now()-90*864e5).reduce((t,x)=>t+x.qty,0);
+         return `<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
+           <td><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}
+             ${p.hidden?' <span class="pill">off</span>':""}</td>
+           <td class="hide-sm">${esc(p.supplier)}</td>
+           <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
+           <td class="num">${money(p.price)}${p.change!=null?`<br><span class="${p.change>0?"up":"down"}" style="font-size:11px">${p.change>0?"+":""}${Math.round(p.change*10)/10}%</span>`:""}</td>
+           <td class="num hide-sm">${Math.round(q90*100)/100} ${esc(p.unit||"")}</td>
+           <td class="num hide-sm">${fmtD(p.lastDate)}<br><span style="color:var(--dim);font-size:11px">${p.daysSince}d</span></td>
+         </tr>`;}).join("")}</tbody></table>
+       <div class="note">${rows.length>shown.length?`Showing ${shown.length} of ${rows.length}. `:""}Click any product
+         for its 90-day quantity and price history.</div>`}
+  </div>`;
+}
 function toggleHomeInv(n){ HOME_INV = HOME_INV===n ? null : n; OPEN_INV=null; route(); }
 
 /* ================= BUILDER ================= */
@@ -1315,6 +1379,7 @@ async function bulkHide(off){
    them or the chips and filters keep showing the old answer until a refresh. */
 function recatalogue(){
   LINES.forEach(l=>{ l.cat=categorise(l.supplier,l.desc,l.invCategory,l.key); });
+  clearCatalogueCache();
 }
 /* Drafts are keyed venue::supplier. Reading DRAFTS[SUPPLIER] found nothing, so + always
    wrote 1 over whatever was there and − wrote 0 — invisible until Fill Usual put real
@@ -1551,10 +1616,22 @@ function renderPriceHistory(key){
   const buys=p.buys.slice().reverse();
   const prices=p.buys.map(b=>b.price), lo=Math.min(...prices), hi=Math.max(...prices);
   const first=p.buys[0], move=first.price?((p.price-first.price)/first.price*100):0;
-  const w=560,h=80,pad=6;
-  const xs=i=>pad+(i/Math.max(1,p.buys.length-1))*(w-2*pad);
-  const ys=v=>hi===lo?h/2:pad+(1-(v-lo)/(hi-lo))*(h-2*pad);
-  const path=p.buys.map((b,i)=>(i?"L":"M")+xs(i).toFixed(1)+" "+ys(b.price).toFixed(1)).join(" ");
+  /* The last 90 days, which is the window the ordering suggestions use, so the chart and
+     the "usual" quantity are talking about the same period. */
+  const from90=Date.now()-90*864e5;
+  const b90=p.buys.filter(b=>+b.date>=from90);
+  const qty90=b90.reduce((t,b)=>t+b.qty,0);
+  const spend90=b90.reduce((t,b)=>t+b.total,0);
+  const wkspan=Math.max(1,(Date.now()-Math.max(from90,+p.buys[0].date))/864e5/7);
+  /* Both series on one axis pair: price as a line against the left scale, quantity as bars
+     against its own. Plotted on TIME, not on buy number — evenly spaced points would hide
+     the gaps, and the gaps are the ordering pattern. */
+  const w=560,h=110,pad=8,base=h-16;
+  const t0=Math.max(from90,+p.buys[0].date), t1=Date.now();
+  const xs=d=>pad+((+d-t0)/Math.max(1,t1-t0))*(w-2*pad);
+  const ys=v=>hi===lo?base/2:pad+(1-(v-lo)/(hi-lo))*(base-2*pad);
+  const qmax=Math.max(...b90.map(b=>b.qty),1);
+  const path=b90.map((b,i)=>(i?"L":"M")+xs(b.date).toFixed(1)+" "+ys(b.price).toFixed(1)).join(" ");
   document.getElementById("app").innerHTML=`${summaryBar(m)}
     <a class="back" onclick="go('rsup::'+encodeURIComponent('${esc(p.supplier)}'))">${esc(p.supplier)} products</a>
     <div class="card">
@@ -1566,10 +1643,30 @@ function renderPriceHistory(key){
         <span class="${move>0?"up":move<0?"down":""}">${move>0?"+":""}${Math.round(move*10)/10}% since ${fmtD(first.date)}</span>
         · bought ${p.buys.length}×
         ${p.variants.length>1?`<br><span style="color:var(--dim)">Merged names: ${esc(p.variants.join(" / "))}</span>`:""}</div>
-      <svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+      <div class="grid2" style="gap:8px;margin-bottom:8px">
+        <div class="tile" style="padding:9px 12px">
+          <div class="k">Bought — last 90 days</div>
+          <div class="v" style="font-size:20px">${Math.round(qty90*100)/100} ${esc(p.unit||"")}</div>
+          <div class="sub">${b90.length} delivery(s) · ${Math.round(qty90/wkspan*100)/100} ${esc(p.unit||"")} a week</div>
+        </div>
+        <div class="tile" style="padding:9px 12px">
+          <div class="k">Spent — last 90 days</div>
+          <div class="v" style="font-size:20px">${money0(spend90)}</div>
+          <div class="sub">${qty90?money(spend90/qty90):"—"} average per ${esc(p.unit||"unit")}</div>
+        </div>
+      </div>
+      ${b90.length?`<svg class="spark" style="height:110px" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+        ${b90.map(b=>{const bh=(b.qty/qmax)*(base-pad*2);
+          return `<rect x="${(xs(b.date)-3).toFixed(1)}" y="${(base-bh).toFixed(1)}" width="6" height="${bh.toFixed(1)}" fill="#dcdcd8"/>`;}).join("")}
         <path d="${path}" fill="none" stroke="var(--ink)" stroke-width="2"/>
-        ${p.buys.map((b,i)=>`<circle cx="${xs(i).toFixed(1)}" cy="${ys(b.price).toFixed(1)}" r="2.5" fill="var(--red)"/>`).join("")}
+        ${b90.map(b=>`<circle cx="${xs(b.date).toFixed(1)}" cy="${ys(b.price).toFixed(1)}" r="2.5" fill="var(--red)"/>`).join("")}
+        <line x1="${pad}" y1="${base}" x2="${w-pad}" y2="${base}" stroke="var(--line)"/>
       </svg>
+      <div class="legend" style="margin-bottom:10px">
+        <span style="color:var(--dim)"><span style="display:inline-block;width:9px;height:9px;background:#dcdcd8;border-radius:2px;margin-right:4px"></span>quantity per delivery</span>
+        <span style="color:var(--dim)"><span style="display:inline-block;width:9px;height:9px;background:var(--ink);border-radius:2px;margin-right:4px"></span>unit price</span>
+        <span style="color:var(--dim)">${fmtD(new Date(t0))} → today, spaced by date</span>
+      </div>`:`<div class="note">Nothing bought in the last 90 days.</div>`}
       <table><thead><tr><th>Date</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Change</th><th class="num">Line</th><th class="hide-sm">Invoice</th></tr></thead>
       <tbody>${buys.map((b,i)=>{
         const prev=buys[i+1];
