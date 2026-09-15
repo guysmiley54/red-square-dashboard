@@ -129,7 +129,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v20-1240"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v21-1350"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1839,7 +1839,7 @@ let SALES_DAY=null, SALES_PERIOD="week", SALES_SORT={col:"sales",dir:-1}, SALES_
    rest of the tab is combined by instruction; the product list is where "what did WE sell"
    is a per-kitchen question. "both" is offered as a local override and resets whenever the
    header toggle is used, so the toggle always wins when someone reaches for it. */
-let SALES_PROD_VENUE=null, SALES_FROM=null, SALES_TO=null, SALES_GROUP="";
+let SALES_PROD_VENUE=null, SALES_FROM=null, SALES_TO=null, SALES_GROUP=[];
 const salesProdVenue=()=>SALES_PROD_VENUE===null?TAG.name:SALES_PROD_VENUE;
 function setProdVenue(v){ SALES_PROD_VENUE=v; route(); }
 const sdSales=rows=>rows.filter(r=>r.group!==LANE_KITCHEN);
@@ -1900,20 +1900,31 @@ function renderSales(){
     return;
   }
   const all=SD[k], rows=sdSales(all), kitchen=all.length-rows.length;
-  const revenue=rows.reduce((t,r)=>t+r.sales,0);
+  /* The item-level feed only exists from the cutover — before that the platform kept weekly
+     totals per venue and nothing finer. Rather than showing an empty page for July, the
+     headline falls back to those weekly figures (the same source the income tile uses on the
+     ordering screens) and the breakdowns say plainly why they are empty. */
+  const feedStart=gvizDate(SALES_CUTOVER);
+  const preFeed=feedStart&&w.end<feedStart;
+  const straddles=feedStart&&w.start<feedStart&&w.end>=feedStart;
+  const weeklyRevenue=SALES.filter(r=>r.date>=w.start&&r.date<=w.end).reduce((t,r)=>t+r.sales,0);
+  const revenue=preFeed?weeklyRevenue:rows.reduce((t,r)=>t+r.sales,0);
   /* Spend for the same window: invoices dated inside it, both kitchens, cost of goods only
      (INV already is). On a single day this is lumpy — a Monday delivery lands on Monday
      while Monday's sales are a seventh of the week — so the day view says so rather than
      letting one big drop read as a 200% COGS day. */
   const spend=INV.filter(r=>r.date&&r.date>=w.start&&r.date<=w.end&&supActive(r.supplier)).reduce((t,r)=>t+r.total,0);
-  const cogs=revenue>0?spend/revenue*100:null;
+  /* Weekly totals cover the whole window even when the item feed only covers part of it, so
+     the headline and the COGS ratio both use them wherever the window crosses the cutover. */
+  const headline=straddles?weeklyRevenue:revenue;
+  const cogs=headline>0?spend/headline*100:null;
   const cogsCls=cogs===null?"":cogs<=TARGET_COGS_PCT-2?"good":cogs<=TARGET_COGS_PCT+2?"amber":"over";
   document.getElementById("app").innerHTML=`${warnBar()}${salesBar(w)}
     ${SD_ERR?`<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div>`:""}
     <div class="summary" style="grid-template-columns:2fr 1fr 1fr">
       <div class="tile" style="text-align:center;padding:16px 14px">
         <div class="k">Combined sales — both kitchens</div>
-        <div class="v" style="font-size:40px">${money0(revenue)}</div>
+        <div class="v" style="font-size:40px">${money0(headline)}</div>
         <div class="sub">${esc(w.label)} ·
           ${LEDGER_VENUES.map(v=>`${esc(vShort(v))} ${money0(rows.filter(r=>r.venue===v).reduce((t,r)=>t+r.sales,0))}`).join(" · ")}</div>
       </div>
@@ -1930,12 +1941,18 @@ function renderSales(){
           cogs<=TARGET_COGS_PCT?(TARGET_COGS_PCT-cogs).toFixed(1)+" points under target":(cogs-TARGET_COGS_PCT).toFixed(1)+" points over target"}</div>
       </div>
     </div>
-    ${w.day?sdHourCard(rows,w):sdDayCard(rows,w)}
-    ${sdCatCard(rows,revenue)}
+    ${preFeed?`<div class="card"><div class="label">Item detail not available before ${fmtD(feedStart)}</div>
+      <div class="note">The total above comes from the weekly figures the platform kept before then, which is what
+        the income and COGS numbers on the ordering screens use. Hour, category, product and wastage breakdowns all
+        need the item-level feed, and that only starts on ${fmtD(feedStart)} when the email processor began
+        collecting it. Nothing is missing from the sheets — that detail was never captured.</div></div>`
+     :`${straddles?`<div class="note" style="margin:-4px 2px 12px">This period starts before ${fmtD(feedStart)}, so the
+        breakdowns below only cover from that date. The headline total covers the whole period.</div>`:""}
+      ${w.day?sdHourCard(rows,w):sdDayCard(rows,w)}
+      ${sdCatCard(rows,revenue)}`}
     ${kitchen?`<div class="note" style="margin:-4px 2px 12px">${kitchen} kitchen prep request(s) excluded from sales and wastage
       <span style="color:var(--dim)">(rung up to message the kitchen, never a sale)</span></div>`:""}
-    ${sdProdCard(rows,w)}
-    ${sdWasteCard(rows)}`;
+    ${preFeed?"":sdProdCard(rows,w)+sdWasteCard(rows)}`;
   const q=document.getElementById("psearch");
   if(q){
     q.addEventListener("input",e=>{ SALES_Q=e.target.value;
@@ -2025,11 +2042,19 @@ function sdDayCard(rows,w){
 
 /* Tap a category to drill in: products narrow to that type and the card says so. */
 let SALES_CATDRILL="";
-function drillCat(t){ SALES_CATDRILL = SALES_CATDRILL===t ? "" : t; SALES_GROUP=""; route(); }
+function drillCat(t){ SALES_CATDRILL = SALES_CATDRILL===t ? "" : t; SALES_GROUP=[]; route(); }
 /* The product-level category — Coffee & Tea, Breakfast, Lunch — as opposed to the Food /
    Beverage rollup above it. Clicking one narrows the list to it, which is the question
    "what did we sell in Breakfast" rather than "what did we sell in Food". */
-function drillGroup(g){ SALES_GROUP = SALES_GROUP===g ? "" : g; SALES_CATDRILL=""; route(); }
+/* Multi-select: each pill toggles, so "Breakfast + Lunch" is one view rather than two
+   separate looks. An empty selection means everything. */
+function drillGroup(g){
+  if(!g){ SALES_GROUP=[]; route(); return; }
+  const i=SALES_GROUP.indexOf(g);
+  if(i<0) SALES_GROUP=SALES_GROUP.concat([g]); else SALES_GROUP=SALES_GROUP.filter(x=>x!==g);
+  SALES_CATDRILL="";
+  route();
+}
 const prodType=r=>(CAT_MAP[r.category.toLowerCase()]||{}).type||r.group||"Uncategorised";
 function sdCatCard(rows,revenue){
   const m={};
@@ -2058,9 +2083,11 @@ function sdProdCard(rows,w){
   const pv=salesProdVenue();
   if(pv!=="both") rows=rows.filter(r=>r.venue===pv);
   if(SALES_CATDRILL) rows=rows.filter(r=>prodType(r)===SALES_CATDRILL);
-  if(SALES_GROUP) rows=rows.filter(r=>(r.group||"")===SALES_GROUP);
+  const rowsForGroups=rows;
+  if(SALES_GROUP.length) rows=rows.filter(r=>SALES_GROUP.indexOf(r.group||"")>=0);
   /* Every group present before the group filter, so the chips don't vanish once you use one. */
-  const groups=[...new Set((SALES_CATDRILL?rows:rows).map(r=>r.group).filter(Boolean))].sort();
+  /* Built before the group filter, so choosing one doesn't make the others disappear. */
+  const groups=[...new Set(rowsForGroups.map(r=>r.group).filter(Boolean))].sort();
   const cols=pv==="both"?LEDGER_VENUES:[pv];
   rows.forEach(r=>{
     const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",sales:0,qty:0});
@@ -2078,7 +2105,7 @@ function sdProdCard(rows,w){
     return `<th class="s ${cls||""} ${on?"act":""}" onclick="setSalesSort('${c}')">${l}${on?(d>0?" ▲":" ▼"):""}</th>`;};
   return `<div class="card"><div class="label">Products (${Object.keys(m).length})
       ${SALES_CATDRILL?`<span class="chip sm on" onclick="drillCat('${esc(SALES_CATDRILL)}')" style="margin-left:8px">${esc(SALES_CATDRILL)} ✕</span>`:""}
-      ${SALES_GROUP?`<span class="chip sm on" onclick="drillGroup('${esc(SALES_GROUP)}')" style="margin-left:8px">${esc(SALES_GROUP)} ✕</span>`:""}
+      ${SALES_GROUP.length?`<span class="chip sm on" onclick="drillGroup('')" style="margin-left:8px">${SALES_GROUP.length} categor${SALES_GROUP.length===1?"y":"ies"} ✕</span>`:""}
       <span style="float:right;display:flex;gap:5px">
         ${TAGS.map(t=>`<span class="chip sm ${pv===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
         <span class="chip sm ${pv==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span></div>
@@ -2086,9 +2113,9 @@ function sdProdCard(rows,w){
       ${Object.keys(SD_ITEM||{}).length} names merged · ${Object.keys((SD_OVER||{}).item||{}).length+Object.keys((SD_OVER||{}).dept||{}).length} overrides applied</div>
     <input type="search" id="psearch" placeholder="Search products…" value="${esc(SALES_Q)}">
     ${groups.length>1?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-      <span class="chip sm ${SALES_GROUP?"":"on"}" onclick="drillGroup('${esc(SALES_GROUP)}')">All categories</span>
-      ${groups.map(g=>`<span class="chip sm ${SALES_GROUP===g?"on":""}" onclick="drillGroup('${esc(g)}')">${esc(g)}</span>`).join("")}
-    </div>`:""}
+      <span class="chip sm ${SALES_GROUP.length?"":"on"}" onclick="drillGroup('')">All categories</span>
+      ${groups.map(g=>`<span class="chip sm ${SALES_GROUP.indexOf(g)>=0?"on":""}" onclick="drillGroup('${esc(g)}')">${esc(g)}</span>`).join("")}
+    </div><div class="note" style="margin-top:4px">Pick as many as you like.</div>`:""}
     <table style="margin-top:8px"><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}
       ${cols.length>1?cols.map(v=>`<th class="num hide-sm">${esc(vShort(v))}</th>`).join(""):""}
       ${head("qty","Sold","num")}<th class="num hide-sm">Per day</th>${head("sales","Revenue","num")}</tr></thead>
@@ -2112,6 +2139,10 @@ function setSalesSort(c){
    to a paying regular. And a $0 line only counts if the SAME item also sells for money in
    this window: something never charged for is a modifier, not a give-away. */
 function sdWasteCard(rows){
+  /* Same store scope as the products list — wastage is a per-kitchen question, and a Luma
+     chef looking at Cambridge's bin is not useful. */
+  const wv=salesProdVenue();
+  if(wv!=="both") rows=rows.filter(r=>r.venue===wv);
   const paid={};
   rows.forEach(r=>{ if(r.sales>0) paid[r.item.toLowerCase()]=1; });
   const m={};
@@ -2124,13 +2155,22 @@ function sdWasteCard(rows){
   list.forEach(o=>{ o.price=o.rev/o.sold; o.value=o.free*o.price;
                     o.pct=o.free/(o.sold+o.free)*100; });
   list.sort((a,b)=>b.value-a.value);
-  if(!list.length) return `<div class="card"><div class="label">Wastage</div>
-    <div class="note">Nothing binned in ${PERISHABLE.join(", ")} for this period — or those items are not in a
-      perishable group in the Overrides tab yet.</div></div>`;
+  if(!list.length) return `<div class="card"><div class="label">Wastage
+      <span style="float:right;display:flex;gap:5px">
+        ${TAGS.map(t=>`<span class="chip sm ${wv===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
+        <span class="chip sm ${wv==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span></div>
+    <div class="note">Nothing binned in ${PERISHABLE.join(", ")} at ${wv==="both"?"either kitchen":esc(wv)} for this
+      period — or those items are not in a perishable group in the Overrides tab yet.</div></div>`;
   const units=list.reduce((t,o)=>t+o.free,0), value=list.reduce((t,o)=>t+o.value,0);
-  return `<div class="card"><div class="label">Wastage</div>
-    <div style="font-size:13px;margin-bottom:10px"><b>${Math.round(units)}</b> items binned, worth
-      <b>${money(value)}</b> at what they were selling for.</div>
+  const soldAll=list.reduce((t,o)=>t+o.sold,0);
+  const pctAll=(soldAll+units)?units/(soldAll+units)*100:0;
+  return `<div class="card"><div class="label">Wastage
+      <span style="float:right;display:flex;gap:5px">
+        ${TAGS.map(t=>`<span class="chip sm ${wv===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
+        <span class="chip sm ${wv==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span></div>
+    <div style="font-size:13px;margin-bottom:10px"><b>${Math.round(units)}</b> items binned at
+      ${wv==="both"?"both kitchens":esc(wv)}, worth <b>${money(value)}</b> at what they were selling for —
+      ${pct1(pctAll)} of everything made in these groups.</div>
     <table><thead><tr><th>Product</th><th class="hide-sm">Group</th><th class="num">Binned</th>
       <th class="num hide-sm">Sold</th><th class="num">% wasted</th><th class="num">Value</th></tr></thead>
     <tbody>${list.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
@@ -2138,7 +2178,12 @@ function sdWasteCard(rows){
       <td class="num">${Math.round(o.free*100)/100}</td>
       <td class="num hide-sm">${Math.round(o.sold*100)/100}</td>
       <td class="num ${o.pct>=25?"up":""}">${pct1(o.pct)}</td>
-      <td class="num">${money(o.value)}</td></tr>`).join("")}</tbody></table>
+      <td class="num">${money(o.value)}</td></tr>`).join("")}
+      <tr style="border-top:2px solid var(--line)"><td><b>Total</b></td><td class="hide-sm"></td>
+        <td class="num"><b>${Math.round(units*100)/100}</b></td>
+        <td class="num hide-sm">${Math.round(soldAll*100)/100}</td>
+        <td class="num"><b>${pct1(pctAll)}</b></td>
+        <td class="num"><b>${money(value)}</b></td></tr></tbody></table>
     <div class="note">Perishable groups only: ${PERISHABLE.join(", ")}. Valued at that item's own average selling
       price in this period.</div></div>`;
 }
