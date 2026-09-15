@@ -119,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v12-1215"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v12-1300"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1057,10 +1057,10 @@ function route(){
 
 /* ================= HOME ================= */
 /* One line, stating a fact: what it cost, how that differs from the same day in recent
-   weeks, and what that base is. The percentage in red read as an alarm on a supplier that
-   was merely early in its week, and fixing it with two more columns made the table busier
-   than the problem warranted. A dollar difference is what anyone controlling spend actually
-   wants, and it carries its own comparison. */
+   weeks, and what that base is. A dollar difference is what anyone controlling spend
+   actually wants, and it carries its own comparison. Colour sits on the difference only —
+   it is safe to scan once the base is spelled out beside it, which it was not when a bare
+   red percentage sat next to a full-week average it had nothing to do with. */
 const DAYSHORT=new Date().toLocaleDateString("en-AU",{weekday:"short"});
 function renderHome(){
   const m=weekModel(), all=supplierList();
@@ -1087,7 +1087,7 @@ function renderHome(){
               title="Show invoices">${openHere?"▾":"▸"}</td>
           <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.portal?' <span class="pill">portal</span>':""}${s.rep?"":' <span class="pill">no rep email</span>'}</td>
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
-            ${v!=null?`<br><span style="font-size:11px;color:var(--dim)">${s.week>=s.usualToDate?"+":"−"}${money0(Math.abs(s.week-s.usualToDate)).slice(1)} vs ${money0(s.usualToDate)} by ${esc(DAYSHORT)}</span>`:""}</td>
+            ${v!=null?`<br><span class="${s.week>=s.usualToDate?"up":"down"}" style="font-size:11px">${s.week>=s.usualToDate?"+":"−"}${money0(Math.abs(s.week-s.usualToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.usualToDate)} by ${esc(DAYSHORT)}</span>`:""}</td>
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
           <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
         </tr>`
