@@ -119,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v9-2130"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v10-1020"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -184,6 +184,20 @@ function nextBusinessDay(from){
 }
 const vShort=v=>String(v||"").replace("Red Square ","RS ").replace("Luma Kitchen","Luma");
 
+/* Same as gvizDate but keeps the clock. Both tabs carry real timestamps — Invoices.scanned
+   is when the invoice email was captured, Orders.logged_at is when the order was placed —
+   and reconciliation is wrong without them. */
+function gvizDateTime(v){
+  if(v instanceof Date) return v;
+  const s=String(v||"").trim();
+  let m=/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?/.exec(s);
+  if(m) return new Date(+m[1],+m[2],+m[3],+(m[4]||0),+(m[5]||0),+(m[6]||0));
+  m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(s);
+  if(m) return new Date(+m[3],+m[2]-1,+m[1],+m[4],+m[5],+(m[6]||0));
+  m=/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(s);
+  if(m) return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6]||0));
+  return gvizDate(v);
+}
 function gvizDate(v){
   if(v instanceof Date) return v;
   const s=String(v||"").trim();
@@ -514,7 +528,8 @@ async function loadAll(){
        downstream can reintroduce it. */
     INV=inv.map(r=>({venue:r.venue||"",supplier:r.supplier||"",number:String(r.invoice_number||""),
       date:gvizDate(r.invoice_date)||gvizDate(r.scanned),subtotal:num_(r.subtotal),gst:num_(r.gst),
-      total:num_(r.total),category:r.category||"",type:r.type||"invoice",src:r.source||""}))
+      total:num_(r.total),category:r.category||"",type:r.type||"invoice",src:r.source||"",
+      scannedAt:gvizDateTime(r.scanned)}))
       .filter(r=>r.supplier&&r.date&&r.type!=="superseded"&&LEDGER_VENUES.indexOf(r.venue)>=0);
 
     const variants={};
@@ -644,6 +659,7 @@ function parseOrders(rows,lineRows){
     const rec={id,action,supplier:String(r.supplier||"").trim(),
       venue,date:d,total:num_(r.total),subtotal:num_(r.subtotal),gst:num_(r.gst),
       channel:String(r.channel||"").trim(),by:String(r.placed_by||"").trim(),logged,
+      loggedAt:gvizDateTime(r.logged_at),
       delivery:gvizDate(r.delivery_date)||null};
     /* A manual match row carries the invoice number in its note; every other field on it may
        be blank, so it is layered onto the place row rather than replacing it. */
@@ -653,7 +669,12 @@ function parseOrders(rows,lineRows){
     if(!prev||(logged&&prev.logged&&logged>=prev.logged)||!prev.logged) byId[id]=Object.assign({},prev||{},keep);
   });
   Object.values(byId).forEach(o=>{ o.lines=lines[o.id]||[]; });
-  return Object.values(byId).filter(o=>o.date&&o.supplier&&o.action!=="cancel");
+  const all=Object.values(byId).filter(o=>o.date&&o.supplier);
+  /* Deleting is append-only: a "cancel" row is added and the last row wins, so the order
+     leaves every total and list while the history stays in the sheet. Counting them means
+     the Placed screen can say where they went rather than silently losing rows. */
+  CANCELLED=all.filter(o=>o.action==="cancel").length;
+  return all.filter(o=>o.action!=="cancel");
 }
 
 /* ================= INCOME, SPEND, COUNTDOWN =================
@@ -738,16 +759,28 @@ function reconcile(orders,inv,wk,today){
     if(o.action==="receive"){ closed.push({o,inv:null,how:"marked received"}); return; }
     const anchor=+mid(o.delivery||o.date);
     if((+now-anchor)/864e5>MATCH_DAYS){ closed.push({o,inv:null,how:"expired after "+MATCH_DAYS+" days"}); return; }
-    let best=null, bestDiff=Infinity;
+    let best=null, bestDiff=Infinity, nearestAny=null, nearestDiff=Infinity;
     pool.forEach(p=>{
       if(p.used||norm(p.r.supplier)!==norm(o.supplier)) return;
       const gap=(+mid(p.r.date)-anchor)/864e5;
       if(gap<-1||gap>MATCH_DAYS) return;
-      const diff=Math.abs(p.r.total-o.total);
-      if(diff<bestDiff){ best=p; bestDiff=diff; }
+      /* Tracked before the timestamp test: something rejected for arriving too early is
+         still the most useful thing to show a human, who can match it by hand if they know
+         better. */
+      const d0=Math.abs(p.r.total-o.total);
+      if(d0<nearestDiff){ nearestAny=p.r; nearestDiff=d0; }
+      /* An invoice captured BEFORE the order was placed cannot be that order's, whatever the
+         dates say. Both tabs carry the clock: Invoices.scanned is when the email landed,
+         Orders.logged_at when the order was made. This caught a real one — a genuine $900.48
+         Doppio invoice scanned 14 Sep 17:53 was closing an $831.30 order placed 15 Sep 11:15,
+         because both carried the invoice date 15 Sep and the amounts were 8% apart.
+         Not all orders go through this tool, so unrelated invoices are the normal case, not
+         the exception, and date-only matching is not enough to tell them apart. */
+      if(p.r.scannedAt&&o.loggedAt&&p.r.scannedAt<o.loggedAt) return;
+      if(d0<bestDiff){ best=p; bestDiff=d0; }
     });
     if(best&&bestDiff<=o.total*MATCH_TOL){ best.used=true; closed.push({o,inv:best.r,how:"matched automatically"}); }
-    else open.push(Object.assign({},o,{nearest:best?best.r:null}));
+    else open.push(Object.assign({},o,{nearest:nearestAny}));
   });
   return {open,closed};
 }
@@ -1567,7 +1600,7 @@ function invoiceTable(supplier,venue,limit){
 
 /* ================= PLACED ORDERS ================= */
 /* Per store, like everything else about ordering. */
-let OPEN_ORDER=null;
+let OPEN_ORDER=null, CANCELLED=0;
 function toggleOrder(id){ OPEN_ORDER = OPEN_ORDER===id ? null : id; route(); }
 function renderPlaced(){
   const m=weekModel();
@@ -1608,15 +1641,21 @@ function renderPlaced(){
                 <a class="chip sm" onclick="event.stopPropagation();matchPicker('${esc(o.id)}')">Match to an invoice…</a>
                 <a class="chip sm" onclick="event.stopPropagation();markReceived('${esc(o.id)}')">Mark received</a>
               </div>`:""}
+            <div style="margin-top:10px">
+              <a class="chip sm" onclick="event.stopPropagation();deleteOrder('${esc(o.id)}')"
+                 style="border-color:var(--red);color:var(--red)">Delete this order</a>
+            </div>
           </td></tr>`:"");
       }).join("")}</tbody></table>
       ${rows.length?"":'<div class="note">No orders logged for this store yet.</div>'}
+      ${CANCELLED?`<div class="note">${CANCELLED} deleted order(s) are hidden. They stay in the Orders tab with a
+        cancel row against them, so nothing is lost from the record.</div>`:""}
       <div class="note">
         <b>Awaiting invoice</b> — the order is holding its slot in the week's budget. When its invoice arrives the
         order stops counting and the invoice counts instead, so a delivery is never charged twice.<br>
-        <b>Invoiced</b> — the tool found that invoice: the same supplier, dated on or after the delivery day, and
-        the closest in value to the order, within a third. If nothing is that close the order stays open and shows
-        its nearest candidate, so you can match it by hand.<br>
+        <b>Invoiced</b> — the tool found that invoice: the same supplier, captured after the order was placed,
+        dated on or around the delivery day, and the closest in value, within a third. If nothing fits, the order
+        stays open and shows its nearest candidate so you can match it by hand.<br>
         Orders placed outside this tool have no row here. Their invoices simply count as spend, which is right.
       </div>
     </div>`;
@@ -1647,6 +1686,26 @@ async function matchTo(id,invoiceNumber){
   catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
   o.matchedTo=invoiceNumber;
   toast("Matched to invoice "+invoiceNumber+".");
+  route();
+}
+/* Delete = a cancel row, not a removed row. The order leaves the budget, the lists and the
+   reconciliation immediately; the sheet keeps the whole history, which matters when the
+   thing being deleted is a real order somebody placed. */
+async function deleteOrder(id){
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
+  if(!confirm(`Delete the ${fmtD(o.date)} order to ${o.supplier} for ${money(o.total)}?\n\n`
+             +`It stops counting against the week straight away. The record stays in the sheet.`)) return;
+  try{ await post({action:"cancel",order_id:id,supplier:o.supplier,venue:o.venue,
+                   order_date:fmtISO(o.date),subtotal:o.subtotal,gst:o.gst,total:o.total}); }
+  catch(e){
+    if(e.message!=="no-webapp"){ alert(e.message); return; }
+    toast("Deleted in this browser only — WEBAPP_URL isn't set.");
+  }
+  ORDERS=ORDERS.filter(x=>x.id!==id);
+  LOCAL_ORDERS=LOCAL_ORDERS.filter(x=>x.id!==id);
+  CANCELLED++;
+  OPEN_ORDER=null;
+  toast("Order deleted.");
   route();
 }
 async function markReceived(id){
@@ -1873,7 +1932,7 @@ function buildPayload(action){
     lines:t.lines.map((l,i)=>({line_no:i+1,item_code:l.code,description:l.desc,unit:l.unit,
                                qty:l.qty,unit_price:l.price,line_total:l.total}))};
 }
-const localRecord=o=>({id:o.order_id,action:"place",supplier:o.supplier,venue:o.venue,date:mid(new Date()),
+const localRecord=o=>({id:o.order_id,action:"place",supplier:o.supplier,venue:o.venue,date:mid(new Date()),loggedAt:new Date(),
   delivery:gvizDate(o.delivery_date)||null,lines:(o.lines||[]).map(l=>({code:l.item_code,desc:l.description,unit:l.unit,qty:l.qty,price:l.unit_price})),
   total:o.total,subtotal:o.subtotal,gst:o.gst,channel:o.channel,by:identity().user||"",logged:new Date()});
 async function markPlaced(){
