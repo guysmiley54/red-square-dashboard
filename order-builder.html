@@ -92,6 +92,7 @@
     <span id="buildtag" style="font-size:9px;color:#666"></span></div>
   <div class="tag" id="tagpick"></div>
   <span class="spacer"></span>
+  <a class="hbtn" onclick="go('sales')">Sales</a>
   <a class="hbtn" onclick="go('placed')">Placed</a>
   <a class="hbtn" onclick="go('favs')">Favourites</a>
   <a class="hbtn" onclick="go('reports')">Reports</a>
@@ -119,7 +120,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v15-1730"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v16-1900"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1071,6 +1072,7 @@ function route(){
   if(h==="reports") return renderReports();
   if(h.startsWith("rsup::")) return renderSupplierProducts(h.slice(6));
   if(h.startsWith("rprod::")) return renderPriceHistory(h.slice(7));
+  if(h==="sales") return renderSales();
   if(h==="placed") return renderPlaced();
   if(h.startsWith("grp::")) return renderGroupDrill(h.slice(5));
   if(h.startsWith("s::")){
@@ -1717,6 +1719,260 @@ function renderPriceHistory(key){
           <td class="num">${money(b.total)}</td>
           <td class="hide-sm" style="font-family:var(--mono);font-size:11px">${esc(b.number)}</td></tr>`;}).join("")}</tbody></table>
     </div>`;
+}
+
+/* ================= SALES DETAIL =================
+   The item-level feed is 108,000 rows and 12 MB. Pulling it on every page load would make
+   ordering — the thing this app is for — wait on a report nobody had asked for. So it is
+   fetched only when the Sales tab is opened, only for the week on screen, and cached per
+   week. gviz does the date filtering: `where B >= date '...'`, with the DATE LITERAL form,
+   because column B types as a date and a plain string comparison silently matches nothing
+   (verified against the live sheet — the bare-string version returns a header and no rows).
+
+   Two small lookup tabs come with it. Overrides carries the group each item really belongs
+   to, because roughly one POS assignment in three is wrong and nobody is going to fix them
+   on site; ItemMap folds POS spellings together. Both are optional — without them the page
+   still works, it just reports what ImPOS said. */
+const SALES_SHEET=SALES_SHEET_ID;
+let SD={}, SD_OVER=null, SD_ITEM=null, SD_BUSY=false, SD_ERR="";
+const LANE_KITCHEN="Kitchen requests", LANE_MODIFIER="Modifiers";
+const PERISHABLE=["Sandwiches","Cakes & Sweets","Hot Takeaway","Grab & Go"];
+const LOYALTY_GROUP="Coffee & Tea";
+const CAT_MAP={
+  "beverage":{type:"Beverage"},"beverage d/h":{type:"Beverage"},"beverage t/a":{type:"Beverage"},
+  "food d/h":{type:"Food"},"dine in":{type:"Food"},"food t/a":{type:"Food"},
+  "takeway food":{type:"Food"},"takeaway food":{type:"Food"},
+  "luma food d/h":{type:"Food"},"luma beverage dine in":{type:"Beverage"},
+  "sundries":{type:"Sundries"},"impos":{type:"Uncategorised"}
+};
+async function sdTab(name){
+  const u=`https://docs.google.com/spreadsheets/d/${SALES_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(name)}&_=${Date.now()}`;
+  try{
+    const t=await (await fetch(u)).text();
+    if(!t||t.trim()[0]==="<"||/"status"\s*:\s*"error"/.test(t)) return null;
+    return parseCsv(t);
+  }catch(e){ return null; }
+}
+async function sdLookups(){
+  if(SD_OVER&&SD_ITEM) return;
+  SD_OVER={dept:{},item:{}}; SD_ITEM={};
+  const og=await sdTab("Overrides");
+  if(og&&og.length>1){
+    const h=og[0].map(x=>String(x).trim().toLowerCase());
+    const ki=h.indexOf("kind"), fi=h.indexOf("from"), gi=h.indexOf("group");
+    og.slice(1).forEach(r=>{
+      const from=String(r[fi]||"").trim(), grp=gi>-1?String(r[gi]||"").trim():"";
+      if(!from||!grp) return;
+      const kind=ki>-1?String(r[ki]||"").trim().toLowerCase():"";
+      if(kind.indexOf("dep")===0) SD_OVER.dept[from.toLowerCase()]=grp;
+      else if(kind.indexOf("item")===0) SD_OVER.item[from.toLowerCase()]=grp;
+      else { SD_OVER.dept[from.toLowerCase()]=grp; SD_OVER.item[from.toLowerCase()]=grp; }
+    });
+  }
+  const ig=await sdTab("ItemMap");
+  if(ig&&ig.length>1){
+    const h=ig[0].map(x=>String(x).trim().toLowerCase());
+    let fi=h.indexOf("item_from"); if(fi<0) fi=0;
+    let ti=h.indexOf("maps_to");   if(ti<0) ti=1;
+    ig.slice(1).forEach(r=>{
+      const a=String(r[fi]||"").trim(), b=String(r[ti]||"").trim();
+      if(a&&b&&a!==b) SD_ITEM[a.toLowerCase()]=b;
+    });
+  }
+}
+const sdKey=wk=>fmtISO(wk.start);
+async function loadSalesWeek(wk){
+  const k=sdKey(wk);
+  if(SD[k]||SD_BUSY) return;
+  SD_BUSY=true; SD_ERR="";
+  try{
+    await sdLookups();
+    const q=`select A,C,D,E,F,G,H where B >= date '${fmtISO(wk.start)}' and B <= date '${fmtISO(wk.end)}'`;
+    const u=`https://docs.google.com/spreadsheets/d/${SALES_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=SalesFeed&tq=${encodeURIComponent(q)}&_=${Date.now()}`;
+    const txt=await (await fetch(u)).text();
+    if(!txt||txt.trim()[0]==="<"||/"status"\s*:\s*"error"/.test(txt)) throw new Error("the sales feed refused that query");
+    const g=parseCsv(txt);
+    /* select A,C,D,E,F,G,H  ->  timestamp, venue, category, department, item, qty, sales */
+    const rows=g.slice(1).map(r=>{
+      const ts=gvizDateTime(r[0]);
+      const dept=String(r[3]||"").trim(), rawItem=String(r[4]||"").trim();
+      const item=SD_ITEM[rawItem.toLowerCase()]||rawItem;
+      /* Department sets the broad group, the item row corrects it: the item-level fixes
+         exist precisely to override departments staff filed wrong. */
+      const grp=SD_OVER.item[item.toLowerCase()]||SD_OVER.dept[dept.toLowerCase()]||"";
+      const cat=String(r[2]||"").trim();
+      return { ts, venue:String(r[1]||"").trim(), category:cat, department:dept, item,
+               group:grp||(CAT_MAP[cat.toLowerCase()]||{}).type||cat||"Uncategorised",
+               qty:num_(r[5]), sales:num_(r[6]) };
+    }).filter(r=>r.ts&&r.item&&LEDGER_VENUES.indexOf(r.venue)>=0);
+    SD[k]=rows;
+  }catch(e){ SD_ERR=e.message; SD[k]=[]; }
+  SD_BUSY=false;
+  route();
+}
+
+/* ================= SALES VIEW =================
+   Combined across both kitchens throughout, by instruction. Kitchen requests are stripped
+   first: staff ring those up to fire a docket to the kitchen printer, so they are not sales
+   and counting them would inflate everything below. Modifiers stay — an extra shot is real
+   revenue. */
+let SALES_TAB="hour", SALES_SORT={col:"sales",dir:-1};
+const sdSales=rows=>rows.filter(r=>r.group!==LANE_KITCHEN);
+function renderSales(){
+  const m=weekModel(), wk=m.wk, k=sdKey(wk);
+  if(!SD[k]){
+    loadSalesWeek(wk);
+    document.getElementById("app").innerHTML=`${summaryBar(m)}
+      <div class="card"><div class="label">Sales — ${esc(weekLabel(wk))}</div>
+      <div id="status">Loading the item-level feed for this week…</div>
+      <div class="note">Only this week is fetched, and only when you open this tab — the full
+        feed is 108,000 rows.</div></div>`;
+    return;
+  }
+  const all=SD[k], rows=sdSales(all);
+  const revenue=rows.reduce((t,r)=>t+r.sales,0);
+  const units=rows.reduce((t,r)=>t+r.qty,0);
+  const kitchen=all.length-rows.length;
+  const days=[...new Set(rows.map(r=>fmtISO(r.ts)))].length||1;
+  const byVenue={};
+  rows.forEach(r=>byVenue[r.venue]=(byVenue[r.venue]||0)+r.sales);
+
+  const tabs=[["hour","Time of day"],["cat","Category"],["prod","Products"],["waste","Wastage"]];
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
+    ${SD_ERR?`<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div>`:""}
+    <div class="card" style="text-align:center;padding:18px 14px">
+      <div class="k" style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">Combined sales — both kitchens · ${esc(weekLabel(wk))}</div>
+      <div style="font-size:40px;font-weight:700;font-family:var(--mono);line-height:1.1;margin:4px 0">${money0(revenue)}</div>
+      <div class="sub" style="font-size:12px;color:var(--dim)">
+        ${Math.round(units).toLocaleString()} items over ${days} trading day(s) · ${money0(revenue/days)} a day ·
+        ${LEDGER_VENUES.map(v=>`${esc(vShort(v))} ${money0(byVenue[v]||0)}`).join(" · ")}
+        ${kitchen?` · ${kitchen} kitchen request(s) excluded`:""}</div>
+    </div>
+    <div class="card">
+      <div class="tabs">${tabs.map(([k2,l])=>`<a class="${SALES_TAB===k2?"on":""}" onclick="setSalesTab('${k2}')">${esc(l)}</a>`).join("")}</div>
+      ${SALES_TAB==="hour"?sdHour(rows,days)
+       :SALES_TAB==="cat"?sdCat(rows,revenue)
+       :SALES_TAB==="prod"?sdProd(rows)
+       :sdWaste(rows)}
+    </div>`;
+}
+function setSalesTab(t){ SALES_TAB=t; SALES_SORT={col:"sales",dir:-1}; route(); }
+function setSalesSort(c){
+  if(SALES_SORT.col===c) SALES_SORT.dir*=-1;
+  else SALES_SORT={col:c,dir:(c==="name")?1:-1};
+  route();
+}
+function sHead(col,label,cls){
+  const on=SALES_SORT.col===col;
+  return `<th class="s ${cls||""} ${on?"act":""}" onclick="setSalesSort('${col}')">${label}${on?(SALES_SORT.dir>0?" ▲":" ▼"):""}</th>`;
+}
+function sdSort(list){
+  const d=SALES_SORT.dir;
+  const by={ name:(a,b)=>a.name.localeCompare(b.name), sales:(a,b)=>a.sales-b.sales,
+             qty:(a,b)=>a.qty-b.qty, price:(a,b)=>(a.qty?a.sales/a.qty:0)-(b.qty?b.sales/b.qty:0) };
+  return list.slice().sort((a,b)=>d*(by[SALES_SORT.col]||by.sales)(a,b));
+}
+
+/* Hourly, both kitchens together. Per-hour figures divide by the number of DAYS that hour
+   actually traded, not by seven — an hour the shop was shut on three of them would
+   otherwise read as a third of its real rate. */
+function sdHour(rows,days){
+  const hrs=Array.from({length:24},()=>({sales:0,qty:0,days:{}}));
+  rows.forEach(r=>{
+    const h=r.ts.getHours();
+    hrs[h].sales+=r.sales; hrs[h].qty+=r.qty; hrs[h].days[fmtISO(r.ts)]=1;
+  });
+  const live=hrs.map((h,i)=>({h,i,n:Object.keys(h.days).length})).filter(x=>x.h.sales>0);
+  if(!live.length) return `<div class="note">No sales rows with a time on them this week.</div>`;
+  const peak=live.slice().sort((a,b)=>b.h.sales-a.h.sales)[0];
+  const max=peak.h.sales;
+  const hh=i=>String(i).padStart(2,"0")+":00";
+  return `<div style="font-size:13px;margin-bottom:10px">Busiest hour <b>${hh(peak.i)}–${hh(peak.i+1)}</b>
+      at ${money0(peak.h.sales)} for the week, ${money0(peak.h.sales/peak.n)} on an average day.</div>
+    <table><thead><tr><th>Hour</th><th class="num">Revenue</th><th class="num hide-sm">Items</th>
+      <th class="num">Per day</th><th class="num hide-sm">Avg item</th><th></th></tr></thead>
+    <tbody>${live.map(x=>`<tr>
+      <td><b>${hh(x.i)}</b></td>
+      <td class="num">${money(x.h.sales)}</td>
+      <td class="num hide-sm">${Math.round(x.h.qty)}</td>
+      <td class="num">${money0(x.h.sales/x.n)}<br><span style="color:var(--dim);font-size:11px">${x.n} day(s)</span></td>
+      <td class="num hide-sm">${x.h.qty?money(x.h.sales/x.h.qty):""}</td>
+      <td style="width:38%"><div style="background:#eee;border-radius:3px;height:10px">
+        <div style="background:var(--ink);height:10px;border-radius:3px;width:${(x.h.sales/max*100).toFixed(1)}%"></div></div></td>
+    </tr>`).join("")}</tbody></table>
+    <div class="note">Both kitchens together. Hours with no sales are left out rather than drawn as empty rows.</div>`;
+}
+
+function sdCat(rows,revenue){
+  const m={};
+  rows.forEach(r=>{
+    const g=r.group||"Uncategorised";
+    const o=m[g]||(m[g]={name:g,sales:0,qty:0});
+    o.sales+=r.sales; o.qty+=r.qty;
+  });
+  const list=sdSort(Object.values(m));
+  return `<table><thead><tr>${sHead("name","Category")}${sHead("sales","Revenue","num")}
+      ${sHead("qty","Items","num hide-sm")}${sHead("price","Avg item","num hide-sm")}<th class="num">% of sales</th></tr></thead>
+    <tbody>${list.map(o=>`<tr>
+      <td><b>${esc(o.name)}</b></td><td class="num">${money(o.sales)}</td>
+      <td class="num hide-sm">${Math.round(o.qty)}</td>
+      <td class="num hide-sm">${o.qty?money(o.sales/o.qty):""}</td>
+      <td class="num">${revenue?pct1(o.sales/revenue*100):""}</td></tr>`).join("")}</tbody></table>
+    <div class="note">Category is the group set in the Overrides tab where there is one, falling back to what the
+      POS sent. Roughly one POS assignment in three is wrong, which is what that tab exists to correct.</div>`;
+}
+
+function sdProd(rows){
+  const m={};
+  rows.forEach(r=>{
+    const o=m[r.item]||(m[r.item]={name:r.item,sales:0,qty:0,group:r.group||""});
+    o.sales+=r.sales; o.qty+=r.qty;
+  });
+  const list=sdSort(Object.values(m)).slice(0,120);
+  return `<table><thead><tr>${sHead("name","Product")}<th class="hide-sm">Category</th>
+      ${sHead("qty","Sold","num")}${sHead("sales","Revenue","num")}${sHead("price","Avg price","num hide-sm")}</tr></thead>
+    <tbody>${list.map(o=>`<tr>
+      <td><b>${esc(o.name)}</b></td>
+      <td class="hide-sm">${o.group?`<span class="pill">${esc(o.group)}</span>`:""}</td>
+      <td class="num">${Math.round(o.qty*100)/100}</td>
+      <td class="num">${money(o.sales)}</td>
+      <td class="num hide-sm">${o.qty?money(o.sales/o.qty):""}</td></tr>`).join("")}</tbody></table>
+    <div class="note">Top 120 by the sorted column. Names are rolled up through the ItemMap tab, so the same
+      product spelled two ways in the POS counts once.</div>`;
+}
+
+/* Wastage: a $0 line in a perishable group is food in the bin. Elsewhere a $0 line usually
+   is not — Coffee & Tea is dominated by the loyalty give-away, which costs margin but went
+   to a paying regular. And a $0 line only counts as waste if the SAME item also sells for
+   money this week: something never charged for is a modifier, not a give-away. */
+function sdWaste(rows){
+  const paid={};
+  rows.forEach(r=>{ if(r.sales>0) paid[r.item.toLowerCase()]=1; });
+  const m={};
+  rows.forEach(r=>{
+    if(PERISHABLE.indexOf(r.group)===-1) return;
+    const o=m[r.item]||(m[r.item]={name:r.item,group:r.group,sold:0,free:0,rev:0});
+    if(r.sales>0){ o.sold+=r.qty; o.rev+=r.sales; } else o.free+=r.qty;
+  });
+  let list=Object.values(m).filter(o=>o.free>0&&o.sold>0&&paid[o.name.toLowerCase()]);
+  list.forEach(o=>{ o.price=o.sold?o.rev/o.sold:0; o.value=o.free*o.price;
+                    o.pct=(o.sold+o.free)?o.free/(o.sold+o.free)*100:0; });
+  list.sort((a,b)=>b.value-a.value);
+  const units=list.reduce((t,o)=>t+o.free,0), value=list.reduce((t,o)=>t+o.value,0);
+  if(!list.length) return `<div class="note">No wastage found in ${PERISHABLE.join(", ")} this week — either none
+    was rung up, or the Overrides tab has not put these items into a perishable group yet.</div>`;
+  return `<div style="font-size:13px;margin-bottom:10px"><b>${Math.round(units)}</b> items binned,
+      worth <b>${money(value)}</b> at what they were selling for.</div>
+    <table><thead><tr><th>Product</th><th class="hide-sm">Group</th><th class="num">Binned</th>
+      <th class="num hide-sm">Sold</th><th class="num">% wasted</th><th class="num">Value</th></tr></thead>
+    <tbody>${list.map(o=>`<tr>
+      <td><b>${esc(o.name)}</b></td><td class="hide-sm"><span class="pill">${esc(o.group)}</span></td>
+      <td class="num">${Math.round(o.free*100)/100}</td>
+      <td class="num hide-sm">${Math.round(o.sold*100)/100}</td>
+      <td class="num ${o.pct>=25?"up":""}">${pct1(o.pct)}</td>
+      <td class="num">${money(o.value)}</td></tr>`).join("")}</tbody></table>
+    <div class="note">Perishable groups only: ${PERISHABLE.join(", ")}. Valued at that item's own average selling
+      price this week. An item that never sold for money is left out — it is a modifier, not waste.</div>`;
 }
 
 /* ================= INVOICES PANEL =================
