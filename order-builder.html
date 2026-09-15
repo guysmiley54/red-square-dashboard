@@ -119,7 +119,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v6-1630"; console.log("Order Builder "+BUILD_ID);
+const BUILD_ID="build-v6-1720"; console.log("Order Builder "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -702,7 +702,11 @@ function deriveCatalogue(lines,supplier,now,opts){
   opts=opts||{};
   const venue=opts.venue===undefined?TAG.name:opts.venue;
   const listDays=opts.listDays||CAT_DAYS, rateDays=opts.rateDays||RATE_DAYS;
-  const FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|admin\s*fee/i;
+  /* Charges are not stock. "admin\s*fee" only ever caught the literal phrase, so "Admin
+     service fee", "Distribution Fee" and "Min Order Charge" all stayed in the catalogue —
+     and Fill Usual duly ordered twenty-two admin fees. Checked against all 2,030 distinct
+     descriptions in the data: this removes exactly six lines, every one a real charge. */
+  const FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|\bfees?\b|\bcharges?\b|\bcartage\b|\bmin(imum)?\.?\s*order\b/i;
   const t=+(now||new Date()),listFrom=t-listDays*864e5,rateFrom=t-rateDays*864e5;
   const map={};
   (lines||[]).forEach(l=>{
