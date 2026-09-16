@@ -202,7 +202,7 @@ function globalCatalogue(){
 function clearCatalogueCache(){ GCAT=null; GCAT_FOR=null; }
 let HOME_INV=null;                     // supplier whose invoices are open on the order list
 let SORT={col:"name",dir:1};
-let RANGE={preset:"8w",from:null,to:null};
+let RANGE={preset:"This week",from:null,to:null};
 let DRAFTS={}, LOCAL_ORDERS=[];
 
 /* ================= HELPERS ================= */
@@ -1620,7 +1620,7 @@ function rangeBar(){
       <span class="label" style="margin:0">Range</span>
       ${RANGE_PRESETS.map(([k])=>`<span class="chip sm ${RANGE.preset===k?"on":""}" onclick="setRange('${k}')">${k}</span>`).join("")}
       <span class="chip sm ${RANGE.preset==="custom"?"on":""}" onclick="setRange('custom')">custom</span>
-      <span class="chip sm" onclick="resetRange()" title="Back to 8 weeks ending this week">reset</span>
+      <span class="chip sm" onclick="resetRange()" title="Back to this week">reset</span>
       ${RANGE.preset==="custom"?`
         <input type="date" id="rfrom" value="${esc(RANGE.from||fmtISO(r.start))}" style="font-size:13px;padding:6px 8px">
         <input type="date" id="rto" value="${esc(RANGE.to||fmtISO(r.end))}" style="font-size:13px;padding:6px 8px">
@@ -1635,7 +1635,7 @@ function rangeBar(){
       the arrows bite.</div></div>`;
 }
 function setRange(k){ RANGE.preset=k; route(); }
-function resetRange(){ RANGE={preset:"8w",from:null,to:null}; WEEK_OFF=0; renderFilters(); route(); }
+function resetRange(){ RANGE={preset:"This week",from:null,to:null}; WEEK_OFF=0; renderFilters(); route(); }
 function applyCustom(){
   RANGE.from=(document.getElementById("rfrom")||{}).value||null;
   RANGE.to=(document.getElementById("rto")||{}).value||null;
