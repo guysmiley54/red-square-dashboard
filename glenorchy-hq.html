@@ -1,0 +1,2650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glenorchy HQ</title>
+<style>
+  :root{--ink:#111;--paper:#f7f6f3;--line:#ddd;--red:#c8102e;--dim:#777;--green:#1a7f37;--amber:#b45309;
+        --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--paper);color:var(--ink)}
+  header{background:var(--ink);color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:20}
+  header .sq{width:13px;height:13px;background:var(--red)}
+  header h1{font-size:16px;font-weight:700;white-space:nowrap}
+  header .spacer{margin-left:auto}
+  header button,header a.hbtn{background:none;border:1px solid #555;color:#fff;border-radius:6px;padding:6px 11px;font-size:12px;cursor:pointer;text-decoration:none}
+  header .on{background:#fff;color:var(--ink);border-color:#fff;font-weight:700}
+  .tag{display:flex;border:1px solid #555;border-radius:7px;overflow:hidden}
+  .tag button{border:none;border-radius:0;padding:7px 13px;font-size:12px;font-weight:600;background:none;color:#fff;cursor:pointer}
+  .tag button.sel{background:#fff;color:var(--ink)}
+  .pill.edit{cursor:pointer;border:1px dashed #bbb;background:#fff}
+  .pill.edit:hover{background:#f0efec}
+  .spark{display:block;width:100%;height:80px}
+  .chart{display:flex;align-items:flex-end;gap:3px;height:170px;padding-top:10px}
+  .chart .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+  .chart .col:hover .bx{opacity:.75}
+  .chart .bx{width:100%;background:var(--red);border-radius:3px 3px 0 0;min-height:1px}
+  .chart .lb{font-size:9px;color:var(--dim);white-space:nowrap;font-family:var(--mono);height:12px}
+  .mets{display:flex;gap:26px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:10px;padding-top:12px}
+  .metric .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .metric .val{font-size:26px;font-weight:700;font-family:var(--mono);line-height:1.15}
+  .metric .sub{font-size:11px;color:var(--dim);margin-top:2px}
+  #filters{background:#fff;border-bottom:1px solid var(--line);padding:8px 14px;display:flex;flex-wrap:wrap;gap:7px;align-items:center;position:sticky;top:47px;z-index:19}
+  main{max-width:1280px;margin:0 auto;padding:14px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+  .label{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+  .note{font-size:11px;color:var(--dim);line-height:1.5;margin-top:8px}
+  .chip{border:1px solid var(--line);border-radius:99px;padding:6px 13px;font-size:13px;cursor:pointer;background:#fff;font-weight:600}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .chip.sm{padding:4px 10px;font-size:12px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:1px solid var(--line)}
+  th.s{cursor:pointer;user-select:none} th.s:hover{color:var(--ink)}
+  th.act{color:var(--ink)}
+  td{padding:8px;border-bottom:1px solid #f0efec;vertical-align:middle}
+  tr.click{cursor:pointer} tr.click:hover{background:#faf9f6}
+  tr.picked{background:#fffbe9}
+  @keyframes flashrow{0%{background:#ffe9a8}60%{background:#ffe9a8}100%{background:transparent}}
+  tr.flash{animation:flashrow 1.6s ease-out}
+  .num{text-align:right;font-family:var(--mono);white-space:nowrap}
+  .up{color:var(--red);font-weight:600} .down{color:var(--green);font-weight:600}
+  .pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em;background:#eee;color:#555}
+  .pill.warn{background:var(--red);color:#fff} .pill.ok{background:var(--green);color:#fff}
+  input[type=search],input[type=text],input[type=email],input[type=number],select{border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:15px;background:#fff;font-family:inherit}
+  input[type=search]{width:100%}
+  .btn{display:inline-block;background:var(--ink);color:#fff;border:none;border-radius:8px;padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center}
+  .btn.outline{background:#fff;color:var(--ink);border:2px solid var(--ink);padding:9px 14px}
+  .btn[disabled]{opacity:.4;cursor:not-allowed}
+  .back{display:inline-block;margin-bottom:10px;font-size:14px;font-weight:600;cursor:pointer}
+  .back:before{content:"← "}
+  .err{border:1px solid var(--red);color:var(--red);border-radius:10px;padding:12px;font-size:14px;background:#fff;margin-bottom:12px}
+  #status{padding:40px 0;text-align:center;color:var(--dim);font-size:14px}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+  @media (max-width:1100px){.summary{grid-template-columns:repeat(2,1fr)}}
+  .tile{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .tile .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .tile .v{font-size:26px;font-weight:700;font-family:var(--mono);line-height:1.15;margin-top:2px}
+  .tile .sub{font-size:11px;color:var(--dim);margin-top:3px;line-height:1.45}
+  .tile.over .v{color:var(--red)} .tile.good .v{color:var(--green)} .tile.amber .v{color:var(--amber)}
+  .bar{height:12px;border-radius:99px;background:#eee;overflow:hidden;display:flex;margin-top:8px}
+  .bar i{display:block;height:100%}
+  .bar .b1{background:var(--ink)} .bar .b2{background:#8a8a8a} .bar .b3{background:var(--red)}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:6px}
+  .legend span:before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
+  .legend .l1:before{background:var(--ink)} .legend .l2:before{background:#8a8a8a} .legend .l3:before{background:var(--red)}
+  .panels{display:grid;grid-template-columns:1fr 370px;gap:12px;align-items:start}
+  .draft{position:sticky;top:104px}
+  @media (max-width:900px){.panels{grid-template-columns:1fr}.draft{position:static}.summary{grid-template-columns:1fr}}
+  @media (max-width:600px){.hide-sm{display:none}td,th{padding:7px 5px}#filters{position:static}}
+  .qty{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .qty button{width:38px;height:38px;border:none;background:#fff;font-size:19px;font-weight:700;cursor:pointer;line-height:1}
+  .qty button:active{background:#eee}
+  .qty input{width:50px;height:38px;border:none;border-left:1px solid var(--line);border-right:1px solid var(--line);text-align:center;font-family:var(--mono);font-size:15px;padding:0;border-radius:0}
+  .qty.on{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+  .dline{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #f0efec;font-size:13px}
+  .dline .g{flex:1;min-width:0} .dline .g b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis}
+  .tot{display:flex;justify-content:space-between;font-size:13px;padding:3px 0}
+  .tot.big{font-size:17px;font-weight:700;font-family:var(--mono);border-top:1px solid var(--line);margin-top:6px;padding-top:8px}
+  textarea{width:100%;min-height:180px;border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px;line-height:1.5}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:40;display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal .box{background:#fff;border-radius:12px;padding:18px;max-width:680px;width:100%;max-height:88vh;overflow:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:760px){.grid2{grid-template-columns:1fr}}
+  .sw{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand" onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer">
+    <div class="sq"></div><h1>Glenorchy HQ</h1>
+    <span id="buildtag" style="font-size:9px;color:#666"></span></div>
+  <div class="tag" id="tagpick"></div>
+  <span class="spacer"></span>
+  <a class="hbtn" onclick="go('sales')">Sales</a>
+  <a class="hbtn" onclick="go('placed')">Placed</a>
+  <a class="hbtn" onclick="go('favs')">Favourites</a>
+  <a class="hbtn" onclick="go('reports')">Reports</a>
+  <a class="hbtn" onclick="go('admin')">Admin</a>
+  <button onclick="loadAll()">↻</button>
+</header>
+<div id="filters"></div>
+<main id="app"><div id="status">Loading data…</div></main>
+
+<script>
+/* =====================================================================================
+   GLENORCHY HQ — the Glenorchy build of Cambridge Central (order-builder.html)
+
+   ONE VENUE, ONE LEDGER. Red Square Glenorchy is the accounting entity and the only
+   delivery tag, so the store switch Cambridge Central carries in its header is gone. The
+   TAGS machinery is left in place with a single entry rather than ripped out, so the two
+   files stay diffable; anything that renders a store picker checks TAGS.length first.
+
+   Same sheets, same Orders.gs endpoint. The Orders, Favourites and OrderTargets tabs carry
+   a venue column, so Glenorchy's rows sit beside Cambridge's. SupplierSettings and
+   CategoryOverrides have no venue column and are SHARED with Cambridge Central — hiding a
+   supplier or fixing a category here does it there too, by design.
+
+   Drafts are kept under their own localStorage key (ghq_drafts). Both dashboards live on
+   the same GitHub Pages origin, so a shared key would have let a Cambridge draft count
+   against Glenorchy's countdown.
+
+   COGS ONLY. Rent, energy, waste, repairs and the other overheads are dropped at load, so
+   they cannot reach a catalogue, a report, a group total or the countdown.
+
+   Reads over gviz; writes through the Orders.gs web app, which is also where every global
+   setting lives — rep emails, supplier visibility, category overrides and favourites are
+   the same for everyone opening the link.
+
+   The page is PUBLIC. No credential belongs in it.
+   ===================================================================================== */
+const BUILD_ID="ghq-v1-0539"; console.log("Glenorchy HQ "+BUILD_ID);
+{const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
+
+const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
+const SALES_SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
+const SALES_CUTOVER  = "2026-08-03";
+const WEBAPP_URL     = "https://script.google.com/macros/s/AKfycbz4LRNzbabVhkQ2PT0v2IxSPboDpyBNcW2PCpjqVb6knLicd9_0V4bXE_2ltMKikzxQmg/exec";
+
+/* Glenorchy only. Cambridge and Luma are a separate business, filtered out at the first
+   read of every row. */
+const LEDGER_VENUES = ["Red Square Glenorchy"];
+const ENTITY = "Red Square Glenorchy";
+
+/* One delivery tag. */
+const TAGS = [
+  { key:"glenorchy", name:"Red Square Glenorchy", short:"Glenorchy", addr:"3/2 Howard Road, Glenorchy TAS 7010" }
+];
+
+const TARGET_COGS_PCT = 30;
+const COMPANY_BLOCK = ["B & G Fitness Pty Ltd","Red Square Cafe Glenorchy","accounts@redsquarecafe.com.au"];
+const ACCOUNTS_EMAIL = "accounts@redsquarecafe.com.au";
+const CAT_DAYS=180, RATE_DAYS=90, DOW_WEEKS=6, MATCH_DAYS=14;
+
+/* Fill Usual. Conservative by instruction: average quantity per order, rounded DOWN, with
+   anything averaging under 0.45 left at zero. The two rules compound — under a strict floor
+   an item averaging 0.45 to 0.99 also lands on zero. That is the conservative reading of
+   "strictly round down"; FILL_MIN is the one knob to change if items bought most weeks
+   should come back as 1. */
+const FILL_FLOOR_CUTOFF = 0.45;
+const FILL_MIN = 0;
+
+/* ================= STATE ================= */
+let INV=[],LINES=[],CFG={},PMERGE={},ORDERS=[],SSET={},FAVS=[],COVER={},HIDDEN={},SALES=[],LOAD_WARN=[];
+let SALES_OK=false;
+let TAG=TAGS[0], WEEK_OFF=0, SUPPLIER="", CATFILT="", SEARCH="", HIDE_PORTAL=true;
+let SHOW_HIDDEN=false, PICKED={};      // PICKED: item_key -> true, for bulk category edits
+/* Typing re-renders the page, which destroys the search box and rebuilds it — so focus and
+   the caret have to be carried across by hand or the field goes dead after every keystroke
+   and has to be clicked again. */
+let SEARCH_FOCUS=false, SEARCH_CARET=0;
+let GSEARCH="", GFOCUS=false, GCARET=0, GCAT_FILT="", GSORT={col:"freq",dir:-1};
+/* Every supplier's catalogue, built once per store and reused. Deriving twenty catalogues
+   on each keystroke of a search box is the difference between instant and unusable. */
+let GCAT=null, GCAT_FOR=null;
+function globalCatalogue(){
+  if(GCAT&&GCAT_FOR===TAG.name) return GCAT;
+  const out=[];
+  supplierList().forEach(s=>{
+    if(!s.visible) return;
+    deriveCatalogue(LINES,s.name,new Date()).forEach(p=>out.push(p));
+  });
+  GCAT=out; GCAT_FOR=TAG.name;
+  return out;
+}
+function clearCatalogueCache(){ GCAT=null; GCAT_FOR=null; }
+let HOME_INV=null;                     // supplier whose invoices are open on the order list
+let SORT={col:"name",dir:1};
+let RANGE={preset:"8w",from:null,to:null};
+let DRAFTS={}, LOCAL_ORDERS=[];
+
+/* ================= HELPERS ================= */
+const norm=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+const money=v=>(v==null||v==="")?"":"$"+Number(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+const money0=v=>"$"+Math.round(Number(v)||0).toLocaleString("en-AU");
+const pct1=v=>(Math.round(v*10)/10)+"%";
+const fmtD=d=>d?d.toLocaleDateString("en-AU"):"";
+const fmtISO=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const mid=d=>{const x=new Date(d);x.setHours(0,0,0,0);return x;};
+const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
+const weekStart=d=>{const x=mid(d);x.setDate(x.getDate()-((x.getDay()+6)%7));return x;};
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num_=v=>+String(v||"").replace(/[^0-9.\-]/g,"")||0;
+const tagByName=n=>TAGS.find(t=>t.name===n)||TAGS[0];
+/* Next weekday. Saturday and Sunday are skipped; suppliers who do deliver on a Saturday
+   can have the date changed on the order. */
+function nextBusinessDay(from){
+  let d=addD(mid(from||new Date()),1);
+  while(d.getDay()===0||d.getDay()===6) d=addD(d,1);
+  return d;
+}
+const vShort=v=>String(v||"").replace("Red Square ","RS ").replace("Luma Kitchen","Luma");
+
+/* Same as gvizDate but keeps the clock. Both tabs carry real timestamps — Invoices.scanned
+   is when the invoice email was captured, Orders.logged_at is when the order was placed —
+   and reconciliation is wrong without them. */
+function gvizDateTime(v){
+  if(v instanceof Date) return v;
+  const s=String(v||"").trim();
+  let m=/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?/.exec(s);
+  if(m) return new Date(+m[1],+m[2],+m[3],+(m[4]||0),+(m[5]||0),+(m[6]||0));
+  m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(s);
+  if(m) return new Date(+m[3],+m[2]-1,+m[1],+m[4],+m[5],+(m[6]||0));
+  m=/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(s);
+  if(m) return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6]||0));
+  return gvizDate(v);
+}
+function gvizDate(v){
+  if(v instanceof Date) return v;
+  const s=String(v||"").trim();
+  let m=/Date\((\d+),(\d+),(\d+)/.exec(s); if(m) return new Date(+m[1],+m[2],+m[3]);
+  m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s); if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+  m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s); if(m) return new Date(+m[3],+m[2]-1,+m[1]);
+  return null;
+}
+
+const UNIT_ALIAS={each:"ea",ea:"ea",unit:"ea",units:"ea",pack:"ea",carton:"ctn",cartons:"ctn",ctn:"ctn",ct:"ctn",cs:"ctn",case:"ctn",box:"box",bx:"box",pkt:"pkt",packet:"pkt",pk:"pkt",sleeve:"slv",slv:"slv",bottle:"btl",btl:"btl",kg:"kg",g:"g",l:"l",ltr:"l",litre:"l",tray:"tray",bag:"bag",tub:"tub",doz:"doz",dozen:"doz"};
+const unitNorm=u=>{const n=norm(u);return UNIT_ALIAS[n]||n;};
+
+/* ================= ITEM NAME NORMALISATION =================
+   Suppliers spell the same product a dozen ways across a year of invoices: word order
+   flips ("Sliced cheese" / "Cheese, Sliced"), plurals wander, and typos stick ("cherry
+   tomatos"). Left alone, each variant becomes its own catalogue line with its own price
+   history, which is how a product ends up looking like it has never been bought before.
+
+   Three passes, each deliberately conservative, because a WRONG merge is worse than a
+   missed one — it silently averages two different products' prices:
+     1. strip punctuation and case, drop pure noise words;
+     2. singularise tokens, guarding the endings that aren't plurals (-ss, -us, -is);
+     3. sort the tokens, so word order stops mattering.
+   Sizes and pack counts are KEPT as tokens: "Milk 2L" and "Milk 1L" must never merge.
+   A near-miss pass then folds single-character typos together, but only within one
+   supplier, one unit, and only for long tokens. */
+const NOISE=new Set(["the","and","a","of","w","with","approx","abt","per","x"]);
+function singular(t){
+  if(t.length<=3) return t;
+  /* -ss, -us and -is are endings, not plurals: "glass", "citrus", "basis". -as is NOT on
+     that list — "bananas", "pizzas", "peas" and "sultanas" are ordinary plurals, and
+     guarding -as kept every one of them out of its category. The short words that guard
+     was really protecting ("gas") are already covered by the length check above. */
+  if(/(ss|us|is)$/.test(t)) return t;
+  if(/ies$/.test(t)) return t.slice(0,-3)+"y";
+  if(/(oes|ches|shes|sses|xes)$/.test(t)) return t.slice(0,-2);
+  if(/s$/.test(t) && t.length>3) return t.slice(0,-1);   // "cups"->"cup", "oats"->"oat"
+  return t;
+}
+function nameKey(desc){
+  const toks=String(desc||"").toLowerCase()
+    .replace(/[^a-z0-9. ]+/g," ")
+    .split(/\s+/).filter(Boolean)
+    .filter(t=>!NOISE.has(t))
+    .map(singular)
+    .filter(Boolean);
+  if(!toks.length) return norm(desc);
+  return toks.sort().join(" ");
+}
+/* Levenshtein, capped: anything past the cap is "too different" and we stop counting. */
+function lev(a,b,cap){
+  if(Math.abs(a.length-b.length)>cap) return cap+1;
+  let prev=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){
+    const cur=[i]; let best=i;
+    for(let j=1;j<=b.length;j++){
+      cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+      if(cur[j]<best) best=cur[j];
+    }
+    if(best>cap) return cap+1;
+    prev=cur;
+  }
+  return prev[b.length];
+}
+/* Folds near-identical keys together inside one supplier+unit bucket. The longest-standing
+   spelling wins (most invoice lines), so the name on screen is the one staff recognise. */
+function fuzzyFold(keys){
+  const map={}, sorted=keys.slice().sort((a,b)=>b.n-a.n||a.key.localeCompare(b.key));
+  const canon=[];
+  sorted.forEach(k=>{
+    const hit=canon.find(c=>c.bucket===k.bucket && k.key.length>=6 && c.key.length>=6
+                            && lev(c.key,k.key,1)<=1);
+    map[k.key]= hit ? hit.key : k.key;
+    if(!hit) canon.push(k);
+  });
+  return map;
+}
+
+/* ================= CATEGORISATION =================
+   Invoice rows carry a category the extractor guessed at invoice level ("Food"), which is
+   too coarse to order from — a chef wants Produce separate from Dairy. These rules tag the
+   LINE, from its description, first match wins. Order matters: the specific beats the
+   general, so "coffee beans" is Coffee before "bean" could make it Produce.
+   Anything unmatched keeps the invoice's own category rather than being forced somewhere
+   wrong, and shows as Uncategorised so the gap is visible instead of silently misfiled. */
+/* Matched against the SINGULARISED description, not the raw one: "Cherry Tomatoes" has to
+   hit the same rule as "cherry tomato", and a list spelling out every plural would rot the
+   first time a supplier wrote "Tomatos". Word order is preserved here (it is not in
+   nameKey) so multi-word rules like "rinse aid" and "roll towel" still match. */
+function catText(desc){
+  return " "+String(desc||"").toLowerCase().replace(/[^a-z0-9]+/g," ").split(/\s+/)
+           .filter(Boolean).map(singular).join(" ")+" ";
+}
+
+/* ================= CATEGORY ENGINE =================
+   Three layers, most specific first:
+     1. a manual override saved to the sheet against the product — always wins;
+     2. a supplier profile: its own rules, plus an ALLOW LIST of the categories that
+        supplier is capable of selling;
+     3. the global keyword rules.
+
+   The allow list is the part that earns its keep. Keywords alone cannot work across
+   suppliers who sell different worlds of product, because the same word means different
+   things: at OnePac "lemon" is Jasol Lemon Bleach, "salad" is a salad bowl and "roll" is a
+   roll towel — all three were reading as food on live data. Constraining a packaging house
+   to packaging and cleaning categories fixes every one at a stroke, without a keyword list
+   that would have to grow forever. */
+const CATEGORIES = ["Produce","Meat","Seafood","Dairy / Cold Storage","Frozen","Bakery","Dry Goods",
+  "Beverage","Coffee","Hot Containers","Cold Containers","Packaging","Cleaning & Chemicals","Uncategorised"];
+const FOOD_CATS = ["Produce","Meat","Seafood","Dairy / Cold Storage","Frozen","Bakery","Dry Goods","Beverage","Coffee"];
+const PACK_CATS = ["Hot Containers","Cold Containers","Packaging","Cleaning & Chemicals"];
+
+const CLEANING_RE = /\b(jasol|detergent|sanitis\w*|sanitiz\w*|degreas\w*|bleach|cleaner|chemical|glove|dishwash\w*|rinse|soap|scourer|bin liner|garbage bag|mop|wipe|wiper|methylated|spirit|sterakleen|firedog|spot aid|tecwash|unox|glaze|descaler|oven cleaner|hand towel|roll towel|paper towel)\b/;
+/* Hot before cold: a "single wall" or "CPLA" cup is a hot cup, though "cup" alone is not. */
+const HOT_RE  = /\b(hot cup|hot lid|cpla|single wall|double wall|coffee cup|pizza|burger box|foil container|catering box|catering tray|snack box|greaseproof|grease proof|grease resistant|paper bag|carry bag|pie|chip cup)\b/;
+const COLD_RE = /\b(cold cup|cold lid|dome lid|salad bowl|pet|pet bowl|pet lid|pla cold|clam shell|clamshell|tumbler|rectangular|round container|round lid|sauce container|smoothie|sundae|deli)\b/;
+const PACK_RE = /\b(cup|lid|napkin|serviette|container|box|bag|tray|straw|cutlery|knife|fork|spoon|teaspoon|film|foil|takeaway|carton|liner|docket|register roll|copy paper|tape)\b/;
+
+/* Frozen is a place, not a food type, so it is asked first: a chef ordering wants to know
+   what comes out of the freezer, whatever it is made of. That means frozen chicken reads as
+   Frozen rather than Meat, and ice cream as Frozen rather than Dairy.
+
+   It only fires on an EXPLICIT signal — the word frozen, FRZ, IQF, or ice cream and its
+   relatives. On the live data that is 21 products, every one certainly frozen. Another ~69
+   are frozen in reality but say so nowhere in their name (McCain chips, hash browns, dim
+   sims), and guessing by product type would sweep in Onepac's sandwich wedge CONTAINERS.
+   Those are for the bulk tool: local knowledge, set once, kept for everyone. */
+const FROZEN_RE = /\b(frozen|froz|frz|iqf|ice cream|icecream|gelato|sorbet)\b/;
+
+const CATEGORY_RULES=[
+  ["Cleaning & Chemicals", CLEANING_RE],
+  ["Frozen", FROZEN_RE],
+  ["Coffee",   /\b(coffee bean|espresso|arabica|robusta|single origin)\b/],
+  ["Dairy / Cold Storage", /\b(milk|cream|cheese|cheer|parma blend|butter|egg|yogh?urt|mozzarella|parmesan|parmigiano|grana|pecorino|feta|fetta|gorgonzola|burrata|haloumi|ricotta|mascarpone|creme fraiche|custard)\b/],
+  ["Seafood",  /\b(salmon|prawn|fish|squid|calamari|octopus|mussel|oyster|scallop|barramundi|tuna|anchov\w*)\b/],
+  /* "Chipolatas - Sage & Parsley" was reading as Produce: the herbs are named and the meat
+     is not. Sausages come in shapes rather than species, so the shapes are listed too. */
+  ["Meat",     /\b(beef|chicken|pork|lamb|bacon|rasher|ham|salami\w*|prosciutto|chorizo|sausage|chipolata|bratwurst|frankfurt\w*|cheerio|saveloy|mince|steak|rump|brisket|turkey|duck|pancetta|wing ding|nugget|schnitzel|kransky|meatball)\b/],
+  ["Bakery",   /\b(bread|bread roll|dinner roll|bun|sourdough|baguette|ciabatta|brioche|croissant|muffin|pastry|focaccia|bagel|tortilla|pita|waffle|pancake|crumpet|scone|donut|doughnut)\b/],
+  /* Sauces and oils before produce: "Tomato Sauce Heinz" and "Oil Veg / Olive Blend" were
+     both landing in Produce on live data. */
+  ["Dry Goods",/\b(sauce|topping|syrup|sweetener|drinking chocolate|marmalade|soft serve|oil|vinegar|mirin|cooking wine|flour|semolina|yeast|sugar|rice|pasta|salt|pepper|spice|anise|cinnamon|clove|cumin|paprika|turmeric|sesame|bay leaf|tamarind|puree|stock|tin|canned|chickpea|lentil|noodle|honey|jam|mayonnaise|mustard|oat|cereal|nut|cashew|walnut|almond|pistachio|seed|olive|chip|fry|fries|wedge|hash brown|crouton|savoiardi|polenta|couscous|quinoa|dim sim|dimsum|spring roll|samosa)\b/],
+  ["Produce",  /\b(tomato|lettuce|cos|mesclun|roquette|rocket|onion|shallot|leek|potato|carrot|spinach|cucumber|capsicum|mushroom|avocado|lemon|lime|orange|apple|pear|banana|berry|grape|melon|honeydew|rockmelon|watermelon|peach|nectarine|plum|mango|pineapple|kiwi|herb|basil|parsley|coriander|mint|thyme|rosemary|dill|chive|garlic|ginger|chilli|chilly|broccoli|cauliflower|zucchini|eggplant|pumpkin|cabbage|wombok|wom bok|celery|kale|asparagus|bean|pea|corn|radish|beetroot|parsnip|swede|turnip|sprout|salad|coleslaw|slaw|fruit|veg)\b/],
+  /* No bare "beer" or "wine": in a kitchen catalogue those words are far more often "beer
+     battered chips" and "beef red wine pie" than a drink. Verified on the live data — adding
+     them moved both into Beverage. */
+  ["Beverage", /\b(juice|soft drink|cola|lemonade|soda|kombucha|cider|cordial|tea|chai|earl grey|english breakfast|chamomile|red bull|energy drink|tonic)\b/],
+  ["Hot Containers",  HOT_RE],
+  ["Cold Containers", COLD_RE],
+  ["Packaging", PACK_RE]
+];
+
+/* Both profiles written against the live catalogue, 14 Sep 2026. */
+const SUPPLIER_PROFILES=[
+  { match:/onepac|tas.?isle/i,
+    /* A packaging and chemicals house — nothing it sells is food, so the food rules are off
+       and anything unmatched is Packaging rather than Uncategorised. */
+    rules:[["Cleaning & Chemicals",CLEANING_RE],["Hot Containers",HOT_RE],["Cold Containers",COLD_RE]],
+    allow:PACK_CATS, fallback:"Packaging" },
+  { match:/doppio/i,
+    /* A coffee roaster that also broadlines meat, dairy and dry goods, so no allow list —
+       just the roaster vocabulary, which is blend and bean names rather than the word
+       "coffee". Without it "Woolloomooloo Blend" read as Beverage and "Decaf Beans" as
+       Produce, because "bean" is a vegetable everywhere else. Cleaning runs first so
+       "Espresso Machine Cleaner" doesn't become Coffee. */
+    rules:[["Cleaning & Chemicals",CLEANING_RE],
+           ["Coffee",/\b(blend|bean|roast|roasted|decaf|single origin|toby)\b/]] },
+  { match:/fresh cut/i,
+    /* Fruit, veg and cold goods. "Cheer Tasty 96 Slices" is sliced cheese, not a cake slice,
+       and was reading as Bakery. Packaging categories are off so "Pineapple Pieces BOX"
+       cannot be claimed by the word "box". */
+    rules:[["Dairy / Cold Storage",/\b(cheer|cheese|butter|yogh?urt|slice|milk|cream)\b/]],
+    allow:FOOD_CATS }
+];
+const profileFor=supplier=>SUPPLIER_PROFILES.find(p=>p.match.test(String(supplier||"")))||null;
+
+function categorise(supplier,desc,fallback,key){
+  if(key&&COVER[key]) return COVER[key];
+  const prof=profileFor(supplier), t=catText(desc);
+  if(prof&&prof.rules) for(const [cat,re] of prof.rules) if(re.test(t)) return cat;
+  for(const [cat,re] of CATEGORY_RULES){
+    if(!re.test(t)) continue;
+    if(prof&&prof.allow&&prof.allow.indexOf(cat)===-1) continue;
+    return cat;
+  }
+  if(prof&&prof.fallback) return prof.fallback;
+  /* No fallback to the invoice's own category. It is set per INVOICE, not per line, so on a
+     broadline supplier it labels everything unmatched with whatever that delivery was filed
+     under — at Doppio that put coffee blends and caramel topping in "Beverage" and Earl Grey
+     in "Coffee". A confident wrong answer is worse than an honest blank: Uncategorised is
+     visible, filterable, and fixable in bulk. */
+  return "Uncategorised";
+}
+
+function prodKey(supplier,code,desc,unit){
+  const hasCode=!!norm(code), sk=norm(supplier);
+  let id=hasCode?norm(code):nameKey(desc);
+  const g=PMERGE[sk+"|"+norm(code)]||PMERGE[sk+"|"+norm(desc)]||PMERGE[sk+"|"+nameKey(desc)]||PMERGE[sk+"|"+id];
+  if(g) id="grp:"+norm(g);
+  const unitPart=(hasCode||g)?"":unitNorm(unit||"");
+  return sk+"|"+id+"|"+unitPart;
+}
+
+/* COGS is an exclusion list, so a category the extractor invents lands IN cost of goods and
+   shows up rather than vanishing. Everything on it is dropped from the data at load. */
+const NON_COGS=new Set(["cleaning","equipment","repairs","maintenance","repairs & maintenance",
+  "utilities","energy","overheads","admin","insurance","rent","subscriptions","freight",
+  "waste","waste management","misc","other"]);
+const supGroup=n=>{const c=CFG[norm(n)];return (c&&c.group)||"Ungrouped";};
+const supActive=n=>{const c=CFG[norm(n)];return c?c.active:true;};
+const rowGroup=r=>{const g=supGroup(r.supplier);return g!=="Ungrouped"?g:(r.category||"Ungrouped");};
+const isCogs=r=>!NON_COGS.has(String(rowGroup(r)||"").trim().toLowerCase());
+
+/* Global settings. Per-site routing is gone: a setting means the same thing in every view. */
+function sset(name){
+  const s=SSET[norm(name)]||{};
+  return { rep_email:s.rep_email||"", visible:s.visible!==false, portal_only:!!s.portal_only,
+           cc:s.cc||"", note:s.note||"" };
+}
+
+/* ================= FETCH ================= */
+/* gviz answers a missing tab with the FIRST sheet's data, HTTP 200, no error. The header
+   signature is the only guard, and a tab with no signature declared gets none — so an
+   undeclared name throws rather than quietly returning invoices. */
+const TAB_COLUMNS={
+  "Invoices":["invoice_number","invoice_date","total"],
+  "InvoiceLines":["invoice_number","description","line_total"],
+  "SupplierConfig":["supplier","merge_into"],
+  "ProductMerge":["supplier","match","into"],
+  "ManualPurchases":["date","shop","venue","amount"],
+  "Orders":["order_id","supplier","venue","order_date"],
+  "OrderLines":["order_id","description","qty"],
+  "SupplierSettings":["supplier","rep_email"],
+  "Favourites":["fav_id","fav_name","venue"],
+  "FavouriteLines":["fav_id","item_key","qty"],
+  "CategoryOverrides":["item_key","category"],
+  "Sales":["date","venue","sales"]
+};
+async function fetchTab(name){
+  const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(name)}`;
+  const res=await fetch(url), txt=await res.text();
+  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("tab '"+name+"' not found or not shared");
+  const rows=parseCsv(txt);
+  if(!rows.length) return [];
+  const cols=rows[0].map(c=>String(c||"").toLowerCase().trim());
+  const need=TAB_COLUMNS[name];
+  if(!need) throw new Error("fetchTab('"+name+"'): no column signature declared in TAB_COLUMNS");
+  const missing=need.filter(c=>cols.indexOf(c)===-1);
+  if(missing.length) throw new Error("tab '"+name+"' did not answer with its own columns (missing: "+missing.join(", ")+")");
+  return rows.slice(1).map(r=>{const o={};cols.forEach((c,i)=>{o[c]=r[i]!==undefined?r[i]:null;});return o;});
+}
+/* Income before the ImPOS feed. BG Ops Data's Sales tab holds weekly totals per venue, week
+   ENDING Sunday, back to April 2023 — which is why every panel read zero before 3 Aug 2026.
+   Each week is spread evenly over its seven days: exact for a weekly total, and it only
+   smooths the day-of-week shape, which nothing pre-cutover depends on. The tab runs to
+   16 Aug and so OVERLAPS the feed by two weeks — it is cut hard at the cutover or those
+   weeks count twice. */
+async function fetchWeeklySales(cut){
+  const rows=await fetchTab("Sales");
+  const out=[];
+  rows.forEach(r=>{
+    const wkEnd=gvizDate(r.date), venue=String(r.venue||"").trim(), total=num_(r.sales);
+    if(!wkEnd||!total||LEDGER_VENUES.indexOf(venue)===-1) return;
+    for(let i=6;i>=0;i--){
+      const d=addD(wkEnd,-i);
+      if(cut&&d>=cut) continue;
+      out.push({date:d,venue,sales:total/7,weekly:true});
+    }
+  });
+  return out;
+}
+async function fetchSalesDaily(){
+  const q="select B, C, sum(H) group by B, C label B 'date', C 'venue', sum(H) 'sales'";
+  const url=`https://docs.google.com/spreadsheets/d/${SALES_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=SalesFeed&tq=${encodeURIComponent(q)}`;
+  const res=await fetch(url), txt=await res.text();
+  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("sales feed not readable");
+  const rows=parseCsv(txt);
+  if(rows.length<2) return [];
+  return rows.slice(1).map(r=>({date:gvizDate(r[0]),venue:String(r[1]||"").trim(),sales:num_(r[2])}))
+                      .filter(r=>r.date&&LEDGER_VENUES.indexOf(r.venue)>=0);
+}
+function parseCsv(text){
+  const rows=[];let row=[],field="",inQ=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(inQ){ if(ch==='"'){ if(text[i+1]==='"'){field+='"';i++;} else inQ=false; } else field+=ch; }
+    else{
+      if(ch==='"') inQ=true;
+      else if(ch===","){row.push(field);field="";}
+      else if(ch==="\n"||ch==="\r"){ if(ch==="\r"&&text[i+1]==="\n")i++; row.push(field);field="";
+        if(row.length>1||row[0]!=="") rows.push(row); row=[]; }
+      else field+=ch;
+    }
+  }
+  if(field!==""||row.length){row.push(field); if(row.length>1||row[0]!=="") rows.push(row);}
+  return rows;
+}
+
+/* ================= LOAD ================= */
+async function loadAll(){
+  const app=document.getElementById("app");
+  app.innerHTML='<div id="status">Loading data…</div>';
+  LOAD_WARN=[];
+  try{
+    const warn=l=>e=>{LOAD_WARN.push(l+": "+e.message);return [];};
+    const [inv,lines,cfgRows,pmRows,manRows,ordRows,ordLineRows,setRows,favRows,favLineRows,covRows,feed,weekly]=await Promise.all([
+      fetchTab("Invoices"),
+      fetchTab("InvoiceLines"),
+      fetchTab("SupplierConfig").catch(warn("SupplierConfig")),
+      fetchTab("ProductMerge").catch(()=>[]),
+      fetchTab("ManualPurchases").catch(warn("ManualPurchases")),
+      fetchTab("Orders").catch(()=>[]),
+      fetchTab("OrderLines").catch(()=>[]),
+      fetchTab("SupplierSettings").catch(()=>[]),
+      fetchTab("Favourites").catch(()=>[]),
+      fetchTab("FavouriteLines").catch(()=>[]),
+      fetchTab("CategoryOverrides").catch(()=>[]),
+      fetchSalesDaily().catch(warn("sales feed")),
+      fetchWeeklySales(gvizDate(SALES_CUTOVER)).catch(warn("weekly Sales tab"))
+    ]);
+
+    CFG={};
+    cfgRows.forEach(r=>{const k=norm(r.supplier);if(!k)return;
+      CFG[k]={merge:String(r.merge_into||"").trim(),group:String(r.group||"").trim(),
+              active:String(r.active||"").trim().toLowerCase()!=="no"};});
+    const applyCfg=n=>{let x=n,seen={};while(true){const c=CFG[norm(x)];
+      if(c&&c.merge&&!seen[norm(c.merge)]){seen[norm(x)]=true;x=c.merge;}else break;}return x;};
+
+    /* Glenorchy is dropped here, at the first filter every row passes through. Nothing
+       downstream can reintroduce it. */
+    INV=inv.map(r=>({venue:r.venue||"",supplier:r.supplier||"",number:String(r.invoice_number||""),
+      date:gvizDate(r.invoice_date)||gvizDate(r.scanned),subtotal:num_(r.subtotal),gst:num_(r.gst),
+      total:num_(r.total),category:r.category||"",type:r.type||"invoice",src:r.source||"",
+      scannedAt:gvizDateTime(r.scanned)}))
+      .filter(r=>r.supplier&&r.date&&r.type!=="superseded"&&LEDGER_VENUES.indexOf(r.venue)>=0);
+
+    const variants={};
+    INV.forEach(r=>{const k=norm(r.supplier);(variants[k]=variants[k]||{})[r.supplier]=(variants[k][r.supplier]||0)+1;});
+    const canon={};
+    Object.entries(variants).forEach(([k,v])=>{canon[k]=Object.entries(v).sort((a,b)=>b[1]-a[1])[0][0];});
+    INV.forEach(r=>{r.supplier=applyCfg(canon[norm(r.supplier)]||r.supplier);});
+
+    manRows.forEach(r=>{
+      const amt=num_(r.amount),d=gvizDate(r.date),shop=String(r.shop||"").trim(),v=r.venue||"";
+      if(!amt||!d||!shop||LEDGER_VENUES.indexOf(v)===-1) return;
+      INV.push({venue:v,supplier:shop,number:"",date:d,subtotal:amt,gst:0,total:amt,
+                category:(r.category||"").trim()||"Food",type:"manual",src:""});
+    });
+
+    /* COGS only, by instruction. Dropping rent, energy, waste and repairs HERE rather than
+       filtering in each view means no total, group, catalogue or countdown can pick them up
+       later by accident. */
+    const beforeCogs=INV.length;
+    INV=INV.filter(isCogs);
+    console.log("COGS filter kept "+INV.length+" of "+beforeCogs+" invoice rows");
+
+    COVER={}; HIDDEN={};
+    covRows.forEach(r=>{
+      const k=String(r.item_key||"").trim(); if(!k) return;
+      const c=String(r.category||"").trim();
+      if(c) COVER[k]=c;
+      if(String(r.hidden||"").trim().toLowerCase()==="yes") HIDDEN[k]=true;
+    });
+
+    const byNumber={};
+    INV.forEach(r=>byNumber[norm(r.supplier)+"|"+norm(r.number)]=r);
+    PMERGE={};
+    const unwrap=v=>String(v==null?"":v).replace(/^="?|"?$/g,"").trim();
+    pmRows.forEach(r=>{const s=unwrap(r.supplier),m=unwrap(r.match),i=unwrap(r.into);
+      if(s&&m&&i) PMERGE[norm(s)+"|"+norm(m)]=i;});
+
+    LINES=lines.map(r=>{
+      const cs=applyCfg(canon[norm(r.supplier)]||r.supplier||"");
+      const iv=byNumber[norm(cs)+"|"+norm(String(r.invoice_number||""))];
+      return {number:String(r.invoice_number||""),supplier:cs,venue:r.venue||"",
+              code:String(r.item_code||""),desc:r.description||"",qty:num_(r.qty),unit:r.unit||"",
+              price:num_(r.unit_price),total:num_(r.line_total),date:iv?iv.date:null,
+              invCategory:iv?iv.category:""};
+    }).filter(r=>r.supplier&&r.date&&LEDGER_VENUES.indexOf(r.venue)>=0);
+
+    /* A line whose invoice is gone (dropped by the COGS filter) goes with it. */
+    const keptInv={};
+    INV.forEach(r=>keptInv[norm(r.supplier)+"|"+norm(r.number)]=true);
+    LINES=LINES.filter(l=>keptInv[norm(l.supplier)+"|"+norm(l.number)]);
+
+    applyFuzzyFold();
+    LINES.forEach(l=>{ l.key=prodKey(l.supplier,l.code,l.desc,l.unit);
+                       l.cat=categorise(l.supplier,l.desc,l.invCategory,l.key); });
+
+    SSET={};
+    setRows.forEach(r=>{const k=norm(r.supplier);if(!k)return;
+      SSET[k]={rep_email:String(r.rep_email||"").trim(),
+               visible:String(r.visible||"").trim().toLowerCase()!=="no",
+               portal_only:String(r.portal_only||"").trim().toLowerCase()==="yes",
+               cc:String(r.cc||"").trim(), note:String(r.note||"").trim()};});
+
+    const favLines={};
+    favLineRows.forEach(r=>{const id=String(r.fav_id||"").trim();if(!id)return;
+      (favLines[id]=favLines[id]||[]).push({key:String(r.item_key||""),desc:String(r.description||""),
+        unit:String(r.unit||""),qty:num_(r.qty),supplier:String(r.supplier||"")});});
+    FAVS=favRows.map(r=>({id:String(r.fav_id||"").trim(),name:String(r.fav_name||"").trim(),
+      venue:String(r.venue||"").trim(),supplier:String(r.supplier||"").trim(),
+      by:String(r.created_by||"").trim(),lines:favLines[String(r.fav_id||"").trim()]||[]}))
+      .filter(f=>f.id&&f.name);   // scoped to a store at render time, by f.venue
+
+    ORDERS=parseOrders(ordRows,ordLineRows);
+    const cut=gvizDate(SALES_CUTOVER);
+    SALES=weekly.concat(feed.filter(f=>!cut||f.date>=cut));
+    SALES_OK=SALES.length>0;
+    if(!feed.length) LOAD_WARN.push("the POS sales feed returned nothing, so income from "+SALES_CUTOVER+" is missing");
+    if(!weekly.length) LOAD_WARN.push("the Sales tab returned nothing, so income before "+SALES_CUTOVER+" is missing");
+
+    clearCatalogueCache();
+    loadDrafts(); renderTagPicker(); renderFilters(); route();
+  }catch(e){
+    app.innerHTML=`<div class="err">Couldn't load the sheet: ${esc(e.message)}<br><br>Check SHEET_ID and that the workbook is shared as "Anyone with the link – Viewer".</div>`;
+  }
+}
+/* Buckets are per supplier and unit, so a fold can never reach across either. */
+function applyFuzzyFold(){
+  const buckets={};
+  LINES.forEach(l=>{
+    if(norm(l.code)) return;                        // coded items need no name matching
+    const b=norm(l.supplier)+"|"+unitNorm(l.unit||"");
+    const k=nameKey(l.desc);
+    const m=(buckets[b]=buckets[b]||{});
+    (m[k]=m[k]||{key:k,bucket:b,n:0,desc:l.desc}).n++;
+  });
+  const fold={};
+  Object.values(buckets).forEach(m=>{
+    const map=fuzzyFold(Object.values(m));
+    Object.entries(map).forEach(([from,to])=>{ if(from!==to) fold[Object.values(m)[0].bucket+"|"+from]=to; });
+  });
+  LINES.forEach(l=>{
+    if(norm(l.code)) return;
+    const b=norm(l.supplier)+"|"+unitNorm(l.unit||"");
+    const to=fold[b+"|"+nameKey(l.desc)];
+    if(to) l.foldTo=to;
+  });
+}
+/* OrderLines has been written since the first version but never read back. Reading it is
+   what makes a past order repeatable: every order placed here already holds exactly what
+   was on it. The stored line has no product key — it has the code, description and unit the
+   order was built from, and prodKey() is deterministic, so the key rebuilds from those and
+   matches the catalogue without a schema change. */
+function parseOrders(rows,lineRows){
+  const lines={};
+  (lineRows||[]).forEach(r=>{
+    const id=String(r.order_id||"").trim(); if(!id) return;
+    const qty=num_(r.qty); if(!(qty>0)) return;
+    (lines[id]=lines[id]||[]).push({code:String(r.item_code||""),desc:String(r.description||""),
+      unit:String(r.unit||""),qty,price:num_(r.unit_price)});
+  });
+  const byId={};
+  rows.forEach(r=>{
+    const id=String(r.order_id||"").trim(); if(!id) return;
+    const venue=String(r.venue||"").trim();
+    if(LEDGER_VENUES.indexOf(venue)===-1) return;
+    const d=gvizDate(r.order_date), logged=gvizDate(r.logged_at)||d;
+    const prev=byId[id];
+    const action=String(r.action||"place").trim().toLowerCase();
+    const rec={id,action,supplier:String(r.supplier||"").trim(),
+      venue,date:d,total:num_(r.total),subtotal:num_(r.subtotal),gst:num_(r.gst),
+      channel:String(r.channel||"").trim(),by:String(r.placed_by||"").trim(),logged,
+      loggedAt:gvizDateTime(r.logged_at),
+      delivery:gvizDate(r.delivery_date)||null};
+    /* A manual match row carries the invoice number in its note; every other field on it may
+       be blank, so it is layered onto the place row rather than replacing it. */
+    if(action==="match"){ rec.matchedTo=String(r.note||"").trim(); delete rec.total; delete rec.subtotal; delete rec.gst; delete rec.delivery; }
+    if(action==="sent"){ delete rec.action; }               // a send row is not a status change
+    const keep=Object.fromEntries(Object.entries(rec).filter(([k,v])=>v!==undefined&&v!==null&&!(k==="delivery"&&!v)));
+    if(!prev||(logged&&prev.logged&&logged>=prev.logged)||!prev.logged) byId[id]=Object.assign({},prev||{},keep);
+  });
+  Object.values(byId).forEach(o=>{ o.lines=lines[o.id]||[]; });
+  const all=Object.values(byId).filter(o=>o.date&&o.supplier);
+  /* Deleting is append-only: a "cancel" row is added and the last row wins, so the order
+     leaves every total and list while the history stays in the sheet. Counting them means
+     the Placed screen can say where they went rather than silently losing rows. */
+  CANCELLED=all.filter(o=>o.action==="cancel").length;
+  return all.filter(o=>o.action!=="cancel");
+}
+
+/* ================= INCOME, SPEND, COUNTDOWN =================
+   One ledger, one venue. */
+const currentWeek=today=>{const s=addD(weekStart(today||new Date()),WEEK_OFF*7);
+  const e=addD(s,6);e.setHours(23,59,59,999);return {start:s,end:e};};
+const weekLabel=wk=>fmtD(wk.start)+" – "+fmtD(wk.end)+(WEEK_OFF===0?" (this week)":WEEK_OFF===-1?" (last week)":"");
+function dailySales(rows){
+  const m={};
+  (rows||[]).forEach(r=>{ if(!r.date) return; const k=fmtISO(r.date); m[k]=(m[k]||0)+(r.sales||0); });
+  return m;
+}
+/* A day with no feed rows is no data, not zero takings — a closed day would otherwise
+   drag that weekday's average down every week. */
+function dowProfile(map,wkStart,weeks){
+  const acc=Array.from({length:7},()=>({s:0,n:0}));
+  for(let w=1;w<=weeks;w++) for(let d=0;d<7;d++){
+    const v=map[fmtISO(addD(wkStart,-7*w+d))];
+    if(v===undefined) continue;
+    acc[d].s+=v; acc[d].n++;
+  }
+  return acc.map(a=>a.n?a.s/a.n:0);
+}
+function forecastWeek(map,wk,today,profile){
+  const t=mid(today||new Date()); let actual=0,forecast=0; const days=[];
+  for(let d=0;d<7;d++){
+    const dt=addD(wk.start,d),iso=fmtISO(dt),a=map[iso]||0;
+    const isToday=+dt===+t,past=+dt<+t;
+    const used=past?a:(isToday?Math.max(a,profile[d]||0):(profile[d]||0));
+    actual+=a; forecast+=used;
+    days.push({iso,dow:d,actual:a,used,past,isToday,est:!past&&!(isToday&&a>=(profile[d]||0))});
+  }
+  return {actual,forecast,days};
+}
+/* Every supplier counts, portal-only included: hiding a supplier from the ordering screen
+   must never hide their money. Non-COGS never reaches here — it was dropped at load. */
+function capturedSpend(inv,wk){
+  let cogs=0,n=0;
+  (inv||[]).forEach(r=>{
+    if(!r.date||r.date<wk.start||r.date>wk.end||!supActive(r.supplier)) return;
+    cogs+=r.total; n++;
+  });
+  return {cogs,n};
+}
+/* RECONCILIATION. A placed order holds its slot in the budget until its invoice lands;
+   when it does, the order stops counting and the invoice counts instead. Get this wrong in
+   one direction and a delivery is charged twice; in the other, money vanishes.
+
+   Three ways an order closes, in order of authority:
+     1. someone matched it to an invoice by hand (a "match" row naming the invoice);
+     2. someone marked it received;
+     3. the tool found the invoice itself.
+
+   Auto-matching anchors on the DELIVERY date, since that is what the supplier dates the
+   invoice, and falls back to the order date when none was given. Within a window of a day
+   before to MATCH_DAYS after, it takes the invoice from that supplier whose total is
+   CLOSEST to the order's, and accepts only if the two agree within a third. The old rule
+   accepted any later invoice regardless of amount, which let a $2,000 delivery close a
+   $200 order and left the $2,000 uncounted. Anything that fails the amount test stays open
+   and is shown with its nearest candidate, so a human can match it in two clicks.
+
+   One invoice settles one order, oldest first. Manual matches are honoured before the
+   automatic pass so a hand-matched invoice can never also close a second order. Orders not
+   placed through this tool have no row here at all: their invoices simply count as spend,
+   which is correct and needs nothing. */
+const MATCH_TOL=0.35;
+function reconcile(orders,inv,wk,today){
+  const now=mid(today||new Date());
+  const inWeek=(orders||[]).filter(o=>o.date&&o.date>=wk.start&&o.date<=wk.end).sort((a,b)=>a.date-b.date);
+  const pool=(inv||[]).filter(r=>r.date&&r.type!=="manual").map(r=>({r,used:false}));
+  const byNum=n=>pool.find(p=>norm(p.r.number)===norm(n)&&!p.used);
+  const closed=[], open=[];
+  // 1. manual matches first, so their invoices are off the table
+  inWeek.forEach(o=>{
+    if(!o.matchedTo) return;
+    const p=byNum(o.matchedTo);
+    if(p) p.used=true;
+    closed.push({o,inv:p?p.r:null,how:"matched by hand"});
+  });
+  inWeek.forEach(o=>{
+    if(o.matchedTo) return;
+    if(o.action==="receive"){ closed.push({o,inv:null,how:"marked received"}); return; }
+    const anchor=+mid(o.delivery||o.date);
+    if((+now-anchor)/864e5>MATCH_DAYS){ closed.push({o,inv:null,how:"expired after "+MATCH_DAYS+" days"}); return; }
+    let best=null, bestDiff=Infinity, nearestAny=null, nearestDiff=Infinity;
+    pool.forEach(p=>{
+      if(p.used||norm(p.r.supplier)!==norm(o.supplier)) return;
+      const gap=(+mid(p.r.date)-anchor)/864e5;
+      if(gap<-1||gap>MATCH_DAYS) return;
+      /* Tracked before the timestamp test: something rejected for arriving too early is
+         still the most useful thing to show a human, who can match it by hand if they know
+         better. */
+      const d0=Math.abs(p.r.total-o.total);
+      if(d0<nearestDiff){ nearestAny=p.r; nearestDiff=d0; }
+      /* An invoice captured BEFORE the order was placed cannot be that order's, whatever the
+         dates say. Both tabs carry the clock: Invoices.scanned is when the email landed,
+         Orders.logged_at when the order was made. This caught a real one — a genuine $900.48
+         Doppio invoice scanned 14 Sep 17:53 was closing an $831.30 order placed 15 Sep 11:15,
+         because both carried the invoice date 15 Sep and the amounts were 8% apart.
+         Not all orders go through this tool, so unrelated invoices are the normal case, not
+         the exception, and date-only matching is not enough to tell them apart. */
+      if(p.r.scannedAt&&o.loggedAt&&p.r.scannedAt<o.loggedAt) return;
+      if(d0<bestDiff){ best=p; bestDiff=d0; }
+    });
+    if(best&&bestDiff<=o.total*MATCH_TOL){ best.used=true; closed.push({o,inv:best.r,how:"matched automatically"}); }
+    else open.push(Object.assign({},o,{nearest:nearestAny}));
+  });
+  return {open,closed};
+}
+/* Kept for the countdown and the tests: just the orders still holding a slot. */
+function openOrders(orders,inv,wk,today){ return reconcile(orders,inv,wk,today).open; }
+function gstRate(supplier){
+  let sub=0,gst=0; const since=Date.now()-CAT_DAYS*864e5;
+  INV.forEach(r=>{ if(norm(r.supplier)!==norm(supplier)||r.type==="manual") return;
+    if(!r.date||+r.date<since||!(r.subtotal>0)) return; sub+=r.subtotal; gst+=r.gst; });
+  if(!(sub>0)) return 0.1;
+  const r=gst/sub;
+  return r<0.005?0:Math.min(0.1,Math.round(r*1000)/1000);
+}
+function weekModel(today){
+  const wk=currentWeek(today), now=today||new Date();
+  const map=dailySales(SALES);
+  const profile=dowProfile(map,wk.start,DOW_WEEKS);
+  const sales=forecastWeek(map,wk,now,profile);
+  const cap=capturedSpend(INV,wk);
+  const open=openOrders(ORDERS.concat(LOCAL_ORDERS),INV,wk,now);
+  const committed=open.reduce((s,o)=>s+o.total,0);
+  const drafted=allDraftTotal();
+  const budget=sales.forecast*TARGET_COGS_PCT/100;
+  const used=cap.cogs+committed+drafted;
+  return {wk,sales,cap,open,committed,drafted,used,budget,remaining:budget-used,
+    cogsActual: sales.actual>0?cap.cogs/sales.actual*100:0,
+    cogsProjected: sales.forecast>0?used/sales.forecast*100:0};
+}
+
+/* ================= CATALOGUE ================= */
+/* No master product list exists in the platform. What you buy IS the catalogue, derived
+   from the invoice lines, so it needs no upkeep and prices follow the invoices. Charges are
+   not stock and are stripped. */
+/* Ordering data is scoped to the active tag (only one here). venue:null crosses every
+   ledger venue, which for Glenorchy HQ is the same thing — kept so the code matches
+   Cambridge Central line for line. */
+function deriveCatalogue(lines,supplier,now,opts){
+  opts=opts||{};
+  const venue=opts.venue===undefined?TAG.name:opts.venue;
+  const listDays=opts.listDays||CAT_DAYS, rateDays=opts.rateDays||RATE_DAYS;
+  /* Charges are not stock. "admin\s*fee" only ever caught the literal phrase, so "Admin
+     service fee", "Distribution Fee" and "Min Order Charge" all stayed in the catalogue —
+     and Fill Usual duly ordered twenty-two admin fees. Checked against all 2,030 distinct
+     descriptions in the data: this removes exactly six lines, every one a real charge. */
+  const FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|\bfees?\b|\bcharges?\b|\bcartage\b|\bmin(imum)?\.?\s*order\b/i;
+  const t=+(now||new Date()),listFrom=t-listDays*864e5,rateFrom=t-rateDays*864e5;
+  const map={};
+  (lines||[]).forEach(l=>{
+    if(supplier&&l.supplier!==supplier) return;
+    if(venue&&l.venue!==venue) return;
+    if(!(l.price>0)||!(l.qty>0)||!l.date) return;
+    if(FEE.test(l.desc)) return;
+    if(+l.date<listFrom) return;
+    const k=l.key||prodKey(l.supplier,l.code,l.desc,l.unit);
+    const p=map[k]||(map[k]={key:k,supplier:l.supplier,code:l.code,desc:l.desc,unit:l.unit,buys:[]});
+    p.desc=l.desc; p.unit=l.unit; p.buys.push(l);
+  });
+  return Object.values(map).map(p=>{
+    p.buys.sort((a,b)=>a.date-b.date);
+    const recent=p.buys.filter(b=>+b.date>=rateFrom), base=recent.length?recent:p.buys;
+    const qty=base.reduce((s,b)=>s+b.qty,0);
+    const orders=new Set(base.map(b=>norm(b.number))).size||1;
+    const span=Math.max(7,(+base[base.length-1].date-+base[0].date)/864e5+1);
+    p.last=p.buys[p.buys.length-1];
+    p.price=p.last.price; p.lastQty=p.last.qty; p.lastDate=p.last.date;
+    p.qtyTotal=p.buys.reduce((s,b)=>s+b.qty,0);
+    p.spendTotal=p.buys.reduce((s,b)=>s+b.total,0);
+    p.avgPerOrder=qty/orders; p.avgQtyWk=qty/(span/7); p.ordersPerWk=orders/(span/7);
+    p.daysSince=Math.round((t-+p.last.date)/864e5);
+    p.stale=+p.last.date<rateFrom;
+    p.variants=[...new Set(p.buys.map(b=>b.desc))];
+    /* Category from ALL the merged spellings, not just the newest one. p.desc is whichever
+       variant was bought most recently, so a product whose supplier alternates between
+       "Cheese Slices" and "Cheer Tasty 96" would change category every time a different
+       spelling came in last — which is exactly the shuffling that made the catalogue hard to
+       order from. Tally the variants, take the most common real answer, break ties
+       alphabetically so the result is stable run to run. */
+    p.cat=stableCat(p);
+    p.hidden=!!HIDDEN[p.key];
+    p.prevPrice=null;
+    for(let i=p.buys.length-2;i>=0;i--){ if(p.buys[i].price!==p.price){p.prevPrice=p.buys[i].price;break;} }
+    p.change=p.prevPrice?(p.price-p.prevPrice)/p.prevPrice*100:null;
+    /* WHEN the price last moved, not just by how much. A 4% rise last week and one from
+       March were rendering identically, and only one of them is worth acting on. Walk back
+       to the first delivery at the current price: that is the day it changed. */
+    let si=p.buys.length-1;
+    while(si>0&&p.buys[si-1].price===p.price) si--;
+    p.priceSince=p.buys[si].date;
+    p.priceAgeDays=Math.round((t-+p.priceSince)/864e5);
+    p.priceFresh=p.change!=null&&p.priceAgeDays<=30;
+    const ps=p.buys.filter(b=>+b.date>=t-90*864e5).map(b=>b.price);
+    p.lo90=ps.length?Math.min(...ps):p.price;
+    p.hi90=ps.length?Math.max(...ps):p.price;
+    p.moves90=(()=>{let n=0;const r=p.buys.filter(b=>+b.date>=t-90*864e5);
+      for(let i=1;i<r.length;i++) if(r[i].price!==r[i-1].price) n++; return n;})();
+    /* Conservative fill: average per order, floored, with a cutoff below which the item is
+       simply not suggested. */
+    p.fillQty = p.avgPerOrder<FILL_FLOOR_CUTOFF ? 0 : Math.max(FILL_MIN,Math.floor(p.avgPerOrder));
+    return p;
+  });
+}
+function stableCat(p){
+  if(COVER[p.key]) return COVER[p.key];
+  const tally={};
+  p.variants.forEach(v=>{
+    const c=categorise(p.supplier,v,null,null);
+    if(c==="Uncategorised") return;
+    tally[c]=(tally[c]||0)+1;
+  });
+  const best=Object.entries(tally).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))[0];
+  return best?best[0]:categorise(p.supplier,p.desc,p.buys[0].invCategory,p.key);
+}
+
+function supplierList(now,opts){
+  opts=opts||{};
+  const venue=opts.venue===undefined?TAG.name:opts.venue;
+  const t=+(now||new Date()),from=t-CAT_DAYS*864e5,m={},wk=currentWeek(now);
+  /* "Spend this week" is week-to-date, so comparing it with a whole week's average makes
+     every supplier read ▼70% on a Monday morning. The honest comparison is like for like:
+     the same Monday-to-today span in each of the previous WEEKS_BACK weeks. */
+  const WEEKS_BACK=6;
+  const dayOfWeek=Math.min(6,Math.max(0,Math.round((mid(now||new Date())-wk.start)/864e5)));
+  INV.forEach(r=>{
+    if(r.type==="manual"||!r.date||+r.date<from||!supActive(r.supplier)) return;
+    if(venue&&r.venue!==venue) return;
+    const s=m[r.supplier]||(m[r.supplier]={name:r.supplier,spend:0,week:0,n:0,last:null,priorToDate:[]});
+    s.spend+=r.total; s.n++;
+    if(r.date>=wk.start&&r.date<=wk.end) s.week+=r.total;
+    for(let w=1;w<=WEEKS_BACK;w++){
+      const ws=addD(wk.start,-7*w), we=addD(ws,dayOfWeek);
+      we.setHours(23,59,59,999);
+      if(r.date>=ws&&r.date<=we){ s.priorToDate[w]=(s.priorToDate[w]||0)+r.total; break; }
+    }
+    if(!s.last||r.date>s.last) s.last=r.date;
+  });
+  const wks=CAT_DAYS/7;
+  return Object.values(m).map(s=>{
+    const cfg=sset(s.name);
+    s.group=supGroup(s.name); s.avgWk=s.spend/wks;
+    /* Against the same point of the week across recent weeks, averaged over ALL of them —
+       including the ones with no delivery, since a supplier you buy from fortnightly really
+       does average half as much. A supplier with no history at this point of the week has
+       nothing to compare against and gets no arrow rather than a made-up one. */
+    let sum=0, seen=0;
+    for(let w=1;w<=WEEKS_BACK;w++){ if(+addD(wk.start,-7*w)>=from){ sum+=s.priorToDate[w]||0; seen++; } }
+    s.usualToDate=seen?sum/seen:null;
+    s.vsUsual=(s.usualToDate!=null&&s.usualToDate>0)?(s.week-s.usualToDate)/s.usualToDate*100:null;
+    s.daysSince=Math.round((t-+s.last)/864e5);
+    s.lines=LINES.some(l=>l.supplier===s.name&&(!venue||l.venue===venue));
+    s.visible=cfg.visible; s.portal=cfg.portal_only; s.rep=cfg.rep_email;
+    s.orderable=s.visible&&s.lines;
+    return s;
+  }).sort((a,b)=>b.avgWk-a.avgWk);
+}
+const orderableSuppliers=()=>supplierList().filter(s=>s.orderable&&(!HIDE_PORTAL||!s.portal));
+function supplierEmail(name){
+  const cfg=sset(name);
+  if(cfg.rep_email) return cfg.rep_email;
+  const tally={};
+  INV.filter(r=>r.supplier===name).forEach(r=>{
+    (String(r.src||"").match(/[\w.+-]+@[\w.-]+\.\w+/g)||[]).forEach(e=>{
+      e=e.toLowerCase();
+      if(/redsquarecafe|beckitt|bgfitness|lumakitchen/.test(e)) return;
+      const w=/sent-via|noreply|no-reply|donotreply|notifications?@|mailer|bounce/.test(e)?1:10;
+      tally[e]=(tally[e]||0)+w;
+    });
+  });
+  const best=Object.entries(tally).sort((a,b)=>b[1]-a[1])[0];
+  return best?best[0]:"";
+}
+
+/* ================= DRAFTS ================= */
+const DRAFT_KEY="ghq_drafts";
+function loadDrafts(){ try{DRAFTS=JSON.parse(localStorage.getItem(DRAFT_KEY)||"{}")||{};}catch(e){DRAFTS={};} }
+function saveDrafts(){ try{localStorage.setItem(DRAFT_KEY,JSON.stringify(DRAFTS));}catch(e){} }
+const draftId=(supplier,venue)=>(venue||TAG.name)+"::"+supplier;
+function draft(supplier,venue){
+  const id=draftId(supplier,venue);
+  const d=DRAFTS[id]||(DRAFTS[id]={supplier,tag:venue||TAG.name,qty:{},note:""});
+  if(!d.delivery||gvizDate(d.delivery)<mid(new Date())) d.delivery=fmtISO(nextBusinessDay());
+  return d;
+}
+function setDelivery(v){ const d=draft(SUPPLIER); if(gvizDate(v)) d.delivery=v; saveDrafts(); route(); }
+function setQty(supplier,key,n,venue){
+  const d=draft(supplier,venue);
+  /* Two decimals, not whole units: plenty of lines are priced per kg and a last quantity of
+     1.5kg must come back as 1.5, not 2. */
+  n=Math.max(0,Math.round((Number(n)||0)*100)/100);
+  if(n) d.qty[key]=n; else delete d.qty[key];
+  saveDrafts();
+}
+function draftLines(supplier,venue){
+  const d=DRAFTS[draftId(supplier,venue)]; if(!d) return [];
+  const by={}; deriveCatalogue(LINES,supplier,new Date(),{venue:venue||TAG.name}).forEach(p=>by[p.key]=p);
+  return Object.keys(d.qty).map(k=>{
+    const p=by[k]; if(!p) return null;
+    return {key:k,code:p.code,desc:p.desc,unit:p.unit,qty:d.qty[k],price:p.price,total:d.qty[k]*p.price,cat:p.cat};
+  }).filter(Boolean);
+}
+function orderTotals(supplier,venue){
+  const lines=draftLines(supplier,venue),rate=gstRate(supplier);
+  const sub=lines.reduce((s,l)=>s+l.total,0);
+  return {lines,sub,gst:sub*rate,total:sub+sub*rate,rate};
+}
+/* Every open draft counts against the countdown. */
+function allDraftTotal(){
+  let t=0;
+  Object.values(DRAFTS).forEach(d=>{ if(d&&d.supplier) t+=orderTotals(d.supplier,d.tag).total; });
+  return t;
+}
+
+/* ================= UI SHELL ================= */
+function renderTagPicker(){
+  document.getElementById("tagpick").innerHTML=TAGS.length<2?"":
+    TAGS.map(t=>`<button class="${TAG.key===t.key?"sel":""}" onclick="setTag('${t.key}')" title="Delivery tag only — all money sits under ${esc(ENTITY)}">${esc(t.short)}</button>`).join("");
+}
+function setTag(k){
+  TAG=TAGS.find(t=>t.key===k)||TAGS[0];
+  SALES_PROD_VENUE=null;
+  /* A category chosen for one store's catalogue rarely exists in the other's, and leaving
+     it set showed an empty list with no obvious cause. */
+  CATFILT=""; GCAT_FILT=""; PICKED={}; clearCatalogueCache();
+  renderTagPicker(); renderFilters(); route();
+}
+function renderFilters(){
+  /* The Sales tab carries its own period control. Showing the ordering week stepper above it
+     put two date pickers on one screen where only the lower one moved the data. */
+  if(location.hash.slice(1)==="sales"){ document.getElementById("filters").innerHTML=""; return; }
+  document.getElementById("filters").innerHTML=`
+    <span class="chip sm on" style="cursor:default" title="Ordering for delivery to ${esc(TAG.name)}">Tag: ${esc(TAG.short)}</span>
+    <span class="chip sm" style="cursor:default;background:#f7f6f3">Books: ${esc(ENTITY)}</span>
+    <span style="flex:1"></span>
+    <span class="chip sm" onclick="stepWeek(-1)">‹</span>
+    <span class="chip sm on" style="cursor:default">${esc(weekLabel(currentWeek()))}</span>
+    <span class="chip sm" onclick="stepWeek(1)" ${WEEK_OFF>=0?'style="opacity:.35"':""}>›</span>
+    ${WEEK_OFF!==0?`<span class="chip sm" onclick="thisWeek()">this week</span>`:""}`;
+}
+function stepWeek(d){ if(WEEK_OFF+d>0) return; WEEK_OFF+=d; renderFilters(); route(); }
+function thisWeek(){ WEEK_OFF=0; renderFilters(); route(); }
+function go(h){ location.hash=h; route(); }
+function warnBar(){ return LOAD_WARN.length?`<div class="err"><b>Some data didn't load.</b><br>${LOAD_WARN.map(esc).join("<br>")}</div>`:""; }
+
+function summaryBar(m){
+  const b=Math.max(m.budget,1), seg=v=>Math.max(0,Math.min(100,v/b*100));
+  const over=m.used>m.budget&&m.budget>0;
+  const cls=m.cogsProjected<=TARGET_COGS_PCT?"good":"over";
+  /* Left to right the way the question is actually asked: what have we spent, what is left,
+     what is coming in, and what does that make the percentage. Spend first because it is the
+     number being controlled; the COGS % last because it is the consequence of the other
+     three rather than something you act on directly. */
+  return `<div class="summary">
+    <div class="tile">
+      <div class="k">Spent so far</div>
+      <div class="v">${money0(m.cap.cogs)}</div>
+      <div class="sub">${m.cap.n} invoice(s) captured${m.committed?` · ${money0(m.committed)} awaiting invoice`:""}${m.drafted?` · ${money0(m.drafted)} in drafts`:""}</div>
+    </div>
+    <div class="tile ${over?"over":""}">
+      <div class="k">Left to spend — ${esc(ENTITY)}</div>
+      <div class="v">${m.budget>0?money0(m.remaining):"—"}</div>
+      <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i></div>
+      <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Awaiting invoice ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span></div>
+      <div class="sub">${money0(m.used)} of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${over?" — <b style='color:var(--red)'>over</b>":""}</div>
+    </div>
+    <div class="tile">
+      <div class="k">Income this week</div>
+      <div class="v">${money0(m.sales.actual)}</div>
+      <div class="sub">Forecast ${money0(m.sales.forecast)}</div>
+    </div>
+    <div class="tile ${m.sales.forecast>0?cls:""}">
+      <div class="k">COGS % — projected vs ${TARGET_COGS_PCT}%</div>
+      <div class="v">${m.sales.forecast>0?pct1(m.cogsProjected):"—"}</div>
+      <div class="sub">${m.sales.actual>0?`${pct1(m.cogsActual)} on income so far. `:""}One venue, one set of books.</div>
+    </div></div>`;
+}
+
+/* ================= ROUTER ================= */
+function route(){
+  const h=decodeURIComponent(location.hash.slice(1));
+  renderFilters();          // the bar belongs to the route, so it is decided here, once
+  if(h==="admin") return renderAdmin();
+  if(h==="favs") return renderFavs();
+  if(h==="reports") return renderReports();
+  if(h.startsWith("rsup::")) return renderSupplierProducts(h.slice(6));
+  if(h.startsWith("rprod::")) return renderPriceHistory(h.slice(7));
+  if(h==="sales") return renderSales();
+  if(h==="placed") return renderPlaced();
+  if(h.startsWith("grp::")) return renderGroupDrill(h.slice(5));
+  if(h.startsWith("s::")){
+    const next=h.slice(3);
+    if(next!==SUPPLIER){ CATFILT=""; SEARCH=""; PICKED={}; }   // filters belong to a supplier, not the app
+    SUPPLIER=next; return renderBuilder();
+  }
+  SUPPLIER=""; renderHome();
+}
+
+/* ================= HOME ================= */
+/* One line, stating a fact: what it cost, how that differs from the same day in recent
+   weeks, and what that base is. A dollar difference is what anyone controlling spend
+   actually wants, and it carries its own comparison. Colour sits on the difference only —
+   it is safe to scan once the base is spelled out beside it, which it was not when a bare
+   red percentage sat next to a full-week average it had nothing to do with. */
+const DAYSHORT=new Date().toLocaleDateString("en-AU",{weekday:"short"});
+function renderHome(){
+  const m=weekModel(), all=supplierList();
+  const shown=all.filter(s=>s.orderable&&(!HIDE_PORTAL||!s.portal));
+  const portalCount=all.filter(s=>s.orderable&&s.portal).length;
+  document.getElementById("app").innerHTML=`
+    ${warnBar()}${summaryBar(m)}
+    <div class="card">
+      <div class="label">Start an order — ${esc(TAG.name)}</div>
+      ${portalCount?`<div style="margin-bottom:10px"><span class="chip sm ${HIDE_PORTAL?"on":""}" onclick="togglePortal()">${HIDE_PORTAL?"portal-only hidden":"portal-only shown"} (${portalCount})</span></div>`:""}
+      <table><thead><tr>
+        <th style="width:30px"></th>
+        <th>Supplier</th><th class="num">Spend so far</th><th class="num hide-sm">Last delivery</th><th class="num">Draft</th>
+      </tr></thead><tbody>
+      ${shown.map(s=>{
+        const d=DRAFTS[draftId(s.name,TAG.name)], n=d?Object.keys(d.qty||{}).length:0;
+        const v=s.vsUsual;
+        const openHere=HOME_INV===s.name;
+        /* The name opens the order builder; the chevron drops the invoices in place. Two
+           different jobs on one row, so they get two different targets rather than one
+           click that has to guess. */
+        return `<tr class="${n?"picked":""} ${openHere?"picked":""}">
+          <td style="text-align:center;cursor:pointer;color:var(--dim)" onclick="toggleHomeInv('${esc(s.name)}')"
+              title="Show invoices">${openHere?"▾":"▸"}</td>
+          <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.portal?' <span class="pill">portal</span>':""}${s.rep?"":' <span class="pill">no rep email</span>'}</td>
+          <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
+            ${v!=null?`<br><span class="${s.week>=s.usualToDate?"up":"down"}" style="font-size:11px">${s.week>=s.usualToDate?"+":"−"}${money0(Math.abs(s.week-s.usualToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.usualToDate)} by ${esc(DAYSHORT)}</span>`:""}</td>
+          <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
+          <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
+        </tr>`
+        + (openHere?`<tr><td colspan="6" style="background:#faf9f6;padding:0 6px 10px">
+             ${invoiceTable(s.name,TAG.name,15)}</td></tr>`:"");}).join("")}
+      </tbody></table>
+      ${shown.length?"":'<div class="note">No suppliers with itemised lines in the last '+CAT_DAYS+' days.</div>'}
+      <div class="note" id="homenote">This list, the catalogue, drafts and favourites are
+        <b>${esc(TAG.name)}</b>.
+        <b>Spend so far</b> is this store's invoices for that supplier this week to date. Underneath is how that
+        compares with the same day over the last 6 weeks — like for like, because measuring a Tuesday against a
+        whole week would show almost every supplier as down until Friday. Cost of goods only.</div>
+    </div>
+    ${productSearchCard()}`;
+  const g=document.getElementById("gsearch");
+  if(g){
+    g.addEventListener("input",e=>{
+      GSEARCH=e.target.value; GCARET=e.target.selectionStart;
+      clearTimeout(window.__gt);
+      window.__gt=setTimeout(()=>{ GFOCUS=true; route(); },160);
+    });
+    if(GFOCUS){ g.focus(); try{ g.setSelectionRange(GCARET,GCARET); }catch(e){} GFOCUS=false; }
+  }
+}
+function togglePortal(){ HIDE_PORTAL=!HIDE_PORTAL; route(); }
+
+/* Find a product without knowing who sells it — the question you have standing in the
+   coolroom. Searches every supplier at once, which is the point: the same thing often comes
+   from two of them at two prices, and that is worth seeing side by side. */
+function productSearchCard(){
+  const q=GSEARCH.trim().toLowerCase();
+  const all=globalCatalogue();
+  /* Counts come from the text match alone, so each chip shows what it would give you rather
+     than what is left after the chip already applied — a filter that reads "Dairy (0)" is
+     more use than one that silently hides itself. */
+  const textHit=p=>!q||q.length<2||p.desc.toLowerCase().includes(q)||String(p.code).toLowerCase().includes(q);
+  const pool=all.filter(textHit);
+  const counts={};
+  pool.forEach(p=>{counts[p.cat]=(counts[p.cat]||0)+1;});
+  const cats=Object.keys(counts).sort();
+  /* A category on its own is a valid search: "show me everything in Frozen". */
+  const browsing=!!GCAT_FILT&&q.length<2;
+  let rows=[];
+  if(q.length>=2||browsing){
+    rows=sortGlobal(pool.filter(p=>!GCAT_FILT||p.cat===GCAT_FILT));
+  }
+  const shown=rows.slice(0,40);
+  return `<div class="card">
+    <div class="label">Find a product — every supplier</div>
+    <input type="search" id="gsearch" placeholder="Search all products…" value="${esc(GSEARCH)}">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <span class="chip sm ${GCAT_FILT?"":"on"}" onclick="setGCat('')">All</span>
+      ${cats.map(c=>`<span class="chip sm ${GCAT_FILT===c?"on":""}" onclick="setGCat('${esc(c)}')">${esc(c)} <span style="color:var(--dim);font-weight:400">${counts[c]}</span></span>`).join("")}
+    </div>
+    ${q.length<2&&!browsing?`<div class="note">Type at least two characters, or pick a category to browse it.
+        Searches every supplier for ${esc(TAG.name)}.</div>`
+     :!rows.length?`<div class="note">Nothing matching ${q.length>=2?`“${esc(GSEARCH)}”`:""}${q.length>=2&&GCAT_FILT?" in ":""}${GCAT_FILT?esc(GCAT_FILT):""} at ${esc(TAG.name)} in the last ${CAT_DAYS} days.</div>`
+     :`<table style="margin-top:8px"><thead><tr>
+         ${gHead("name","Product")}${gHead("supplier","Supplier","hide-sm")}${gHead("cat","Category","hide-sm")}
+         ${gHead("price","Unit price","num")}${gHead("qty90","90-day qty","num hide-sm")}
+         ${gHead("last","Last bought","num hide-sm")}</tr></thead>
+       <tbody>${shown.map(p=>{
+         const q90=qty90(p);
+         return `<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
+           <td><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}
+             ${p.hidden?' <span class="pill">off</span>':""}</td>
+           <td class="hide-sm">${esc(p.supplier)}</td>
+           <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
+           <td class="num">${money(p.price)}${p.change!=null?`<br><span class="${p.change>0?"up":"down"}" style="font-size:11px">${p.change>0?"+":""}${Math.round(p.change*10)/10}%</span>`:""}</td>
+           <td class="num hide-sm">${Math.round(q90*100)/100} ${esc(p.unit||"")}</td>
+           <td class="num hide-sm">${fmtD(p.lastDate)}<br><span style="color:var(--dim);font-size:11px">${p.daysSince}d</span></td>
+         </tr>`;}).join("")}</tbody></table>
+       <div class="note">${rows.length>shown.length?`Showing ${shown.length} of ${rows.length}. `:""}Click any product
+         for its 90-day quantity and price history.</div>`}
+  </div>`;
+}
+function setGCat(c){ GCAT_FILT = GCAT_FILT===c ? "" : c; GFOCUS=GSEARCH.trim().length>=2; route(); }
+const qty90=p=>p.buys.filter(b=>+b.date>=Date.now()-90*864e5).reduce((t,x)=>t+x.qty,0);
+/* Every column sorts. The default is most-often-bought first, which is the order you want
+   before you have expressed a preference. */
+function sortGlobal(rows){
+  const d=GSORT.dir;
+  const by={ name:(a,b)=>a.desc.localeCompare(b.desc),
+             supplier:(a,b)=>a.supplier.localeCompare(b.supplier)||a.desc.localeCompare(b.desc),
+             cat:(a,b)=>a.cat.localeCompare(b.cat)||a.desc.localeCompare(b.desc),
+             price:(a,b)=>a.price-b.price,
+             qty90:(a,b)=>qty90(a)-qty90(b),
+             last:(a,b)=>(+a.lastDate)-(+b.lastDate),
+             freq:(a,b)=>a.ordersPerWk-b.ordersPerWk||b.desc.localeCompare(a.desc) };
+  return rows.slice().sort((a,b)=>d*(by[GSORT.col]||by.freq)(a,b));
+}
+function gHead(col,label,cls){
+  const on=GSORT.col===col;
+  return `<th class="s ${cls||""} ${on?"act":""}" onclick="setGSort('${col}')">${label}${on?(GSORT.dir>0?" ▲":" ▼"):""}</th>`;
+}
+function setGSort(c){
+  if(GSORT.col===c) GSORT.dir*=-1;
+  /* Text reads best A to Z; numbers and dates read best biggest or newest first. */
+  else GSORT={col:c,dir:(c==="name"||c==="supplier"||c==="cat")?1:-1};
+  GFOCUS=GSEARCH.trim().length>=2;
+  route();
+}
+function toggleHomeInv(n){ HOME_INV = HOME_INV===n ? null : n; OPEN_INV=null; route(); }
+
+/* ================= BUILDER ================= */
+function sortCat(rows){
+  const d=SORT.dir;
+  const by={ name:(a,b)=>a.desc.localeCompare(b.desc), price:(a,b)=>a.price-b.price,
+             last:(a,b)=>(+a.lastDate)-(+b.lastDate), qty:(a,b)=>a.lastQty-b.lastQty,
+             cat:(a,b)=>a.cat.localeCompare(b.cat)||a.desc.localeCompare(b.desc),
+             freq:(a,b)=>a.ordersPerWk-b.ordersPerWk, spend:(a,b)=>a.spendTotal-b.spendTotal };
+  return rows.slice().sort((a,b)=>d*(by[SORT.col]||by.name)(a,b));
+}
+function sortHead(col,label,cls){
+  const on=SORT.col===col;
+  return `<th class="s ${cls||""} ${on?"act":""}" onclick="setSort('${col}')">${label}${on?(SORT.dir>0?" ▲":" ▼"):""}</th>`;
+}
+function setSort(c){ if(SORT.col===c) SORT.dir*=-1; else {SORT.col=c;SORT.dir=1;} route(); }
+
+function renderBuilder(){
+  const name=SUPPLIER, m=weekModel();
+  const cat=deriveCatalogue(LINES,name,new Date());
+  const cats=[...new Set(cat.map(p=>p.cat))].sort();
+  const q=SEARCH.trim().toLowerCase();
+  const visible=cat.filter(p=>SHOW_HIDDEN||!p.hidden);
+  const hiddenN=cat.length-visible.length;
+  const rows=sortCat(visible.filter(p=>(!CATFILT||p.cat===CATFILT)&&(!q||p.desc.toLowerCase().includes(q)||String(p.code).toLowerCase().includes(q))));
+  const nPicked=Object.keys(PICKED).filter(k=>PICKED[k]).length;
+  const d=draft(name), t=orderTotals(name), cfg=sset(name), email=supplierEmail(name);
+  const myFavs=FAVS.filter(f=>f.venue===TAG.name&&(!f.supplier||f.supplier===name));
+  document.getElementById("app").innerHTML=`
+    ${warnBar()}${summaryBar(m)}
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="panels">
+      <div><div class="card">
+        <div class="label">${esc(name)} — catalogue</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <input type="search" id="csearch" placeholder="Find an item…" value="${esc(SEARCH)}" style="flex:1;min-width:170px">
+          <span class="chip sm" onclick="fillUsual()">Fill usual</span>
+          <span class="chip sm" onclick="clearDraft()">Clear</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <span class="chip sm ${CATFILT?"":"on"}" onclick="setCat('')">All</span>
+          ${cats.map(c=>`<span class="chip sm ${CATFILT===c?"on":""}" onclick="setCat('${esc(c)}')">${esc(c)}</span>`).join("")}
+          ${hiddenN?`<span class="chip sm ${SHOW_HIDDEN?"on":""}" onclick="toggleHidden()">${SHOW_HIDDEN?"hiding":"show"} ${hiddenN} off</span>`:""}
+        </div>
+        ${nPicked?`<div class="card" style="padding:8px 10px;margin-bottom:8px;background:#fffbe9">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <b style="font-size:13px">${nPicked} selected</b>
+            <select id="bulkcat" style="font-size:13px;padding:6px 8px">
+              <option value="">Set category…</option>
+              ${CATEGORIES.map(c=>`<option>${esc(c)}</option>`).join("")}
+            </select>
+            <span class="chip sm" onclick="bulkCategory()">Apply to all</span>
+            <span class="chip sm" onclick="bulkHide(true)">Turn off</span>
+            ${SHOW_HIDDEN?`<span class="chip sm" onclick="bulkHide(false)">Turn back on</span>`:""}
+            <span class="chip sm" onclick="clearPicked()">Clear</span>
+          </div></div>`:""}
+        ${myFavs.length?`<div style="margin-bottom:8px;font-size:12px">Favourites:
+          ${myFavs.map(f=>`<span class="chip sm" onclick="recallFav('${esc(f.id)}')">${esc(f.name)}</span>`).join(" ")}</div>`:""}
+        <table><thead><tr>
+          <th style="width:26px"><input type="checkbox" onchange="pickAll(this.checked)" title="Select all shown"></th>
+          ${sortHead("name","Product")}${sortHead("cat","Category","hide-sm")}${sortHead("price","Unit price","num")}
+          ${sortHead("last","Last ordered","num hide-sm")}${sortHead("qty","Last qty","num hide-sm")}<th class="num">Qty</th>
+        </tr></thead><tbody>
+        ${rows.map(p=>`<tr data-pk="${esc(p.key)}" class="${d.qty[p.key]?"picked":""}" style="${p.hidden?"opacity:.5":""}">
+          <td><input type="checkbox" ${PICKED[p.key]?"checked":""} onchange="pick('${esc(p.key)}',this.checked)"></td>
+          <td class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')"><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}
+            ${p.code?`<br><span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(p.code)}</span>`:""}
+            ${p.variants.length>1?` <span class="pill" title="${esc(p.variants.join(" / "))}">${p.variants.length} names merged</span>`:""}
+            ${p.stale?' <span class="pill">not bought lately</span>':""}
+            ${p.hidden?' <span class="pill warn">off</span>':""}</td>
+          <td class="hide-sm"><span class="pill edit" onclick="editCategory('${esc(p.key)}')" title="Reassign for everyone">${esc(p.cat)} ✎</span>
+            ${COVER[p.key]?'<br><span style="font-size:10px;color:var(--dim)">set by hand</span>':""}</td>
+          <td class="num">${money(p.price)}${priceFlag(p)}</td>
+          <td class="num hide-sm">${fmtD(p.lastDate)}<br><span style="color:var(--dim);font-size:11px">${p.daysSince}d</span></td>
+          <td class="num hide-sm click" onclick="setQty(SUPPLIER,'${esc(p.key)}',${p.lastQty});route()"
+              title="Order this quantity again" style="cursor:pointer">
+            <b style="border-bottom:1px dashed #bbb">${p.lastQty} ${esc(p.unit||"")}</b>
+            <br><span style="color:var(--dim);font-size:11px">usual ${Math.round(p.avgPerOrder*100)/100} → fill ${p.fillQty}</span></td>
+          <td class="num"><span class="qty ${d.qty[p.key]?"on":""}">
+            <button onclick="bump('${esc(p.key)}',-1)">−</button>
+            <input type="number" min="0" step="any" value="${d.qty[p.key]||0}" data-k="${esc(p.key)}" onchange="typed(this)">
+            <button onclick="bump('${esc(p.key)}',1)">+</button></span>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px">${d.qty[p.key]?money(d.qty[p.key]*p.price):"&nbsp;"}</div></td>
+        </tr>`).join("")}
+        </tbody></table>
+        ${rows.length?"":`<div class="note">Nothing bought from this supplier in the last ${CAT_DAYS} days.</div>`}
+        <div class="note">Tick items to change their category in bulk, or to turn them off — delivery charges,
+          admin fees and one-off lines you will never order. Turned-off items stay in every spend total and
+          report; they only leave the ordering screens. Click a product name for its unit price history.
+          <b>Fill usual</b> is deliberately mean: the
+          average quantity per order, rounded down, anything under ${FILL_FLOOR_CUTOFF} left at zero, and the whole
+          fill capped so one tap can't eat the week's budget.</div>
+      </div></div>
+
+      <div class="draft"><div class="card">
+        <div class="label">This order</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:8px">Tagged <b>${esc(d.tag||TAG.name)}</b> · billed to ${esc(ENTITY)}</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:12px;color:var(--dim)">Deliver on
+          <input type="date" value="${esc(d.delivery)}" min="${fmtISO(mid(new Date()))}" onchange="setDelivery(this.value)" style="font-size:13px;padding:6px 8px">
+          <span title="The invoice will carry this date, so it is what the order is reconciled against">${gvizDate(d.delivery)?esc(gvizDate(d.delivery).toLocaleDateString("en-AU",{weekday:"short"})):""}</span></div>
+        ${t.lines.length?`
+          <div style="max-height:36vh;overflow:auto">
+          ${t.lines.map(l=>`<div class="dline"><div class="g" style="cursor:pointer" title="Show this item in the catalogue" onclick="focusProduct('${esc(l.key)}')"><b>${esc(l.desc)}</b>
+            <span style="color:var(--dim);font-size:11px">${l.qty} × ${money(l.price)} ${esc(l.unit||"")}</span></div>
+            <div class="num" style="font-size:13px">${money(l.total)}</div>
+            <div><button onclick="setQty(SUPPLIER,'${esc(l.key)}',0);route()" style="border:none;background:none;font-size:15px;color:var(--dim);cursor:pointer;padding:2px 4px">✕</button></div>
+          </div>`).join("")}</div>
+          <div style="margin-top:10px">
+            <div class="tot"><span>Subtotal</span><span class="num">${money(t.sub)}</span></div>
+            <div class="tot"><span>GST est. (${Math.round(t.rate*1000)/10}%)</span><span class="num">${money(t.gst)}</span></div>
+            <div class="tot big"><span>Total</span><span>${money(t.total)}</span></div>
+          </div>
+          ${t.total>m.remaining?`<div class="note" style="color:var(--red)"><b>Takes the week ${money0(t.total-m.remaining)} past the ${TARGET_COGS_PCT}% target.</b></div>`
+            :`<div class="note">Leaves ${money0(m.remaining-t.total)} before the ${TARGET_COGS_PCT}% target.</div>`}
+          <div style="display:grid;gap:8px;margin-top:12px">
+            <div style="font-size:12px;color:var(--dim)">Sales rep: <input type="email" id="repmail" value="${esc(email)}" placeholder="rep@supplier.com.au" style="width:100%;margin-top:4px;font-size:13px;padding:7px 9px"></div>
+            <label class="sw"><input type="checkbox" id="cckitchen"> CC ${esc(cfg.cc||ACCOUNTS_EMAIL)}</label>
+            <a class="btn" onclick="dispatch('email')">✉ Email the order</a>
+            <a class="btn outline" onclick="dispatch('copy')">⧉ Copy for portal / SMS</a>
+            <a class="btn outline" onclick="markPlaced()">✓ Mark as placed</a>
+            <a class="btn outline" onclick="saveFavPrompt()">★ Save as favourite</a>
+          </div>
+        `:`<div class="note">Nothing added yet. Tap + on an item, or
+           <a onclick="fillUsual()" style="cursor:pointer;text-decoration:underline">fill your usual quantities</a>.</div>`}
+      </div></div>
+    </div>
+    ${invoicePanel(name,TAG.name,25)}`;
+  const s=document.getElementById("csearch");
+  if(s){
+    s.addEventListener("input",e=>{
+      SEARCH=e.target.value;
+      SEARCH_CARET=e.target.selectionStart;
+      clearTimeout(window.__st);
+      window.__st=setTimeout(()=>{ SEARCH_FOCUS=true; route(); },140);
+    });
+    if(SEARCH_FOCUS){
+      s.focus();
+      /* Restore where the cursor actually was, not the end: otherwise editing the middle of
+         a search term throws you to the back of it. */
+      try{ s.setSelectionRange(SEARCH_CARET,SEARCH_CARET); }catch(e){}
+      SEARCH_FOCUS=false;
+    }
+  }
+}
+/* The flag reads: which way, by how much, and how long ago. A move inside 30 days is filled
+   in so it stands out from an old one that happens to be the last change on record; a price
+   that has moved two or more times in 90 days is called out separately, because a supplier
+   who keeps shifting a price is a different conversation from one that rose once. */
+function priceFlag(p){
+  if(p.change==null) return `<br><span style="font-size:10px;color:var(--dim)">no change on record</span>`;
+  const up=p.change>0, pct=Math.abs(Math.round(p.change*10)/10);
+  const ago=p.priceAgeDays<=1?"today":p.priceAgeDays<14?p.priceAgeDays+"d ago"
+           :p.priceAgeDays<70?Math.round(p.priceAgeDays/7)+"w ago":Math.round(p.priceAgeDays/30)+"mo ago";
+  const style=p.priceFresh
+    ? `background:${up?"var(--red)":"var(--green)"};color:#fff;padding:1px 5px;border-radius:99px`
+    : `color:var(--${up?"red":"green"})`;
+  return `<br><span style="font-size:11px;font-weight:600;${style}"
+      title="was ${money(p.prevPrice)} until ${fmtD(p.priceSince)} · 90-day range ${money(p.lo90)}–${money(p.hi90)}">${up?"▲":"▼"} ${pct}%</span>
+    <span style="font-size:10px;color:var(--dim)"> ${ago}</span>
+    ${p.moves90>=2?`<br><span class="pill" title="${p.moves90} price changes in the last 90 days">${p.moves90} moves/90d</span>`:""}`;
+}
+function setCat(c){ CATFILT=c; route(); }
+/* Jump from a line in the order to that product in the catalogue. Any active category chip
+   or search box is cleared first — otherwise the row you are being sent to may not be on
+   screen at all, and the jump silently does nothing. */
+function focusProduct(key){
+  CATFILT=""; SEARCH=""; SHOW_HIDDEN=true;
+  route();
+  const raf = typeof requestAnimationFrame==="function" ? requestAnimationFrame : (f=>setTimeout(f,0));
+  raf(()=>{
+    const row=document.querySelector(`tr[data-pk="${String(key).replace(/"/g,'\\"')}"]`);
+    if(!row) return;
+    row.scrollIntoView({behavior:"smooth",block:"center"});
+    row.classList.add("flash");
+    setTimeout(()=>row.classList.remove("flash"),1600);
+  });
+}
+function toggleHidden(){ SHOW_HIDDEN=!SHOW_HIDDEN; route(); }
+function pick(k,on){ if(on) PICKED[k]=true; else delete PICKED[k]; route(); }
+function clearPicked(){ PICKED={}; route(); }
+function pickAll(on){
+  const cat=deriveCatalogue(LINES,SUPPLIER,new Date()).filter(p=>SHOW_HIDDEN||!p.hidden);
+  const q=SEARCH.trim().toLowerCase();
+  cat.filter(p=>(!CATFILT||p.cat===CATFILT)&&(!q||p.desc.toLowerCase().includes(q)))
+     .forEach(p=>{ if(on) PICKED[p.key]=true; else delete PICKED[p.key]; });
+  route();
+}
+/* One round trip for the whole selection. Fifty separate posts would each open the identity
+   prompt's promise and hammer a quota-limited endpoint. */
+async function bulkCategory(){
+  const cat=(document.getElementById("bulkcat")||{}).value||"";
+  if(!cat){ alert("Pick a category first."); return; }
+  const keys=Object.keys(PICKED).filter(k=>PICKED[k]);
+  if(!keys.length) return;
+  const cat2=deriveCatalogue(LINES,SUPPLIER,new Date(),{venue:null});
+  const items=keys.map(k=>{const p=cat2.find(x=>x.key===k);
+    return {item_key:k,category:cat,supplier:p?p.supplier:SUPPLIER,description:p?p.desc:""};});
+  keys.forEach(k=>COVER[k]=cat);
+  recatalogue();
+  PICKED={};
+  try{ await post({action:"category_bulk",items}); toast(`${keys.length} product(s) set to ${cat} for everyone.`); }
+  catch(e){ if(e.message==="no-webapp") toast("Changed here only — WEBAPP_URL isn't set."); else alert(e.message); }
+  route();
+}
+async function bulkHide(off){
+  const keys=Object.keys(PICKED).filter(k=>PICKED[k]);
+  if(!keys.length) return;
+  const cat2=deriveCatalogue(LINES,SUPPLIER,new Date(),{venue:null});
+  const items=keys.map(k=>{const p=cat2.find(x=>x.key===k);
+    return {item_key:k,hidden:off?"yes":"no",supplier:p?p.supplier:SUPPLIER,description:p?p.desc:"",
+            category:COVER[k]||""};});
+  keys.forEach(k=>{ if(off) HIDDEN[k]=true; else delete HIDDEN[k]; });
+  PICKED={};
+  try{ await post({action:"category_bulk",items}); toast(`${keys.length} product(s) turned ${off?"off":"back on"} for everyone.`); }
+  catch(e){ if(e.message==="no-webapp") toast("Changed here only — WEBAPP_URL isn't set."); else alert(e.message); }
+  route();
+}
+/* Categories are cached on each line at load, so an override has to be pushed back through
+   them or the chips and filters keep showing the old answer until a refresh. */
+function recatalogue(){
+  LINES.forEach(l=>{ l.cat=categorise(l.supplier,l.desc,l.invCategory,l.key); });
+  clearCatalogueCache();
+}
+/* Drafts are keyed venue::supplier. Reading DRAFTS[SUPPLIER] found nothing, so + always
+   wrote 1 over whatever was there and − wrote 0 — invisible until Fill Usual put real
+   quantities in for them to clobber. */
+function bump(k,n){ const cur=(DRAFTS[draftId(SUPPLIER,TAG.name)]||{qty:{}}).qty[k]||0; setQty(SUPPLIER,k,cur+n); route(); }
+function typed(el){ setQty(SUPPLIER,el.dataset.k,el.value); route(); }
+function clearDraft(){ const d=DRAFTS[draftId(SUPPLIER,TAG.name)]; if(d){d.qty={};saveDrafts();} route(); }
+
+/* What a USUAL order from this supplier is worth: the median of their recent delivery
+   totals. Median, not mean, so one quarterly bulk drop doesn't licence a four-figure fill. */
+function usualOrderValue(supplier,venue){
+  const since=Date.now()-CAT_DAYS*864e5;
+  const totals=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)
+                            &&r.type!=="manual"&&r.date&&+r.date>=since&&r.total>0)
+                  .map(r=>r.total).sort((a,b)=>a-b);
+  if(!totals.length) return 0;
+  const m=Math.floor(totals.length/2);
+  return totals.length%2 ? totals[m] : (totals[m-1]+totals[m])/2;
+}
+/* Fill Usual. Two things were wrong with the first version, and the screenshot showed both.
+   The cap was the week's REMAINING budget, clamped at zero — so the moment the week was
+   already over target the cap became 0, and `budgetLeft>0` then meant "no limit" rather than
+   "no room". It filled hardest exactly when it should have filled least.
+
+   The deeper error was the cap itself: a whole week's budget belongs to every supplier
+   together, so handing it to one of them was never right. The real bound is this supplier's
+   own usual delivery — filling every line at its 90-day average produces a week of stock in
+   one order, which is not what anyone means by "my usual". The week's remaining budget still
+   applies as a second, tighter ceiling when there is one. */
+function fillUsualPlan(cat,cap,rate){
+  const picked=[],skipped=[]; let total=0;
+  /* cap is a hard ceiling, always. A cap of zero means there is no room, so nothing fills —
+     it must never be read as "unlimited", which is precisely how the old guard failed. */
+  cat.filter(p=>!p.stale&&p.fillQty>0)
+     .sort((a,b)=>b.ordersPerWk-a.ordersPerWk)
+     .forEach(p=>{
+       const cost=p.fillQty*p.price*(1+(rate||0));
+       if(cap<=0||total+cost>cap){ skipped.push(p); return; }
+       picked.push(p); total+=cost;
+     });
+  return {picked,skipped,total,cap};
+}
+function fillUsual(){
+  const m=weekModel(), cat=deriveCatalogue(LINES,SUPPLIER,new Date());
+  const usual=usualOrderValue(SUPPLIER,TAG.name);
+  /* No delivery history to learn from: fall back to whatever the week has left, and if the
+     week has nothing left, fill nothing rather than everything. */
+  let cap = usual>0 ? usual : Math.max(0,m.remaining);
+  let reason = usual>0 ? "your usual "+money0(usual)+" order from them" : "the week's remaining budget";
+  if(m.remaining>0&&m.remaining<cap){ cap=m.remaining; reason="the week's remaining "+money0(m.remaining); }
+  const plan=fillUsualPlan(cat,cap,gstRate(SUPPLIER));
+  plan.picked.forEach(p=>setQty(SUPPLIER,p.key,p.fillQty));
+  route();
+  const zeroed=cat.filter(p=>!p.stale&&p.fillQty===0).length;
+  let msg=`Filled ${plan.picked.length} item(s), ${money0(plan.total)} — capped at ${reason}.`;
+  if(plan.skipped.length) msg+=` ${plan.skipped.length} item(s) left off.`;
+  else if(zeroed) msg+=` ${zeroed} below the ${FILL_FLOOR_CUTOFF} cutoff left at zero.`;
+  toast(msg);
+}
+
+/* ================= CATEGORY OVERRIDE ================= */
+function editCategory(key){
+  const p=deriveCatalogue(LINES,SUPPLIER,new Date()).find(x=>x.key===key);
+  if(!p) return;
+  modal(`<div class="label">Category for this product</div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:2px">${esc(p.desc)}</div>
+    <div style="font-size:12px;color:var(--dim);margin-bottom:10px">${esc(p.supplier)} · currently <b>${esc(p.cat)}</b></div>
+    <select id="catsel" style="width:100%">
+      ${CATEGORIES.map(c=>`<option ${c===p.cat?"selected":""}>${esc(c)}</option>`).join("")}
+    </select>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <a class="btn" id="catok">Save for everyone</a>
+      ${COVER[key]?`<a class="btn outline" id="catclear">Clear override</a>`:""}
+      <a class="btn outline" onclick="closeModal()">Cancel</a></div>
+    <div class="note">Saved to the sheet against this product, so every user of this link sees it and it survives a
+      reload. It overrides the automatic rules for this product only.</div>`);
+  document.getElementById("catok").onclick=()=>saveCategory(key,document.getElementById("catsel").value,p);
+  const cl=document.getElementById("catclear");
+  if(cl) cl.onclick=()=>saveCategory(key,"",p);
+}
+async function saveCategory(key,cat,p){
+  closeModal();
+  if(cat) COVER[key]=cat; else delete COVER[key];
+  recatalogue();
+  try{
+    await post({action:"category_override",item_key:key,category:cat,
+                supplier:p?p.supplier:"",description:p?p.desc:""});
+    toast(cat?`Set to ${cat} for everyone.`:"Override cleared.");
+  }catch(e){
+    if(e.message==="no-webapp") toast("Changed here only — WEBAPP_URL isn't set.");
+    else alert(e.message);
+  }
+  route();
+}
+
+/* ================= REPORTS ================= */
+const RANGE_PRESETS=[["This week",1],["4w",4],["8w",8],["13w",13],["26w",26]];
+function reportRange(){
+  const wk=currentWeek();
+  if(RANGE.preset==="custom"&&RANGE.from&&RANGE.to){
+    const a=gvizDate(RANGE.from), b=gvizDate(RANGE.to);
+    if(a&&b&&a<=b){ const e=new Date(b); e.setHours(23,59,59,999);
+      return {start:a,end:e,label:fmtD(a)+" – "+fmtD(b)}; }
+  }
+  const weeks=(RANGE_PRESETS.find(p=>p[0]===RANGE.preset)||["8w",8])[1];
+  return {start:addD(wk.start,-7*(weeks-1)),end:wk.end,
+          label:weeks===1?("week of "+fmtD(wk.start)):(weeks+" weeks to "+fmtD(wk.end))};
+}
+function spendRows(range){
+  const bySup={},byGrp={};
+  INV.forEach(r=>{
+    if(!r.date||r.date<range.start||r.date>range.end||!supActive(r.supplier)) return;
+    const g=rowGroup(r);
+    (bySup[r.supplier]=bySup[r.supplier]||{name:r.supplier,spend:0,n:0,group:g}).spend+=r.total;
+    bySup[r.supplier].n++;
+    (byGrp[g]=byGrp[g]||{name:g,spend:0,n:0}).spend+=r.total; byGrp[g].n++;
+  });
+  const weeks=Math.max(1,(range.end-range.start)/864e5/7);
+  const fin=o=>{o.perWk=o.spend/weeks;return o;};
+  return {sup:Object.values(bySup).map(fin).sort((a,b)=>b.spend-a.spend),
+          grp:Object.values(byGrp).map(fin).sort((a,b)=>b.spend-a.spend), weeks};
+}
+function rangeBar(){
+  const r=reportRange();
+  return `<div class="card" style="padding:10px 14px">
+    <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+      <span class="label" style="margin:0">Range</span>
+      ${RANGE_PRESETS.map(([k])=>`<span class="chip sm ${RANGE.preset===k?"on":""}" onclick="setRange('${k}')">${k}</span>`).join("")}
+      <span class="chip sm ${RANGE.preset==="custom"?"on":""}" onclick="setRange('custom')">custom</span>
+      <span class="chip sm" onclick="resetRange()" title="Back to 8 weeks ending this week">reset</span>
+      ${RANGE.preset==="custom"?`
+        <input type="date" id="rfrom" value="${esc(RANGE.from||fmtISO(r.start))}" style="font-size:13px;padding:6px 8px">
+        <input type="date" id="rto" value="${esc(RANGE.to||fmtISO(r.end))}" style="font-size:13px;padding:6px 8px">
+        <span class="chip sm" onclick="applyCustom()">apply</span>`:""}
+      <span style="flex:1"></span>
+      <span class="chip sm" onclick="stepWeek(-1)">‹</span>
+      <span class="chip sm" onclick="stepWeek(1)" ${WEEK_OFF>=0?'style="opacity:.35"':""}>›</span>
+      <span style="font-size:12px;color:var(--dim)">${esc(r.label)}</span>
+    </div>
+    <div class="note" style="margin-top:6px">A preset range ends on the selected week, so the ‹ › arrows move the
+      whole window. Over 8 or 26 weeks one week's shift barely moves the totals — pick <b>This week</b> to see
+      the arrows bite.</div></div>`;
+}
+function setRange(k){ RANGE.preset=k; route(); }
+function resetRange(){ RANGE={preset:"8w",from:null,to:null}; WEEK_OFF=0; renderFilters(); route(); }
+function applyCustom(){
+  RANGE.from=(document.getElementById("rfrom")||{}).value||null;
+  RANGE.to=(document.getElementById("rto")||{}).value||null;
+  route();
+}
+function renderReports(){
+  const m=weekModel(), range=reportRange(), d=spendRows(range);
+  const total=d.sup.reduce((s,x)=>s+x.spend,0);
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}${rangeBar()}
+    <div class="grid2">
+      <div class="card"><div class="label">Suppliers by spend — in range</div>
+        <table><thead><tr><th>Supplier</th><th class="num">Spend</th><th class="num hide-sm">Per week</th><th class="num">%</th></tr></thead>
+        <tbody>${d.sup.map(s=>`<tr class="click" onclick="go('rsup::${encodeURIComponent(s.name)}')">
+          <td><b>${esc(s.name)}</b>${sset(s.name).portal_only?' <span class="pill">portal</span>':""}</td>
+          <td class="num">${money(s.spend)}</td><td class="num hide-sm">${money(s.perWk)}</td>
+          <td class="num">${total?pct1(s.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
+        <div class="note">Totals follow the range above, not a fixed window. Portal-only suppliers are included —
+          hidden from ordering, never from spend.</div>
+      </div>
+      <div class="card"><div class="label">Spend by group — in range</div>
+        <table><thead><tr><th>Group</th><th class="num">Spend</th><th class="num hide-sm">Per week</th><th class="num">%</th></tr></thead>
+        <tbody>${d.grp.map(g=>`<tr class="click" onclick="go('grp::${encodeURIComponent(g.name)}')">
+          <td><b>${esc(g.name)}</b></td><td class="num">${money(g.spend)}</td>
+          <td class="num hide-sm">${money(g.perWk)}</td><td class="num">${total?pct1(g.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
+        <div class="note">Cost of goods only — ${money(total)} over ${Math.round(d.weeks*10)/10} weeks.</div>
+      </div>
+    </div>`;
+}
+function renderGroupDrill(group){
+  const m=weekModel(), range=reportRange(), bySup={};
+  INV.forEach(r=>{ if(rowGroup(r)!==group||!r.date||r.date<range.start||r.date>range.end) return;
+    (bySup[r.supplier]=bySup[r.supplier]||{name:r.supplier,spend:0,n:0}).spend+=r.total; bySup[r.supplier].n++; });
+  const rows=Object.values(bySup).sort((a,b)=>b.spend-a.spend);
+  const tot=rows.reduce((s,r)=>s+r.spend,0);
+  document.getElementById("app").innerHTML=`${summaryBar(m)}${rangeBar()}
+    <a class="back" onclick="go('reports')">Reports</a>
+    <div class="card"><div class="label">${esc(group)} — ${esc(range.label)}</div>
+      <div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(tot)}</div>
+      <table><thead><tr><th>Supplier</th><th class="num">Spend</th><th class="num">Invoices</th></tr></thead>
+      <tbody>${rows.map(s=>`<tr class="click" onclick="go('rsup::${encodeURIComponent(s.name)}')">
+        <td><b>${esc(s.name)}</b></td><td class="num">${money(s.spend)}</td><td class="num">${s.n}</td></tr>`).join("")}</tbody></table>
+    </div>`;
+}
+/* The Supplier Explorer products layout: what was bought, how much, what it cost, and how
+   today's price compares with the average actually paid across the range. */
+/* Deliberately NOT filtered by the report range. Drilling into a supplier is a question
+   about the products themselves — what they cost and how that has moved — and a range that
+   kept resetting the answer made the price history useless. Full history. */
+function renderSupplierProducts(name){
+  const m=weekModel();
+  const all=sortCat(deriveCatalogue(LINES,name,new Date(),{venue:null}));
+  const rows=all.filter(p=>SHOW_HIDDEN||!p.hidden);
+  const hiddenN=all.length-rows.length;
+  const spend=rows.reduce((s,p)=>s+p.spendTotal,0);
+  document.getElementById("app").innerHTML=`${summaryBar(m)}
+    <a class="back" onclick="go('reports')">Reports</a>
+    <div class="card">
+      <div class="label">${esc(name)} — products — last ${CAT_DAYS} days</div>
+      ${hiddenN?`<div style="margin-bottom:8px"><span class="chip sm ${SHOW_HIDDEN?"on":""}" onclick="toggleHidden()">${SHOW_HIDDEN?"hiding":"show"} ${hiddenN} turned-off item(s)</span></div>`:""}
+      <div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(spend)}</div>
+      <table><thead><tr>
+        ${sortHead("name","Product")}${sortHead("cat","Category","hide-sm")}${sortHead("qty","Qty","num")}
+        ${sortHead("spend","Spend","num")}${sortHead("price","Unit price","num")}${sortHead("last","Last bought","num hide-sm")}
+      </tr></thead><tbody>
+      ${rows.map(p=>{
+        const avgPaid=p.qtyTotal?p.spendTotal/p.qtyTotal:0;
+        const vs=avgPaid?((p.price-avgPaid)/avgPaid*100):0;
+        return `<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
+          <td><b>${esc(p.desc)}</b>${p.variants.length>1?` <span class="pill">${p.variants.length} merged</span>`:""}</td>
+          <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
+          <td class="num">${Math.round(p.qtyTotal*100)/100} ${esc(p.unit||"")}</td>
+          <td class="num">${money(p.spendTotal)}</td>
+          <td class="num">${money(p.price)}${Math.abs(vs)>=1?`<br><span class="${vs>0?"up":"down"}" style="font-size:11px">${vs>0?"+":""}${Math.round(vs)}% vs avg</span>`:""}</td>
+          <td class="num hide-sm">${fmtD(p.lastDate)}</td></tr>`;}).join("")}
+      </tbody></table>
+      ${rows.length?"":'<div class="note">Nothing bought from this supplier in the last '+CAT_DAYS+' days.</div>'}
+      <div class="note">Click a product for its unit price history. This view ignores the report range on
+        purpose — it is about the products, not the period.</div>
+    </div>
+    ${invoicePanel(name,null,60)}`;
+}
+/* Unit price history: the movement over time, not just the latest figure. */
+function renderPriceHistory(key){
+  const m=weekModel();
+  const sup=(LINES.find(l=>l.key===key)||{}).supplier;
+  const p=sup?deriveCatalogue(LINES,sup,new Date(),{venue:null}).find(x=>x.key===key):null;
+  if(!p){ document.getElementById("app").innerHTML=`<a class="back" onclick="go('reports')">Reports</a>
+    <div class="card"><div class="note">That product isn't in the last ${CAT_DAYS} days of buying.</div></div>`; return; }
+  const buys=p.buys.slice().reverse();
+  const prices=p.buys.map(b=>b.price), lo=Math.min(...prices), hi=Math.max(...prices);
+  const first=p.buys[0], move=first.price?((p.price-first.price)/first.price*100):0;
+  /* The last 90 days, which is the window the ordering suggestions use, so the chart and
+     the "usual" quantity are talking about the same period. */
+  const from90=Date.now()-90*864e5;
+  const b90=p.buys.filter(b=>+b.date>=from90);
+  const qty90=b90.reduce((t,b)=>t+b.qty,0);
+  const spend90=b90.reduce((t,b)=>t+b.total,0);
+  const wkspan=Math.max(1,(Date.now()-Math.max(from90,+p.buys[0].date))/864e5/7);
+  /* Both series on one axis pair: price as a line against the left scale, quantity as bars
+     against its own. Plotted on TIME, not on buy number — evenly spaced points would hide
+     the gaps, and the gaps are the ordering pattern. */
+  const w=560,h=110,pad=8,base=h-16;
+  const t0=Math.max(from90,+p.buys[0].date), t1=Date.now();
+  const xs=d=>pad+((+d-t0)/Math.max(1,t1-t0))*(w-2*pad);
+  const ys=v=>hi===lo?base/2:pad+(1-(v-lo)/(hi-lo))*(base-2*pad);
+  const qmax=Math.max(...b90.map(b=>b.qty),1);
+  const path=b90.map((b,i)=>(i?"L":"M")+xs(b.date).toFixed(1)+" "+ys(b.price).toFixed(1)).join(" ");
+  document.getElementById("app").innerHTML=`${summaryBar(m)}
+    <a class="back" onclick="go('rsup::'+encodeURIComponent('${esc(p.supplier)}'))">${esc(p.supplier)} products</a>
+    <div class="card">
+      <div class="label">Unit price history</div>
+      <div style="font-size:16px;font-weight:700">${esc(p.desc)}</div>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:10px">${esc(p.supplier)} · ${esc(p.cat)} ·
+        ${esc(p.unit||"")} ${p.code?"· "+esc(p.code):""}</div>
+      <div style="font-size:13px;margin-bottom:8px">Now <b>${money(p.price)}</b> · range ${money(lo)}–${money(hi)} ·
+        <span class="${move>0?"up":move<0?"down":""}">${move>0?"+":""}${Math.round(move*10)/10}% since ${fmtD(first.date)}</span>
+        · bought ${p.buys.length}×
+        ${p.variants.length>1?`<br><span style="color:var(--dim)">Merged names: ${esc(p.variants.join(" / "))}</span>`:""}</div>
+      <div class="grid2" style="gap:8px;margin-bottom:8px">
+        <div class="tile" style="padding:9px 12px">
+          <div class="k">Bought — last 90 days</div>
+          <div class="v" style="font-size:20px">${Math.round(qty90*100)/100} ${esc(p.unit||"")}</div>
+          <div class="sub">${b90.length} delivery(s) · ${Math.round(qty90/wkspan*100)/100} ${esc(p.unit||"")} a week</div>
+        </div>
+        <div class="tile" style="padding:9px 12px">
+          <div class="k">Spent — last 90 days</div>
+          <div class="v" style="font-size:20px">${money0(spend90)}</div>
+          <div class="sub">${qty90?money(spend90/qty90):"—"} average per ${esc(p.unit||"unit")}</div>
+        </div>
+      </div>
+      ${b90.length?`<svg class="spark" style="height:110px" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+        ${b90.map(b=>{const bh=(b.qty/qmax)*(base-pad*2);
+          return `<rect x="${(xs(b.date)-3).toFixed(1)}" y="${(base-bh).toFixed(1)}" width="6" height="${bh.toFixed(1)}" fill="#dcdcd8"/>`;}).join("")}
+        <path d="${path}" fill="none" stroke="var(--ink)" stroke-width="2"/>
+        ${b90.map(b=>`<circle cx="${xs(b.date).toFixed(1)}" cy="${ys(b.price).toFixed(1)}" r="2.5" fill="var(--red)"/>`).join("")}
+        <line x1="${pad}" y1="${base}" x2="${w-pad}" y2="${base}" stroke="var(--line)"/>
+      </svg>
+      <div class="legend" style="margin-bottom:10px">
+        <span style="color:var(--dim)"><span style="display:inline-block;width:9px;height:9px;background:#dcdcd8;border-radius:2px;margin-right:4px"></span>quantity per delivery</span>
+        <span style="color:var(--dim)"><span style="display:inline-block;width:9px;height:9px;background:var(--ink);border-radius:2px;margin-right:4px"></span>unit price</span>
+        <span style="color:var(--dim)">${fmtD(new Date(t0))} → today, spaced by date</span>
+      </div>`:`<div class="note">Nothing bought in the last 90 days.</div>`}
+      <table><thead><tr><th>Date</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Change</th><th class="num">Line</th><th class="hide-sm">Invoice</th></tr></thead>
+      <tbody>${buys.map((b,i)=>{
+        const prev=buys[i+1];
+        const ch=prev&&prev.price!==b.price?((b.price-prev.price)/prev.price*100):null;
+        return `<tr><td>${fmtD(b.date)}</td><td class="num">${b.qty}</td><td class="num">${money(b.price)}</td>
+          <td class="num">${ch!=null?`<span class="${ch>0?"up":"down"}">${ch>0?"+":""}${Math.round(ch*10)/10}%</span>`:"—"}</td>
+          <td class="num">${money(b.total)}</td>
+          <td class="hide-sm" style="font-family:var(--mono);font-size:11px">${esc(b.number)}</td></tr>`;}).join("")}</tbody></table>
+    </div>`;
+}
+
+/* ================= SALES DETAIL =================
+   The item-level feed is 108,000 rows and 12 MB. Pulling it on every page load would make
+   ordering — the thing this app is for — wait on a report nobody had asked for. So it is
+   fetched only when the Sales tab is opened, only for the week on screen, and cached per
+   week. gviz does the date filtering: `where B >= date '...'`, with the DATE LITERAL form,
+   because column B types as a date and a plain string comparison silently matches nothing
+   (verified against the live sheet — the bare-string version returns a header and no rows).
+
+   Two small lookup tabs come with it. Overrides carries the group each item really belongs
+   to, because roughly one POS assignment in three is wrong and nobody is going to fix them
+   on site; ItemMap folds POS spellings together. Both are optional — without them the page
+   still works, it just reports what ImPOS said. */
+const SALES_SHEET=SALES_SHEET_ID;
+let SD={}, SD_OVER=null, SD_ITEM=null, SD_BUSY=false, SD_ERR="";
+const LANE_KITCHEN="Kitchen requests", LANE_MODIFIER="Modifiers";
+const PERISHABLE=["Sandwiches","Cakes & Sweets","Hot Takeaway","Grab & Go"];
+const LOYALTY_GROUP="Coffee & Tea";
+const CAT_MAP={
+  "beverage":{type:"Beverage"},"beverage d/h":{type:"Beverage"},"beverage t/a":{type:"Beverage"},
+  "food d/h":{type:"Food"},"dine in":{type:"Food"},"food t/a":{type:"Food"},
+  "takeway food":{type:"Food"},"takeaway food":{type:"Food"},
+  "luma food d/h":{type:"Food"},"luma beverage dine in":{type:"Beverage"},
+  "sundries":{type:"Sundries"},"impos":{type:"Uncategorised"},"no cat.":{type:"Uncategorised"}
+};
+async function sdTab(name){
+  const u=`https://docs.google.com/spreadsheets/d/${SALES_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(name)}&_=${Date.now()}`;
+  try{
+    const t=await (await fetch(u)).text();
+    if(!t||t.trim()[0]==="<"||/"status"\s*:\s*"error"/.test(t)) return null;
+    return parseCsv(t);
+  }catch(e){ return null; }
+}
+async function sdLookups(){
+  if(SD_OVER&&SD_ITEM) return;
+  SD_OVER={dept:{},item:{}}; SD_ITEM={};
+  const og=await sdTab("Overrides");
+  if(og&&og.length>1){
+    const h=og[0].map(x=>String(x).trim().toLowerCase());
+    const ki=h.indexOf("kind"), fi=h.indexOf("from"), gi=h.indexOf("group");
+    og.slice(1).forEach(r=>{
+      const from=String(r[fi]||"").trim(), grp=gi>-1?String(r[gi]||"").trim():"";
+      if(!from||!grp) return;
+      const kind=ki>-1?String(r[ki]||"").trim().toLowerCase():"";
+      if(kind.indexOf("dep")===0) SD_OVER.dept[from.toLowerCase()]=grp;
+      else if(kind.indexOf("item")===0) SD_OVER.item[from.toLowerCase()]=grp;
+      else { SD_OVER.dept[from.toLowerCase()]=grp; SD_OVER.item[from.toLowerCase()]=grp; }
+    });
+  }
+  const ig=await sdTab("ItemMap");
+  if(ig&&ig.length>1){
+    const h=ig[0].map(x=>String(x).trim().toLowerCase());
+    let fi=h.indexOf("item_from"); if(fi<0) fi=0;
+    let ti=h.indexOf("maps_to");   if(ti<0) ti=1;
+    ig.slice(1).forEach(r=>{
+      const a=String(r[fi]||"").trim(), b=String(r[ti]||"").trim();
+      if(a&&b&&a!==b) SD_ITEM[a.toLowerCase()]=b;
+    });
+  }
+}
+const sdKey=wk=>fmtISO(wk.start)+"|"+fmtISO(wk.end);
+async function loadSalesWeek(wk){
+  const k=sdKey(wk);
+  if(SD[k]||SD_BUSY) return;
+  SD_BUSY=true; SD_ERR="";
+  try{
+    await sdLookups();
+    const q=`select A,C,D,E,F,G,H where B >= date '${fmtISO(wk.start)}' and B <= date '${fmtISO(wk.end)}'`;
+    const u=`https://docs.google.com/spreadsheets/d/${SALES_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=SalesFeed&tq=${encodeURIComponent(q)}&_=${Date.now()}`;
+    const txt=await (await fetch(u)).text();
+    if(!txt||txt.trim()[0]==="<"||/"status"\s*:\s*"error"/.test(txt)) throw new Error("the sales feed refused that query");
+    const g=parseCsv(txt);
+    /* select A,C,D,E,F,G,H  ->  timestamp, venue, category, department, item, qty, sales */
+    const rows=g.slice(1).map(r=>{
+      const ts=gvizDateTime(r[0]);
+      const dept=String(r[3]||"").trim(), rawItem=String(r[4]||"").trim();
+      const item=SD_ITEM[rawItem.toLowerCase()]||rawItem;
+      /* Department sets the broad group, the item row corrects it: the item-level fixes
+         exist precisely to override departments staff filed wrong. */
+      const grp=SD_OVER.item[item.toLowerCase()]||SD_OVER.dept[dept.toLowerCase()]||"";
+      const cat=String(r[2]||"").trim();
+      return { ts, venue:String(r[1]||"").trim(), category:cat, department:dept, item,
+               group:grp||(CAT_MAP[cat.toLowerCase()]||{}).type||cat||"Uncategorised",
+               qty:num_(r[5]), sales:num_(r[6]) };
+    }).filter(r=>r.ts&&r.item&&LEDGER_VENUES.indexOf(r.venue)>=0);
+    SD[k]=rows;
+  }catch(e){ SD_ERR=e.message; SD[k]=[]; }
+  SD_BUSY=false;
+  route();
+}
+
+/* ================= SALES VIEW =================
+   Laid out like the sales explorer, because that is the shape people already read. Two
+   differences, both deliberate: Glenorchy never appears (it is not this entity), and the
+   hourly chart is never split by venue — a combined trading curve is the question being
+   asked, and two interleaved series answer a different one.
+
+   Time of day only means anything for ONE DAY. A week of hours averaged together hides the
+   Saturday that behaves nothing like the Tuesday, so the day picker drives the whole tab
+   and the chart disappears on the week view rather than quietly showing a blend. */
+let SALES_DAY=null, SALES_PERIOD="week", SALES_SORT={col:"sales",dir:-1}, SALES_Q="", SALES_QF=false;
+/* Products follow the header store toggle — the one place on the Sales tab that does. The
+   rest of the tab is combined by instruction; the product list is where "what did WE sell"
+   is a per-kitchen question. "both" is offered as a local override and resets whenever the
+   header toggle is used, so the toggle always wins when someone reaches for it. */
+let SALES_PROD_VENUE=null, SALES_FROM=null, SALES_TO=null, SALES_GROUP=[];
+const salesProdVenue=()=>SALES_PROD_VENUE===null?TAG.name:SALES_PROD_VENUE;
+function setProdVenue(v){ SALES_PROD_VENUE=v; route(); }
+/* Store chips on the products and wastage cards. One tag means nothing to switch, so the
+   chips (and the "Both" option) are not rendered at all. */
+function venueChips(cur){
+  if(TAGS.length<2) return "";
+  return `<span style="float:right;display:flex;gap:5px">
+        ${TAGS.map(t=>`<span class="chip sm ${cur===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
+        <span class="chip sm ${cur==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span>`;
+}
+const sdSales=rows=>rows.filter(r=>r.group!==LANE_KITCHEN);
+function wHead(col,label,cls){
+  const on=WASTE_SORT.col===col;
+  return `<th class="s ${cls||""} ${on?"act":""}" onclick="setWasteSort('${col}')">${label}${on?(WASTE_SORT.dir>0?" ▲":" ▼"):""}</th>`;
+}
+const SALES_MAX_DAYS=100;   // a custom range wider than this is a download, not a report
+function salesWindow(){
+  if(!SALES_DAY) SALES_DAY=fmtISO(mid(new Date()));
+  const d=gvizDate(SALES_DAY)||mid(new Date());
+  if(SALES_PERIOD==="custom"&&SALES_FROM&&SALES_TO){
+    const a=gvizDate(SALES_FROM), b=gvizDate(SALES_TO);
+    if(a&&b&&a<=b){
+      const e=new Date(b); e.setHours(23,59,59,999);
+      const days=Math.round((+mid(b)-+mid(a))/864e5)+1;
+      return {start:mid(a),end:e,label:fmtD(a)+" – "+fmtD(b),days,day:days===1,
+              tooWide:days>SALES_MAX_DAYS};
+    }
+  }
+  if(SALES_PERIOD==="month"){
+    const s=new Date(d.getFullYear(),d.getMonth(),1);
+    const e=new Date(d.getFullYear(),d.getMonth()+1,0,23,59,59,999);
+    return {start:s,end:e,label:s.toLocaleDateString("en-AU",{month:"long",year:"numeric"}),
+            days:e.getDate(),day:false};
+  }
+  if(SALES_PERIOD==="week"){ const s=weekStart(d), e=addD(s,6); e.setHours(23,59,59,999);
+    return {start:s,end:e,label:fmtD(s)+" – "+fmtD(e),days:7,day:false}; }
+  const e=new Date(d); e.setHours(23,59,59,999);
+  return {start:mid(d),end:e,label:fmtD(d),days:1,day:true};
+}
+function stepDay(n){
+  const d=gvizDate(SALES_DAY)||mid(new Date());
+  if(SALES_PERIOD==="month") SALES_DAY=fmtISO(new Date(d.getFullYear(),d.getMonth()+n,1));
+  else SALES_DAY=fmtISO(addD(d,SALES_PERIOD==="week"?n*7:n));
+  route();
+}
+function applySalesRange(){
+  SALES_FROM=(document.getElementById("sfrom")||{}).value||null;
+  SALES_TO=(document.getElementById("sto")||{}).value||null;
+  route();
+}
+function setSalesPeriod(p){ SALES_PERIOD=p; route(); }
+function setSalesDay(v){ if(gvizDate(v)) SALES_DAY=v; route(); }
+function pickDay(k){ SALES_DAY=k; SALES_PERIOD="day"; route(); }
+
+function renderSales(){
+  const m=weekModel(), w=salesWindow(), k=sdKey(w);
+  if(w.tooWide){
+    document.getElementById("app").innerHTML=`${salesBar(w)}
+      <div class="card"><div class="note">That range is ${w.days} days. The item feed is 108,000 rows, so
+        anything past ${SALES_MAX_DAYS} days would pull more than the browser can hold — pick a shorter range,
+        or use Month.</div></div>`;
+    return;
+  }
+  if(!SD[k]){
+    loadSalesWeek(w);
+    document.getElementById("app").innerHTML=`${salesBar(w)}
+      <div class="card"><div id="status">Loading the item-level feed…</div>
+      <div class="note">Only the period on screen is fetched, and only when you open this tab — the whole
+        feed is 108,000 rows.</div></div>`;
+    return;
+  }
+  const all=SD[k], rows=sdSales(all), kitchen=all.length-rows.length;
+  /* The item-level feed only exists from the cutover — before that the platform kept weekly
+     totals per venue and nothing finer. Rather than showing an empty page for July, the
+     headline falls back to those weekly figures (the same source the income tile uses on the
+     ordering screens) and the breakdowns say plainly why they are empty. */
+  const feedStart=gvizDate(SALES_CUTOVER);
+  const preFeed=feedStart&&w.end<feedStart;
+  const straddles=feedStart&&w.start<feedStart&&w.end>=feedStart;
+  const weeklyRevenue=SALES.filter(r=>r.date>=w.start&&r.date<=w.end).reduce((t,r)=>t+r.sales,0);
+  const revenue=preFeed?weeklyRevenue:rows.reduce((t,r)=>t+r.sales,0);
+  /* Spend for the same window: invoices dated inside it, cost of goods only
+     (INV already is). On a single day this is lumpy — a Monday delivery lands on Monday
+     while Monday's sales are a seventh of the week — so the day view says so rather than
+     letting one big drop read as a 200% COGS day. */
+  const spend=INV.filter(r=>r.date&&r.date>=w.start&&r.date<=w.end&&supActive(r.supplier)).reduce((t,r)=>t+r.total,0);
+  /* Weekly totals cover the whole window even when the item feed only covers part of it, so
+     the headline and the COGS ratio both use them wherever the window crosses the cutover. */
+  const headline=straddles?weeklyRevenue:revenue;
+  const cogs=headline>0?spend/headline*100:null;
+  const cogsCls=cogs===null?"":cogs<=TARGET_COGS_PCT-2?"good":cogs<=TARGET_COGS_PCT+2?"amber":"over";
+  document.getElementById("app").innerHTML=`${warnBar()}${salesBar(w)}
+    ${SD_ERR?`<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div>`:""}
+    <div class="summary" style="grid-template-columns:2fr 1fr 1fr">
+      <div class="tile" style="text-align:center;padding:16px 14px">
+        <div class="k">Sales — ${esc(ENTITY)}</div>
+        <div class="v" style="font-size:40px">${money0(headline)}</div>
+        <div class="sub">${esc(w.label)} ·
+          ${LEDGER_VENUES.map(v=>`${esc(vShort(v))} ${money0(rows.filter(r=>r.venue===v).reduce((t,r)=>t+r.sales,0))}`).join(" · ")}</div>
+      </div>
+      <div class="tile" style="text-align:center;padding:16px 14px">
+        <div class="k">Spend — ${w.day?"this day":"this week"}</div>
+        <div class="v" style="font-size:30px">${money0(spend)}</div>
+        <div class="sub">invoices dated in the period</div>
+      </div>
+      <div class="tile ${cogsCls}" style="text-align:center;padding:16px 14px">
+        <div class="k">COGS % vs ${TARGET_COGS_PCT}%</div>
+        <div class="v" style="font-size:30px">${cogs===null?"—":pct1(cogs)}</div>
+        <div class="sub">${cogs===null?"no income in the period":
+          w.day?"single day — deliveries are lumpy, read the week instead":
+          cogs<=TARGET_COGS_PCT?(TARGET_COGS_PCT-cogs).toFixed(1)+" points under target":(cogs-TARGET_COGS_PCT).toFixed(1)+" points over target"}</div>
+      </div>
+    </div>
+    ${preFeed?`<div class="card"><div class="label">Item detail not available before ${fmtD(feedStart)}</div>
+      <div class="note">The total above comes from the weekly figures the platform kept before then, which is what
+        the income and COGS numbers on the ordering screens use. Hour, category, product and wastage breakdowns all
+        need the item-level feed, and that only starts on ${fmtD(feedStart)} when the email processor began
+        collecting it. Nothing is missing from the sheets — that detail was never captured.</div></div>`
+     :`${straddles?`<div class="note" style="margin:-4px 2px 12px">This period starts before ${fmtD(feedStart)}, so the
+        breakdowns below only cover from that date. The headline total covers the whole period.</div>`:""}
+      ${w.day?sdHourCard(rows,w):sdDayCard(rows,w)}
+      ${sdCatCard(rows,revenue)}`}
+    ${kitchen?`<div class="note" style="margin:-4px 2px 12px">${kitchen} kitchen prep request(s) excluded from sales and wastage
+      <span style="color:var(--dim)">(rung up to message the kitchen, never a sale)</span></div>`:""}
+    ${preFeed?"":sdProdCard(rows,w)+sdWasteCard(rows)}`;
+  const q=document.getElementById("psearch");
+  if(q){
+    q.addEventListener("input",e=>{ SALES_Q=e.target.value;
+      clearTimeout(window.__pt); window.__pt=setTimeout(()=>{ SALES_QF=true; route(); },160); });
+    if(SALES_QF){ q.focus(); try{ q.setSelectionRange(q.value.length,q.value.length); }catch(e){} SALES_QF=false; }
+  }
+}
+function salesBar(w){
+  return `<div class="card" style="padding:10px 14px;margin-bottom:12px">
+    <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+      <span class="label" style="margin:0">Sales</span>
+      <span class="chip sm ${SALES_PERIOD==="day"?"on":""}" onclick="setSalesPeriod('day')">Day</span>
+      <span class="chip sm ${SALES_PERIOD==="week"?"on":""}" onclick="setSalesPeriod('week')">Week</span>
+      <span class="chip sm ${SALES_PERIOD==="month"?"on":""}" onclick="setSalesPeriod('month')">Month</span>
+      <span class="chip sm ${SALES_PERIOD==="custom"?"on":""}" onclick="setSalesPeriod('custom')">Custom</span>
+      ${SALES_PERIOD==="custom"?`
+        <input type="date" id="sfrom" value="${esc(SALES_FROM||fmtISO(w.start))}" style="font-size:13px;padding:6px 8px">
+        <input type="date" id="sto" value="${esc(SALES_TO||fmtISO(w.end))}" style="font-size:13px;padding:6px 8px">
+        <span class="chip sm" onclick="applySalesRange()">apply</span>`
+      :`<span class="chip sm" onclick="stepDay(-1)">‹</span>
+        <input type="date" value="${esc(SALES_DAY||fmtISO(mid(new Date())))}" onchange="setSalesDay(this.value)" style="font-size:13px;padding:6px 8px">
+        <span class="chip sm" onclick="stepDay(1)">›</span>`}
+      <span style="flex:1"></span>
+      <span style="font-size:12px;color:var(--dim)">${esc(w.label)}</span>
+    </div></div>`;
+}
+
+/* The trading span is what was actually observed — first hour with a sale to last — not a
+   notional opening time. Quoting "per hour" across a day that only traded ten of them
+   would understate every hour by a third. */
+function sdHourCard(rows,w){
+  const hrs={};
+  rows.forEach(r=>{ const h=r.ts.getHours(); hrs[h]=(hrs[h]||0)+r.sales; });
+  const keys=Object.keys(hrs).map(Number).sort((a,b)=>a-b);
+  if(!keys.length) return `<div class="card"><div class="label">Sales by time of day</div>
+    <div class="note">No sales with a time on them for ${esc(w.label)}.</div></div>`;
+  const lo=keys[0], hi=keys[keys.length-1];
+  const max=Math.max(...keys.map(k=>hrs[k]),1);
+  const total=keys.reduce((t,k)=>t+hrs[k],0);
+  const peak=keys.reduce((mx,k)=>hrs[k]>hrs[mx]?k:mx,keys[0]);
+  const span=hi-lo+1, slots=span;
+  let cols="";
+  for(let h=lo;h<=hi;h++){
+    const v=hrs[h]||0;
+    cols+=`<div class="col" title="${String(h).padStart(2,"0")}:00 — ${money(v)}">
+      <div class="bx" style="height:${Math.round(v/max*140)}px"></div>
+      <div class="lb">${h}</div></div>`;
+  }
+  const met=(k,v,sub)=>`<div class="metric"><div class="k">${k}</div><div class="val">${v}</div><div class="sub">${sub}</div></div>`;
+  return `<div class="card">
+    <div class="label">Sales by time of day <span class="pill">hourly</span></div>
+    <div class="chart">${cols}</div>
+    <div class="mets">
+      ${met("Revenue",money0(total),esc(w.label))}
+      ${met("Per hour",money0(total/span),span.toFixed(1)+" hours trading")}
+      ${met("Busiest hour",String(peak).padStart(2,"0")+":00",money(hrs[peak]))}
+      ${met("Per hour avg",money0(total/slots),slots+" slots")}
+    </div></div>`;
+}
+
+/* The week (or any multi-day window) as one bar per day, the way the explorer draws it.
+   Same axis logic as the hourly chart: revenue per day divides by the days that traded. */
+function sdDayCard(rows,w){
+  const days={};
+  rows.forEach(r=>{ const k=fmtISO(r.ts); days[k]=(days[k]||0)+r.sales; });
+  const keys=[]; for(let d=new Date(w.start);d<=w.end;d=addD(d,1)) keys.push(fmtISO(d));
+  const traded=keys.filter(k=>days[k]>0);
+  if(!traded.length) return `<div class="card"><div class="label">Sales by day</div>
+    <div class="note">No sales for ${esc(w.label)}.</div></div>`;
+  const max=Math.max(...traded.map(k=>days[k]),1);
+  const total=traded.reduce((t,k)=>t+days[k],0);
+  const best=traded.reduce((mx,k)=>days[k]>days[mx]?k:mx,traded[0]);
+  const dm=k=>{const d=gvizDate(k);return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0");};
+  const cols=keys.map(k=>`<div class="col" style="cursor:pointer" onclick="pickDay('${k}')" title="${dm(k)} — ${money(days[k]||0)} · click to open the day">
+      <div class="bx" style="height:${Math.round((days[k]||0)/max*140)}px"></div>
+      <div class="lb">${dm(k)}</div></div>`).join("");
+  const met=(k,v,sub)=>`<div class="metric"><div class="k">${k}</div><div class="val">${v}</div><div class="sub">${sub}</div></div>`;
+  return `<div class="card">
+    <div class="label">Sales by day</div>
+    <div class="chart">${cols}</div>
+    <div class="mets">
+      ${met("Revenue",money0(total),esc(w.label))}
+      ${met("Per day",money0(total/traded.length),traded.length+" trading day"+(traded.length===1?"":"s"))}
+      ${met("Best day",dm(best),money(days[best]))}
+    </div></div>`;
+}
+
+/* Tap a category to drill in: products narrow to that type and the card says so. */
+let SALES_CATDRILL="";
+function drillCat(t){ SALES_CATDRILL = SALES_CATDRILL===t ? "" : t; SALES_GROUP=[]; route(); }
+/* The product-level category — Coffee & Tea, Breakfast, Lunch — as opposed to the Food /
+   Beverage rollup above it. Clicking one narrows the list to it, which is the question
+   "what did we sell in Breakfast" rather than "what did we sell in Food". */
+/* Multi-select: each pill toggles, so "Breakfast + Lunch" is one view rather than two
+   separate looks. An empty selection means everything. */
+function drillGroup(g){
+  if(!g){ SALES_GROUP=[]; route(); return; }
+  const i=SALES_GROUP.indexOf(g);
+  if(i<0) SALES_GROUP=SALES_GROUP.concat([g]); else SALES_GROUP=SALES_GROUP.filter(x=>x!==g);
+  SALES_CATDRILL="";
+  route();
+}
+const prodType=r=>(CAT_MAP[r.category.toLowerCase()]||{}).type||r.group||"Uncategorised";
+function sdCatCard(rows,revenue){
+  const m={};
+  rows.forEach(r=>{
+    const t=prodType(r);
+    const o=m[t]||(m[t]={name:t,total:0});
+    o.total+=r.sales;
+    o[r.venue]=(o[r.venue]||0)+r.sales;
+  });
+  const list=Object.values(m).sort((a,b)=>b.total-a.total);
+  return `<div class="card"><div class="label">By category <span class="pill">product type</span>
+      <span style="font-weight:400;color:var(--dim);text-transform:none;letter-spacing:0;margin-left:8px">tap a row to drill in</span></div>
+    <table><thead><tr><th>Product type</th>
+      ${LEDGER_VENUES.map(v=>`<th class="num hide-sm">${esc(vShort(v))}</th>`).join("")}
+      <th class="num">Total</th><th class="num">%</th></tr></thead>
+    <tbody>${list.map(o=>`<tr class="click ${SALES_CATDRILL===o.name?"picked":""}" onclick="drillCat('${esc(o.name)}')"><td><b>${esc(o.name)}</b></td>
+      ${LEDGER_VENUES.map(v=>`<td class="num hide-sm">${o[v]?money0(o[v]):'<span style="color:var(--dim)">—</span>'}</td>`).join("")}
+      <td class="num"><b>${money(o.total)}</b></td>
+      <td class="num" style="color:var(--dim)">${revenue?Math.round(o.total/revenue*100)+"%":""}</td></tr>`).join("")}</tbody></table>
+    <div class="note">Product type comes from the POS category mapping; anything unmapped keeps its own name rather
+      than being folded away.</div></div>`;
+}
+
+function sdProdCard(rows,w){
+  const m={};
+  const pv=salesProdVenue();
+  if(pv!=="both") rows=rows.filter(r=>r.venue===pv);
+  if(SALES_CATDRILL) rows=rows.filter(r=>prodType(r)===SALES_CATDRILL);
+  const rowsForGroups=rows;
+  if(SALES_GROUP.length) rows=rows.filter(r=>SALES_GROUP.indexOf(r.group||"")>=0);
+  /* Every group present before the group filter, so the chips don't vanish once you use one. */
+  /* Built before the group filter, so choosing one doesn't make the others disappear. */
+  const groups=[...new Set(rowsForGroups.map(r=>r.group).filter(Boolean))].sort();
+  const cols=pv==="both"?LEDGER_VENUES:[pv];
+  rows.forEach(r=>{
+    const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",sales:0,qty:0});
+    o.sales+=r.sales; o.qty+=r.qty;
+    o[r.venue]=(o[r.venue]||0)+r.sales;
+  });
+  let list=Object.values(m);
+  const q=SALES_Q.trim().toLowerCase();
+  if(q) list=list.filter(o=>o.name.toLowerCase().includes(q)||o.group.toLowerCase().includes(q));
+  const d=SALES_SORT.dir;
+  const by={ name:(a,b)=>a.name.localeCompare(b.name), cat:(a,b)=>a.group.localeCompare(b.group),
+             qty:(a,b)=>a.qty-b.qty, sales:(a,b)=>a.sales-b.sales };
+  list=list.slice().sort((a,b)=>d*(by[SALES_SORT.col]||by.sales)(a,b));
+  const head=(c,l,cls)=>{const on=SALES_SORT.col===c;
+    return `<th class="s ${cls||""} ${on?"act":""}" onclick="setSalesSort('${c}')">${l}${on?(d>0?" ▲":" ▼"):""}</th>`;};
+  return `<div class="card"><div class="label">Products (${Object.keys(m).length})
+      ${SALES_CATDRILL?`<span class="chip sm on" onclick="drillCat('${esc(SALES_CATDRILL)}')" style="margin-left:8px">${esc(SALES_CATDRILL)} ✕</span>`:""}
+      ${SALES_GROUP.length?`<span class="chip sm on" onclick="drillGroup('')" style="margin-left:8px">${SALES_GROUP.length} categor${SALES_GROUP.length===1?"y":"ies"} ✕</span>`:""}
+${venueChips(pv)}</div>
+    <div style="font-size:12px;color:var(--dim);margin-bottom:8px">tap a column to sort ·
+      ${Object.keys(SD_ITEM||{}).length} names merged · ${Object.keys((SD_OVER||{}).item||{}).length+Object.keys((SD_OVER||{}).dept||{}).length} overrides applied</div>
+    <input type="search" id="psearch" placeholder="Search products…" value="${esc(SALES_Q)}">
+    ${groups.length>1?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <span class="chip sm ${SALES_GROUP.length?"":"on"}" onclick="drillGroup('')">All categories</span>
+      ${groups.map(g=>`<span class="chip sm ${SALES_GROUP.indexOf(g)>=0?"on":""}" onclick="drillGroup('${esc(g)}')">${esc(g)}</span>`).join("")}
+    </div><div class="note" style="margin-top:4px">Pick as many as you like.</div>`:""}
+    <table style="margin-top:8px"><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}
+      ${cols.length>1?cols.map(v=>`<th class="num hide-sm">${esc(vShort(v))}</th>`).join(""):""}
+      ${head("qty","Sold","num")}<th class="num hide-sm">Per day</th>${head("sales","Revenue","num")}</tr></thead>
+    <tbody>${list.slice(0,150).map(o=>`<tr>
+      <td><b>${esc(o.name)}</b></td>
+      <td class="hide-sm">${o.group?`<span class="pill" style="cursor:pointer" onclick="drillGroup('${esc(o.group)}')" title="Show only ${esc(o.group)}">${esc(o.group)}</span>`:""}</td>
+      ${cols.length>1?cols.map(v=>`<td class="num hide-sm">${o[v]?money0(o[v]):'<span style="color:var(--dim)">—</span>'}</td>`).join(""):""}
+      <td class="num">${Math.round(o.qty*100)/100}</td>
+      <td class="num hide-sm" style="color:var(--dim)">${Math.round(o.qty/w.days*10)/10}</td>
+      <td class="num"><b>${money(o.sales)}</b></td></tr>`).join("")}</tbody></table>
+    ${list.length>150?`<div class="note">Showing 150 of ${list.length}.</div>`:""}</div>`;
+}
+function setSalesSort(c){
+  if(SALES_SORT.col===c) SALES_SORT.dir*=-1;
+  else SALES_SORT={col:c,dir:(c==="name"||c==="cat")?1:-1};
+  route();
+}
+
+/* Wastage: a $0 line in a perishable group is food in the bin. Elsewhere a $0 line usually
+   is not — Coffee & Tea is dominated by the loyalty give-away, which costs margin but went
+   to a paying regular. And a $0 line only counts if the SAME item also sells for money in
+   this window: something never charged for is a modifier, not a give-away. */
+let WASTE_SORT={col:"value",dir:-1};
+function setWasteSort(c){
+  if(WASTE_SORT.col===c) WASTE_SORT.dir*=-1;
+  else WASTE_SORT={col:c,dir:(c==="name"||c==="group")?1:-1};
+  route();
+}
+function sdWasteCard(rows){
+  /* Same store scope as the products list. */
+  const wv=salesProdVenue();
+  if(wv!=="both") rows=rows.filter(r=>r.venue===wv);
+  const paid={};
+  rows.forEach(r=>{ if(r.sales>0) paid[r.item.toLowerCase()]=1; });
+  const m={};
+  rows.forEach(r=>{
+    if(PERISHABLE.indexOf(r.group)===-1) return;
+    const o=m[r.item]||(m[r.item]={name:r.item,group:r.group,sold:0,free:0,rev:0});
+    if(r.sales>0){ o.sold+=r.qty; o.rev+=r.sales; } else o.free+=r.qty;
+  });
+  let list=Object.values(m).filter(o=>o.free>0&&o.sold>0&&paid[o.name.toLowerCase()]);
+  list.forEach(o=>{ o.price=o.rev/o.sold; o.value=o.free*o.price;
+                    o.pct=o.free/(o.sold+o.free)*100; });
+  const wd=WASTE_SORT.dir;
+  const wby={ name:(a,b)=>a.name.localeCompare(b.name), group:(a,b)=>a.group.localeCompare(b.group)||a.name.localeCompare(b.name),
+              free:(a,b)=>a.free-b.free, sold:(a,b)=>a.sold-b.sold, pct:(a,b)=>a.pct-b.pct, value:(a,b)=>a.value-b.value };
+  list.sort((a,b)=>wd*(wby[WASTE_SORT.col]||wby.value)(a,b));
+  if(!list.length) return `<div class="card"><div class="label">Wastage
+${venueChips(wv)}</div>
+    <div class="note">Nothing binned in ${PERISHABLE.join(", ")} at ${esc(wv)} for this
+      period — or those items are not in a perishable group in the Overrides tab yet.</div></div>`;
+  const units=list.reduce((t,o)=>t+o.free,0), value=list.reduce((t,o)=>t+o.value,0);
+  const soldAll=list.reduce((t,o)=>t+o.sold,0);
+  const pctAll=(soldAll+units)?units/(soldAll+units)*100:0;
+  return `<div class="card"><div class="label">Wastage
+${venueChips(wv)}</div>
+    <div style="font-size:13px;margin-bottom:10px"><b>${Math.round(units)}</b> items binned at
+      ${esc(wv)}, worth <b>${money(value)}</b> at what they were selling for —
+      ${pct1(pctAll)} of everything made in these groups.</div>
+    <table><thead><tr>${wHead("name","Product")}${wHead("group","Group","hide-sm")}${wHead("free","Binned","num")}
+      ${wHead("sold","Sold","num hide-sm")}${wHead("pct","% wasted","num")}${wHead("value","Value","num")}</tr></thead>
+    <tbody>${list.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
+      <td class="hide-sm"><span class="pill">${esc(o.group)}</span></td>
+      <td class="num">${Math.round(o.free*100)/100}</td>
+      <td class="num hide-sm">${Math.round(o.sold*100)/100}</td>
+      <td class="num ${o.pct>=25?"up":""}">${pct1(o.pct)}</td>
+      <td class="num">${money(o.value)}</td></tr>`).join("")}
+      <tr style="border-top:2px solid var(--line)"><td><b>Total</b></td><td class="hide-sm"></td>
+        <td class="num"><b>${Math.round(units*100)/100}</b></td>
+        <td class="num hide-sm">${Math.round(soldAll*100)/100}</td>
+        <td class="num"><b>${pct1(pctAll)}</b></td>
+        <td class="num"><b>${money(value)}</b></td></tr></tbody></table>
+    <div class="note">Perishable groups only: ${PERISHABLE.join(", ")}. Valued at that item's own average selling
+      price in this period.</div></div>`;
+}
+
+/* ================= INVOICES PANEL =================
+   Supplier Explorer's invoice list, reusable: the builder shows this store's invoices under
+   the catalogue, the reports drilldown shows the full history. Clicking an invoice opens its
+   own lines, which is the only place in this app you see what an invoice actually contained
+   rather than a product rolled up across many of them. */
+let OPEN_INV=null;
+function toggleInv(k){ OPEN_INV = OPEN_INV===k ? null : k; route(); }
+function invoicePanel(supplier,venue,limit){
+  return `<div class="card">
+    <div class="label">Invoices — ${esc(supplier)}${venue?" · "+esc(venue):""}</div>
+    ${invoiceTable(supplier,venue,limit)}</div>`;
+}
+function invoiceTable(supplier,venue,limit){
+  const rows=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)&&r.date)
+                .sort((a,b)=>b.date-a.date).slice(0,limit||40);
+  if(!rows.length) return `<div class="note">No invoices for this supplier${venue?" at "+esc(venue):""} in the data.</div>`;
+  const tot=rows.reduce((s,r)=>s+r.total,0);
+  return `<div style="font-size:13px;color:var(--dim);margin:6px 0 8px">${rows.length} invoice(s), ${money(tot)}</div>
+    <table><thead><tr><th>Date</th><th class="hide-sm">Invoice</th><th class="hide-sm">Venue</th>
+      <th class="num">Subtotal</th><th class="num hide-sm">GST</th><th class="num">Total</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const k=norm(r.supplier)+"|"+norm(r.number)+"|"+fmtISO(r.date);
+      const open=OPEN_INV===k;
+      const lines=open?LINES.filter(l=>l.supplier===r.supplier&&norm(l.number)===norm(r.number)
+                                       &&(!venue||l.venue===venue)):[];
+      return `<tr class="click ${open?"picked":""}" onclick="toggleInv('${esc(k)}')">
+          <td>${open?"▾ ":"▸ "}${fmtD(r.date)}</td>
+          <td class="hide-sm" style="font-family:var(--mono);font-size:11px">${esc(r.number)||"—"}</td>
+          <td class="hide-sm">${esc(vShort(r.venue))}</td>
+          <td class="num">${money(r.subtotal)}</td><td class="num hide-sm">${money(r.gst)}</td>
+          <td class="num"><b>${money(r.total)}</b></td></tr>`
+        + (open?`<tr><td colspan="6" style="background:#faf9f6;padding:0 8px 10px">
+            ${lines.length?`<table style="margin-top:4px"><thead><tr><th>Line</th><th class="num">Qty</th>
+              <th class="num">Unit price</th><th class="num">Line total</th></tr></thead>
+              <tbody>${lines.map(l=>`<tr><td>${esc(l.desc)}${l.code?` <span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(l.code)}</span>`:""}</td>
+                <td class="num">${l.qty} ${esc(l.unit||"")}</td><td class="num">${money(l.price)}</td>
+                <td class="num">${money(l.total)}</td></tr>`).join("")}</tbody></table>`
+              :`<div class="note">No itemised lines captured for this invoice — it arrived as a total only.</div>`}
+          </td></tr>`:"");
+    }).join("")}</tbody></table>
+    <div class="note">Most recent first, capped at ${limit||40}. Click any invoice for its lines.</div>`;
+}
+
+/* ================= PLACED ORDERS ================= */
+/* Per store, like everything else about ordering. */
+let OPEN_ORDER=null, CANCELLED=0;
+function toggleOrder(id){ OPEN_ORDER = OPEN_ORDER===id ? null : id; route(); }
+function renderPlaced(){
+  const m=weekModel();
+  const rec=reconcile(ORDERS.concat(LOCAL_ORDERS),INV,{start:addD(m.wk.start,-28),end:m.wk.end},new Date());
+  const status={};
+  rec.open.forEach(o=>status[o.id]={state:"open",nearest:o.nearest});
+  rec.closed.forEach(c=>status[c.o.id]={state:"closed",inv:c.inv,how:c.how});
+  const rows=ORDERS.concat(LOCAL_ORDERS).filter(o=>o.venue===TAG.name&&o.date>=addD(m.wk.start,-28))
+                   .sort((a,b)=>b.date-a.date);
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="card"><div class="label">Orders placed — last 4 weeks · ${esc(TAG.name)}</div>
+      <table><thead><tr><th>Placed</th><th>Supplier</th><th class="hide-sm">Deliver</th><th class="num hide-sm">Items</th>
+        <th class="num">Total</th><th>Reconciliation</th><th class="num"></th></tr></thead>
+      <tbody>${rows.map(o=>{
+        const st=status[o.id]||{state:"closed",how:"outside this window"};
+        const open=OPEN_ORDER===o.id;
+        let pill;
+        if(st.state==="open") pill=`<span class="pill">awaiting invoice</span>`+(st.nearest?`<br><span style="font-size:11px;color:var(--dim)">nearest: ${money(st.nearest.total)} on ${fmtD(st.nearest.date)}</span>`:"");
+        else if(st.inv) pill=`<span class="pill ok">invoiced</span><br><span style="font-size:11px;color:var(--dim)">#${esc(st.inv.number)} · ${money(st.inv.total)} · ${fmtD(st.inv.date)} · ${esc(st.how)}</span>`;
+        else pill=`<span class="pill ok">${esc(st.how||"closed")}</span>`;
+        return `<tr class="click ${open?"picked":""}" onclick="toggleOrder('${esc(o.id)}')">
+          <td>${open?"▾ ":"▸ "}${fmtD(o.date)}</td>
+          <td><b>${esc(o.supplier)}</b>${o.by?`<br><span style="color:var(--dim);font-size:11px">${esc(o.by)}</span>`:""}</td>
+          <td class="hide-sm">${o.delivery?fmtD(o.delivery):'<span style="color:var(--dim)">—</span>'}</td>
+          <td class="num hide-sm">${(o.lines||[]).length||'<span style="color:var(--dim)">—</span>'}</td>
+          <td class="num">${money(o.total)}</td>
+          <td>${pill}</td>
+          <td class="num">${(o.lines||[]).length?`<a class="chip sm" onclick="event.stopPropagation();reorder('${esc(o.id)}')">Order again</a>`:""}</td></tr>`
+        + (open?`<tr><td colspan="7" style="background:#faf9f6;padding:0 8px 12px">
+            ${(o.lines||[]).length?`<table style="margin-top:6px"><thead><tr><th>Line</th><th class="num">Qty</th><th class="num">Unit price then</th><th class="num">Line</th></tr></thead>
+              <tbody>${o.lines.map(l=>`<tr><td>${esc(l.desc)}${l.code?` <span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(l.code)}</span>`:""}</td>
+                <td class="num">${l.qty} ${esc(l.unit||"")}</td><td class="num">${money(l.price)}</td><td class="num">${money(l.qty*l.price)}</td></tr>`).join("")}</tbody></table>`
+              :`<div class="note">No line detail was stored for this order.</div>`}
+            ${st.state==="open"?`
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+                <span style="font-size:12px;color:var(--dim)">Still counting against the week.</span>
+                <a class="chip sm" onclick="event.stopPropagation();matchPicker('${esc(o.id)}')">Match to an invoice…</a>
+                <a class="chip sm" onclick="event.stopPropagation();markReceived('${esc(o.id)}')">Mark received</a>
+              </div>`:""}
+            <div style="margin-top:10px">
+              <a class="chip sm" onclick="event.stopPropagation();deleteOrder('${esc(o.id)}')"
+                 style="border-color:var(--red);color:var(--red)">Delete this order</a>
+            </div>
+          </td></tr>`:"");
+      }).join("")}</tbody></table>
+      ${rows.length?"":'<div class="note">No orders logged for this store yet.</div>'}
+      ${CANCELLED?`<div class="note">${CANCELLED} deleted order(s) are hidden. They stay in the Orders tab with a
+        cancel row against them, so nothing is lost from the record.</div>`:""}
+      <div class="note">
+        <b>Awaiting invoice</b> — the order is holding its slot in the week's budget. When its invoice arrives the
+        order stops counting and the invoice counts instead, so a delivery is never charged twice.<br>
+        <b>Invoiced</b> — the tool found that invoice: the same supplier, captured after the order was placed,
+        dated on or around the delivery day, and the closest in value, within a third. If nothing fits, the order
+        stays open and shows its nearest candidate so you can match it by hand.<br>
+        Orders placed outside this tool have no row here. Their invoices simply count as spend, which is right.
+      </div>
+    </div>`;
+}
+/* Pick the invoice by hand. Offered: that supplier's invoices from a week before the order
+   to today, unmatched, nearest in value first. */
+function matchPicker(id){
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
+  const used=new Set();
+  reconcile(ORDERS.concat(LOCAL_ORDERS),INV,{start:addD(o.date,-60),end:addD(new Date(),1)},new Date())
+    .closed.forEach(c=>{ if(c.inv) used.add(norm(c.inv.number)); });
+  const cands=INV.filter(r=>r.supplier===o.supplier&&r.type!=="manual"&&r.number&&r.date>=addD(o.date,-7)&&!used.has(norm(r.number)))
+                 .sort((a,b)=>Math.abs(a.total-o.total)-Math.abs(b.total-o.total)).slice(0,12);
+  modal(`<div class="label">Match this order to an invoice</div>
+    <div style="font-size:13px;margin-bottom:8px">${esc(o.supplier)} · ordered ${fmtD(o.date)} · ${money(o.total)}</div>
+    ${cands.length?`<table><thead><tr><th>Date</th><th class="hide-sm">Invoice</th><th class="num">Total</th><th class="num">Diff</th><th></th></tr></thead>
+      <tbody>${cands.map(r=>`<tr><td>${fmtD(r.date)}</td><td class="hide-sm" style="font-family:var(--mono);font-size:11px">${esc(r.number)}</td>
+        <td class="num">${money(r.total)}</td><td class="num ${Math.abs(r.total-o.total)>o.total*MATCH_TOL?"up":""}">${money(r.total-o.total)}</td>
+        <td class="num"><a class="chip sm" onclick="matchTo('${esc(o.id)}','${esc(r.number)}')">This one</a></td></tr>`).join("")}</tbody></table>`
+      :`<div class="note">No unmatched invoices from ${esc(o.supplier)} since ${fmtD(addD(o.date,-7))}. It may not have arrived yet.</div>`}
+    <div style="margin-top:12px"><a class="btn outline" onclick="closeModal()">Cancel</a></div>`);
+}
+async function matchTo(id,invoiceNumber){
+  closeModal();
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
+  try{ await post({action:"match",order_id:id,supplier:o.supplier,venue:o.venue,order_date:fmtISO(o.date),
+                   note:invoiceNumber}); }
+  catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
+  o.matchedTo=invoiceNumber;
+  toast("Matched to invoice "+invoiceNumber+".");
+  route();
+}
+/* Delete = a cancel row, not a removed row. The order leaves the budget, the lists and the
+   reconciliation immediately; the sheet keeps the whole history, which matters when the
+   thing being deleted is a real order somebody placed. */
+async function deleteOrder(id){
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
+  if(!confirm(`Delete the ${fmtD(o.date)} order to ${o.supplier} for ${money(o.total)}?\n\n`
+             +`It stops counting against the week straight away. The record stays in the sheet.`)) return;
+  try{ await post({action:"cancel",order_id:id,supplier:o.supplier,venue:o.venue,
+                   order_date:fmtISO(o.date),subtotal:o.subtotal,gst:o.gst,total:o.total}); }
+  catch(e){
+    if(e.message!=="no-webapp"){ alert(e.message); return; }
+    toast("Deleted in this browser only — WEBAPP_URL isn't set.");
+  }
+  ORDERS=ORDERS.filter(x=>x.id!==id);
+  LOCAL_ORDERS=LOCAL_ORDERS.filter(x=>x.id!==id);
+  CANCELLED++;
+  OPEN_ORDER=null;
+  toast("Order deleted.");
+  route();
+}
+async function markReceived(id){
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id); if(!o) return;
+  try{ await post({action:"receive",order_id:id,supplier:o.supplier,venue:o.venue,order_date:fmtISO(o.date),
+                   subtotal:o.subtotal,gst:o.gst,total:o.total}); }
+  catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
+  o.action="receive";
+  route();
+}
+
+/* Load a past order back into the cart. Prices come from the CURRENT catalogue, never from
+   what was paid at the time — reordering at last quarter's price would quietly understate
+   the cart against this week's budget. Items that have since left the catalogue are skipped
+   and counted rather than invented. */
+function reorder(id){
+  const o=ORDERS.concat(LOCAL_ORDERS).find(x=>x.id===id);
+  if(!o||!(o.lines||[]).length) return;
+  const known={};
+  deriveCatalogue(LINES,o.supplier,new Date(),{venue:o.venue}).forEach(p=>known[p.key]=p);
+  let loaded=0, miss=0;
+  o.lines.forEach(l=>{
+    const key=prodKey(o.supplier,l.code,l.desc,l.unit);
+    if(known[key]){ setQty(o.supplier,key,l.qty,o.venue); loaded++; } else miss++;
+  });
+  TAG=tagByName(o.venue); SUPPLIER=o.supplier;
+  renderTagPicker(); renderFilters();
+  location.hash="s::"+encodeURIComponent(o.supplier);
+  route();
+  toast(miss?`Loaded ${loaded} item(s) from ${fmtD(o.date)} — ${miss} no longer in the catalogue.`
+            :`Loaded all ${loaded} item(s) from the ${fmtD(o.date)} order.`);
+}
+
+/* ================= FAVOURITES ================= */
+function saveFavPrompt(){
+  const t=orderTotals(SUPPLIER);
+  if(!t.lines.length){ alert("Nothing in this order yet."); return; }
+  modal(`<div class="label">Save as favourite</div>
+    <div style="font-size:13px;margin-bottom:8px">${t.lines.length} item(s) · ${esc(SUPPLIER)}</div>
+    <input type="text" id="favname" placeholder="e.g. Monday Kitchen Run" style="width:100%">
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <a class="btn" id="favok">Save</a><a class="btn outline" onclick="closeModal()">Cancel</a></div>
+    <div class="note">Saved to the sheet, so anyone opening this link sees it.</div>`);
+  document.getElementById("favok").onclick=()=>saveFav(document.getElementById("favname").value.trim(),t.lines,SUPPLIER);
+}
+/* Takes its lines explicitly: the prompt after a placed order runs once the draft has been
+   cleared, so reading the draft here would save an empty favourite. */
+async function saveFav(name,lines,supplier){
+  if(!name||!lines||!lines.length) return;
+  const fav={fav_id:"f"+Date.now().toString(36),fav_name:name,venue:TAG.name,supplier,
+    lines:lines.map((l,i)=>({line_no:i+1,item_key:l.key,description:l.desc,unit:l.unit,qty:l.qty,supplier}))};
+  closeModal();
+  try{
+    await post(Object.assign({action:"favourite"},fav));
+    FAVS.push({id:fav.fav_id,name,venue:TAG.name,supplier,by:identity().user||"",
+      lines:fav.lines.map(l=>({key:l.item_key,desc:l.description,unit:l.unit,qty:l.qty,supplier}))});
+    toast("Favourite saved.");
+  }catch(e){
+    if(e.message==="no-webapp") toast("Can't save favourites until WEBAPP_URL is set.");
+    else alert(e.message);
+  }
+  route();
+}
+function recallFav(id){
+  const f=FAVS.find(x=>x.id===id); if(!f) return;
+  const sup=f.supplier||SUPPLIER;
+  const known={}; deriveCatalogue(LINES,sup,new Date(),{venue:f.venue}).forEach(p=>known[p.key]=p);
+  let miss=0;
+  f.lines.forEach(l=>{ if(known[l.key]) setQty(sup,l.key,l.qty,f.venue); else miss++; });
+  SUPPLIER=sup; location.hash="s::"+encodeURIComponent(sup);
+  route();
+  toast(miss?`Loaded "${f.name}" — ${miss} item(s) no longer in the catalogue were skipped.`:`Loaded "${f.name}".`);
+}
+function renderFavs(){
+  const m=weekModel();
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="card"><div class="label">Saved favourites — ${esc(TAG.name)}</div>
+      <table><thead><tr><th>Name</th><th class="hide-sm">Supplier</th><th class="num">Items</th><th class="num"></th></tr></thead>
+      <tbody>${FAVS.filter(f=>f.venue===TAG.name).map(f=>`<tr><td><b>${esc(f.name)}</b>${f.by?`<br><span style="color:var(--dim);font-size:11px">${esc(f.by)}</span>`:""}</td>
+        <td class="hide-sm">${esc(f.supplier||"—")}</td><td class="num">${f.lines.length}</td>
+        <td class="num"><a class="chip sm" onclick="recallFav('${esc(f.id)}')">Load</a>
+          <a class="chip sm" onclick="deleteFav('${esc(f.id)}')">Delete</a></td></tr>`).join("")}</tbody></table>
+      ${FAVS.filter(f=>f.venue===TAG.name).length?"":'<div class="note">No favourites for this store yet. Build an order and choose <b>Save as favourite</b>.</div>'}
+    </div>`;
+}
+async function deleteFav(id){
+  const f=FAVS.find(x=>x.id===id); if(!f) return;
+  if(!confirm(`Delete favourite "${f.name}"?`)) return;
+  try{ await post({action:"favourite_delete",fav_id:id}); }
+  catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
+  FAVS=FAVS.filter(x=>x.id!==id); route();
+}
+
+/* ================= ADMIN ================= */
+function renderAdmin(){
+  const list=supplierList(), overrides=Object.keys(COVER);
+  document.getElementById("app").innerHTML=`
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="card"><div class="label">Supplier settings — global, one setting everywhere</div>
+      <table><thead><tr><th>Supplier</th><th>Sales rep email</th><th class="num">Visible</th><th class="num">Portal only</th></tr></thead>
+      <tbody>${list.map(s=>{const c=sset(s.name);return `<tr>
+        <td><b>${esc(s.name)}</b>${s.lines?"":' <span class="pill">no line items</span>'}</td>
+        <td><input type="email" value="${esc(c.rep_email)}" placeholder="${esc(supplierEmail(s.name)||"none known")}"
+             style="width:100%;font-size:12px;padding:6px 8px" onchange="saveSupplier('${esc(s.name)}','rep_email',this.value)"></td>
+        <td class="num"><input type="checkbox" ${c.visible?"checked":""} onchange="saveSupplier('${esc(s.name)}','visible',this.checked?'yes':'no')"></td>
+        <td class="num"><input type="checkbox" ${c.portal_only?"checked":""} onchange="saveSupplier('${esc(s.name)}','portal_only',this.checked?'yes':'no')"></td>
+      </tr>`;}).join("")}</tbody></table>
+      <div class="note">
+        <b>Sales rep email</b> is who you order from, deliberately separate from the address invoices arrive from —
+        the greyed placeholder is what the invoices suggest, and it's usually a no-reply robot.<br>
+        <b>Portal only</b> keeps a supplier off the ordering list while their invoices still count toward spend and
+        COGS. <b>Visible</b> hides them from ordering entirely. Both apply to every view, for everyone.
+      </div>
+    </div>
+    <div class="card"><div class="label">Category overrides — ${overrides.length} set by hand</div>
+      ${overrides.length?`<table><thead><tr><th>Product</th><th>Category</th></tr></thead>
+        <tbody>${overrides.map(k=>{
+          const l=LINES.find(x=>x.key===k);
+          return `<tr><td>${esc(l?l.desc:k)}<br><span style="color:var(--dim);font-family:var(--mono);font-size:10px">${esc(k)}</span></td>
+            <td><span class="pill">${esc(COVER[k])}</span></td></tr>`;}).join("")}</tbody></table>`
+        :'<div class="note">None yet. Use the ✎ beside any category in a supplier catalogue to reassign a product for everyone.</div>'}
+    </div>`;
+}
+async function saveSupplier(name,field,value){
+  const cur=sset(name);
+  SSET[norm(name)]=Object.assign({},cur,{[field]: field==="visible"?value!=="no":field==="portal_only"?value==="yes":value});
+  try{ await post({action:"supplier_setting",supplier:name,field,value}); toast("Saved for everyone."); }
+  catch(e){ if(e.message==="no-webapp") toast("Not saved — WEBAPP_URL isn't set."); else alert(e.message); }
+}
+
+/* ================= DISPATCH ================= */
+function orderText(supplier,opts){
+  opts=opts||{};
+  const t=orderTotals(supplier), d=draft(supplier), tag=tagByName(d.tag||TAG.name);
+  const lines=t.lines.map(l=>`- ${l.qty} x ${l.unit||"ea"}  ${l.desc}${l.code?" ["+l.code+"]":""}`+(opts.prices?`   ${money(l.price)} ea`:""));
+  const head=[`Order — ${tag.name}`,`Date: ${fmtD(new Date())}`,
+              d.delivery?`Deliver on: ${fmtD(gvizDate(d.delivery))}`:"", `Deliver to: ${tag.addr}`].filter(Boolean);
+  const tail=opts.prices?["",`Estimated ${money(t.sub)} + ${money(t.gst)} GST = ${money(t.total)}`]:[];
+  return head.join("\n")+"\n\n"+lines.join("\n")+tail.join("\n");
+}
+function orderEmailBody(supplier){
+  const d=draft(supplier);
+  return `Hi,\n\nCould we please order the following for ${d.tag||TAG.name}:\n\n`
+    + orderText(supplier,{prices:false}).split("\n\n").slice(1).join("\n\n")
+    + `\n\nPlease confirm availability and delivery day.\n\nThanks,\n${identity().user||"Red Square"}\n`
+    + COMPANY_BLOCK.join("\n");
+}
+function dispatch(how){
+  const t=orderTotals(SUPPLIER);
+  if(!t.lines.length){ alert("Nothing in this order yet."); return; }
+  if(how==="copy") return copyText(orderText(SUPPLIER,{prices:false}));
+  const to=(document.getElementById("repmail")||{}).value||supplierEmail(SUPPLIER);
+  if(!to){ alert("No sales rep email for this supplier. Add one in Admin, or use Copy."); return; }
+  const ccOn=(document.getElementById("cckitchen")||{}).checked;
+  const cc=ccOn?(sset(SUPPLIER).cc||ACCOUNTS_EMAIL):"";
+  const d=draft(SUPPLIER);
+  const q=`subject=${encodeURIComponent(`Order — ${d.tag||TAG.name} — ${fmtD(new Date())}`)}&body=${encodeURIComponent(orderEmailBody(SUPPLIER))}`;
+  location.href=`mailto:${encodeURIComponent(to)}?${cc?`cc=${encodeURIComponent(cc)}&`:""}${q}`;
+}
+function copyText(txt){
+  const done=()=>toast("Copied — paste it into the portal or message.");
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done,()=>showCopyBox(txt));
+  else showCopyBox(txt);
+}
+function showCopyBox(txt){
+  modal(`<div class="label">Copy this order</div><textarea id="cpbox">${esc(txt)}</textarea>
+    <div style="margin-top:10px"><a class="btn" onclick="closeModal()">Done</a></div>`);
+  const el=document.getElementById("cpbox"); if(el){el.focus();el.select();}
+}
+function toast(msg){
+  const el=document.createElement("div"); el.textContent=msg;
+  el.style.cssText="position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#111;color:#fff;padding:11px 18px;border-radius:8px;font-size:14px;z-index:50";
+  document.body.appendChild(el); setTimeout(()=>el.remove(),2600);
+}
+function modal(html){
+  closeModal();
+  const w=document.createElement("div"); w.className="modal"; w.id="obmodal";
+  w.innerHTML=`<div class="box">${html}</div>`;
+  w.addEventListener("click",e=>{if(e.target===w) closeModal();});
+  document.body.appendChild(w);
+}
+function closeModal(){ const m=document.getElementById("obmodal"); if(m) m.remove(); }
+
+/* ================= WRITE PATH ================= */
+function identity(){ try{return JSON.parse(localStorage.getItem("ob_identity")||"{}")||{};}catch(e){return {};} }
+function askIdentity(){
+  const id=identity();
+  if(id.user&&id.pin) return Promise.resolve(id);
+  return new Promise(res=>{
+    modal(`<div class="label">Who's using this?</div>
+      <div style="display:grid;gap:8px">
+        <input type="text" id="obname" placeholder="Your name" value="${esc(id.user||"")}">
+        <input type="text" id="obpin" placeholder="Shared PIN" value="${esc(id.pin||"")}">
+        <a class="btn" id="obok">Save</a></div>
+      <div class="note">Your name goes on the order record. The PIN is shared and is a working record, not
+        security — this page is public.</div>`);
+    document.getElementById("obok").onclick=()=>{
+      const user=document.getElementById("obname").value.trim(), pin=document.getElementById("obpin").value.trim();
+      if(!user||!pin) return;
+      try{localStorage.setItem("ob_identity",JSON.stringify({user,pin}));}catch(e){}
+      closeModal(); res({user,pin});
+    };
+  });
+}
+async function post(payload){
+  if(!WEBAPP_URL) throw new Error("no-webapp");
+  const id=await askIdentity();
+  let res;
+  /* A string body sends as text/plain: a simple request with no CORS preflight, which an
+     Apps Script web app cannot answer. */
+  try{ res=await fetch(WEBAPP_URL,{method:"POST",body:JSON.stringify(Object.assign({pin:id.pin,user:id.user},payload)),redirect:"follow"}); }
+  catch(e){ throw new Error("Couldn't reach the save endpoint. In Apps Script check Deploy → Manage deployments: access must be Anyone, and the /exec URL current. Nothing was saved."); }
+  const txt=await res.text();
+  let j; try{ j=JSON.parse(txt); }catch(e){ throw new Error("Unexpected reply from the web app (not JSON). Is the deployment set to 'Anyone'?"); }
+  if(!j.ok) throw new Error(j.error||"save failed");
+  return j;
+}
+function buildPayload(action){
+  const t=orderTotals(SUPPLIER), d=draft(SUPPLIER);
+  return {order_id:"o"+Date.now().toString(36),action,supplier:SUPPLIER,venue:d.tag||TAG.name,
+    order_date:fmtISO(new Date()),delivery_date:d.delivery||"",subtotal:t.sub,gst:t.gst,total:t.total,
+    channel:sset(SUPPLIER).portal_only?"portal":"email",
+    lines:t.lines.map((l,i)=>({line_no:i+1,item_code:l.code,description:l.desc,unit:l.unit,
+                               qty:l.qty,unit_price:l.price,line_total:l.total}))};
+}
+const localRecord=o=>({id:o.order_id,action:"place",supplier:o.supplier,venue:o.venue,date:mid(new Date()),loggedAt:new Date(),
+  delivery:gvizDate(o.delivery_date)||null,lines:(o.lines||[]).map(l=>({code:l.item_code,desc:l.description,unit:l.unit,qty:l.qty,price:l.unit_price})),
+  total:o.total,subtotal:o.subtotal,gst:o.gst,channel:o.channel,by:identity().user||"",logged:new Date()});
+async function markPlaced(){
+  const t=orderTotals(SUPPLIER);
+  if(!t.lines.length){ alert("Nothing in this order yet."); return; }
+  const order=buildPayload("place"), local=localRecord(order);
+  const placedLines=t.lines, placedSupplier=SUPPLIER;
+  /* Same stale key: this left the placed draft in place AND created a second entry under a
+     bare supplier name, so a placed order counted against the budget twice. */
+  const finish=msg=>{ LOCAL_ORDERS.push(local); DRAFTS[draftId(SUPPLIER,order.venue)]={supplier:SUPPLIER,tag:order.venue,qty:{},note:""};
+                      saveDrafts(); toast(msg); offerFav(placedLines,placedSupplier); };
+  try{ await post(order); finish("Order logged."); }
+  catch(e){ if(e.message==="no-webapp") finish("Logged in this browser only — WEBAPP_URL isn't set.");
+            else alert(e.message); }
+}
+/* Asked after the order is safely logged, never before — a prompt that blocks the order is
+   a prompt people learn to dismiss. */
+function offerFav(lines,supplier){
+  modal(`<div class="label">Save this as a favourite?</div>
+    <div style="font-size:13px;margin-bottom:8px">Give it a name and it can be reloaded as an editable order.</div>
+    <input type="text" id="favname" placeholder="e.g. Monday Kitchen Run" style="width:100%">
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <a class="btn" id="favok">Save favourite</a><a class="btn outline" onclick="closeModal();go('')">No thanks</a></div>`);
+  document.getElementById("favok").onclick=()=>{
+    const n=document.getElementById("favname").value.trim(); if(!n) return;
+    saveFav(n,lines,supplier);
+  };
+}
+window.addEventListener("hashchange",route);
+if(!window.__OB_NO_AUTOLOAD) loadAll();
+</script>
+</body>
+</html>
