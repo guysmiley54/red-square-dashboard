@@ -19,11 +19,11 @@ global.Logger={log(){}}; global.Utilities={formatDate:()=>"20260916"};
 // real code path: a rep email configured in SupplierSettings
 sheet("SupplierSettings").rows.push(["supplier","rep_email","visible","portal_only","cc","note","updated_by","updated_at"],["Fresh Cut","rep@freshcut.example","yes","no","","","",""]);
 const src=fs.readFileSync(process.argv[2]||"/home/claude/ghq/Orders.gs","utf8");
-eval(src+"\n;global.__x={validateOrder_,favourite_,send_,place_,OB_STORES,OB_VENUE,OB_BUILD,supplierEmail_,tab_};");
+eval(src+"\n;global.__x={validateOrder_,favourite_,send_,place_,OB_STORES,OB_VENUE,OB_BUILD,supplierEmail_,tab_,doPost:typeof doPost!=='undefined'?doPost:null,doGet};");
 const x=global.__x;
 const order=(venue)=>({order_id:"o"+venue.replace(/\W/g,""),supplier:"Fresh Cut",venue,order_date:"2026-09-16",subtotal:80,gst:0,total:80,channel:"email",lines:[{item_code:"",description:"Bananas",unit:"kg",qty:8,unit_price:10,line_total:80}]});
 
-ok("build bumped", /^gs-v10-/.test(x.OB_BUILD), x.OB_BUILD);
+ok("build bumped", /^gs-v1[0-9]-/.test(x.OB_BUILD), x.OB_BUILD);
 ok("OB_STORES has three venues", x.OB_STORES.length===3 && x.OB_STORES.indexOf("Red Square Glenorchy")>-1);
 ok("every store has an OB_VENUE entry", x.OB_STORES.every(v=>x.OB_VENUE[v]&&x.OB_VENUE[v].addr&&x.OB_VENUE[v].signoff));
 ok("validate: Glenorchy accepted", !x.validateOrder_(order("Red Square Glenorchy")).error, x.validateOrder_(order("Red Square Glenorchy")).error);
@@ -43,4 +43,29 @@ ok("send: company and accounts lines kept", /B & G Fitness Pty Ltd\nRed Square C
 const r2=send_(order("Luma Kitchen"),"Ange"); const b2=SENT[SENT.length-1]; ok("send: Luma sent", r2.ok&&r2.sent===true&&SENT.length===2, r2);
 ok("send: Luma keeps the Cambridge signoff", /Red Square Cafe \| Luma Kitchen/.test(b2.body) && /66 Kennedy Drive/.test(b2.body), b2.body.split("\n").slice(-6));
 ok("send: rows written with venue", sheets.Orders.rows.filter(r=>r[3]==="Red Square Glenorchy").length===2 /* place + sent */, sheets.Orders.rows.map(r=>r[1]+"/"+r[3]));
+
+// ---- per-dashboard turned-off items ----
+const post=b=>JSON.parse(x.doPost({postData:{contents:JSON.stringify(Object.assign({pin:"1234",user:"Tam"},b))}}).body);
+// Cambridge Central has already turned Naan off and categorised it
+sheet("CategoryOverrides").rows.push(["item_key","supplier","description","category","hidden","updated_by","updated_at"],
+  ["pfd|bread naan|ea","PFD","Naan Bread","Bakery","yes","Ange",""]);
+const camb=()=>sheets.CategoryOverrides.rows.map(r=>r.slice(0,5).join("|")).join("\n");
+const before=camb();
+const vis=()=>((sheets.ItemVisibility||{rows:[]}).rows).filter((r,i)=>i>0&&r&&r[0]);
+ok("doGet lists item_visibility", JSON.parse(x.doGet().body).actions.indexOf("item_visibility")>-1);
+let r=post({action:"item_visibility",scope:"glenorchy",items:[{item_key:"fc|banana|kg",hidden:"yes",supplier:"Fresh Cut",description:"Bananas"}]});
+ok("off: accepted", r.ok&&r.off===1, r);
+ok("off: one row, scope glenorchy", vis().length===1&&vis()[0][1]==="glenorchy"&&vis()[0][4]==="yes", vis());
+r=post({action:"item_visibility",scope:"glenorchy",items:[{item_key:"fc|banana|kg",hidden:"yes"}]});
+ok("off twice: still one row", vis().length===1, vis().length);
+r=post({action:"item_visibility",scope:"glenorchy",items:[{item_key:"x|peas|kg",hidden:"yes"},{item_key:"fc|banana|kg",hidden:"no"}]});
+ok("on removes the row, other stays", r.ok&&vis().length===1&&vis()[0][0]==="x|peas|kg", vis());
+ok("header intact", sheets.ItemVisibility.rows[0].join()==="item_key,scope,supplier,description,hidden,updated_by,updated_at");
+ok("unknown scope rejected", /unknown scope/.test(post({action:"item_visibility",scope:"cambridge",items:[{item_key:"a",hidden:"yes"}]}).error||""));
+ok("bad hidden value reported", post({action:"item_visibility",scope:"glenorchy",items:[{item_key:"a",hidden:"maybe"}]}).failed.length===1);
+ok("CategoryOverrides untouched by item_visibility", camb()===before, camb());
+// Glenorchy recategorising Naan (shared) must keep Cambridge's "off"
+r=post({action:"category_bulk",items:[{item_key:"pfd|bread naan|ea",category:"Dry Goods",supplier:"PFD",description:"Naan Bread"}]});
+const naanRow=sheets.CategoryOverrides.rows.find(z=>z&&z[0]==="pfd|bread naan|ea");
+ok("shared category change keeps Cambridge's hidden=yes", r.ok&&naanRow[3]==="Dry Goods"&&naanRow[4]==="yes", naanRow);
 console.log(`\n${PASS} passed, ${FAIL} failed`); process.exit(FAIL?1:0);

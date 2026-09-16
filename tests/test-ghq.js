@@ -21,6 +21,7 @@ const TABS={
     ["G2", iso(wd(1)), "200.00","200.00","0.00","Fresh Cut",G,"Food","invoice","email",iso(wd(1))+" 09:00:00"],
     ["G3", iso(dm(20)),"150.00","150.00","0.00","Fresh Cut",G,"Food","invoice","email",iso(dm(20))+" 09:00:00"],
     ["G9", iso(wd(0)), "400.00","400.00","0.00","TasWaste",G,"Waste Management","invoice","email",iso(wd(0))+" 09:00:00"],
+    ["G4", iso(dm(10)),"96.00","96.00","0.00","PFD Food Services",G,"Food","invoice","email",iso(dm(10))+" 09:00:00"],
     ["C1", iso(wd(0)), "999.00","900.00","99.00","Doppio Foods",C,"Beverage","invoice","email",iso(wd(0))+" 09:00:00"],
     ["L1", iso(wd(1)), "555.00","555.00","0.00","Fresh Cut",L,"Food","invoice","email",iso(wd(1))+" 09:00:00"]
   ]),
@@ -29,11 +30,12 @@ const TABS={
     ["G2","Bananas","100.00","Fresh Cut",G,"","10","kg","10.00"],
     ["G2","Peas","100.00","Fresh Cut",G,"","5","kg","20.00"],
     ["G3","Bananas","150.00","Fresh Cut",G,"","15","kg","10.00"],
+    ["G4","Naan Bread","96.00","PFD Food Services",G,"","24","ea","4.00"],
     ["C1","Blend Beans 1kg","900.00","Doppio Foods",C,"BB1","9","kg","100.00"],
     ["C1","Cambridge Only Widget","0.00","Doppio Foods",C,"CW1","1","ea","0.00"],
     ["L1","Luma Only Lettuce","555.00","Fresh Cut",L,"","5","kg","111.00"]
   ]),
-  SupplierConfig: csv(["supplier","merge_into","group","active"],[["Doppio Foods","","Beverage","yes"],["Fresh Cut","","Food","yes"],["TasWaste","","Waste Management","yes"]]),
+  SupplierConfig: csv(["supplier","merge_into","group","active"],[["Doppio Foods","","Beverage","yes"],["Fresh Cut","","Food","yes"],["TasWaste","","Waste Management","yes"],["PFD Food Services","","Food","yes"]]),
   ProductMerge: csv(["supplier","match","into"],[]),
   ManualPurchases: csv(["date","shop","venue","amount"],[[iso(wd(1)),"Woolworths",G,"50.00"],[iso(wd(1)),"Woolworths",C,"7000.00"]]),
   Orders: csv(["order_id","action","supplier","venue","order_date","subtotal","gst","total","channel","placed_by","note","logged_at","delivery_date"],[
@@ -45,7 +47,8 @@ const TABS={
   SupplierSettings: csv(["supplier","rep_email","visible","portal_only","cc","note"],[["Fresh Cut","rep@freshcut.example","yes","no","",""]]),
   Favourites: csv(["fav_id","fav_name","venue","supplier","created_by","created_at"],[["f1","Glen weekly",G,"Fresh Cut","Tam",""],["f2","Camb weekly",C,"Fresh Cut","Ange",""]]),
   FavouriteLines: csv(["fav_id","line_no","item_key","description","unit","qty","supplier"],[["f1","1","x","Bananas","kg","4","Fresh Cut"],["f2","1","x","Bananas","kg","40","Fresh Cut"]]),
-  CategoryOverrides: csv(["item_key","supplier","description","category","hidden"],[]),
+  CategoryOverrides: null,     // built per run once the page can compute product keys
+  ItemVisibility: null,
   // pre-feed weekly totals, week ENDING Sunday. One week in July (pre-cutover) for all three venues,
   // plus the overlap weeks up to 16 Aug that must be cut.
   Sales: csv(["Date","Venue","Sales","Wages"],[
@@ -72,25 +75,35 @@ function serve(url){
   const u=new URL(url); const sheet=u.searchParams.get("sheet"); const tq=u.searchParams.get("tq")||"";
   if(sheet==="SalesFeed"){ if(/select B, C, sum\(H\)/.test(tq)) return feedDaily; if(/select A,C,D,E,F,G,H/.test(tq)) return feedItems; return feedItems; }
   if(sheet==="Overrides"||sheet==="ItemMap") return TABS.Invoices;   // the gviz trap: wrong tab, HTTP 200
-  if(TABS[sheet]!==undefined) return TABS[sheet];
+  if(TABS[sheet]!=null) return TABS[sheet];
   return TABS.Invoices;   // gviz trap for anything unknown
 }
 
-(async()=>{
+async function run(withVis){
+  console.log(withVis?"\n-- run: ItemVisibility tab present":"\n-- run: ItemVisibility tab not created yet (gviz trap)");
   const html=fs.readFileSync(FILE,"utf8");
+  const POSTS=[];
   const dom=new JSDOM(html,{runScripts:"dangerously",url:"https://guysmiley54.github.io/red-square-dashboard/glenorchy-hq.html",
     beforeParse(w){ w.__OB_NO_AUTOLOAD=true;
-      w.fetch=async(url,opts)=>{ if(/script\.google\.com/.test(url)) return {ok:true,text:async()=>JSON.stringify({ok:true,order_id:"x"}),json:async()=>({ok:true,order_id:"x"})};
+      w.fetch=async(url,opts)=>{ if(/script\.google\.com/.test(url)){ POSTS.push(JSON.parse(opts.body)); } if(/script\.google\.com/.test(url)) return {ok:true,text:async()=>JSON.stringify({ok:true,order_id:"x"}),json:async()=>({ok:true,order_id:"x"})};
         const t=serve(url); return {ok:true,text:async()=>t,json:async()=>({})}; };
       w.alert=()=>{}; w.confirm=()=>true;
       // a leftover Cambridge Central draft on the SAME origin — must not count here
+      w.localStorage.setItem("ob_identity",JSON.stringify({user:"Test",pin:"1"}));
       w.localStorage.setItem("ob3_drafts",JSON.stringify({"Red Square Cambridge::Fresh Cut":{supplier:"Fresh Cut",tag:"Red Square Cambridge",qty:{"fresh cut||bananas|kg":999},note:""}}));
     }});
   const w=dom.window; await new Promise(r=>setTimeout(r,300));
   const ev=s=>w.eval(s);
+  const key=(sup,desc,unit)=>ev(`prodKey(${JSON.stringify(sup)},"",${JSON.stringify(desc)},${JSON.stringify(unit)})`);
+  const NAAN=key("PFD Food Services","Naan Bread","ea"), BAN=key("Fresh Cut","Bananas","kg"), PEAS=key("Fresh Cut","Peas","kg");
+  // Cambridge Central turned Naan off and gave it a category; the category must apply here, the "off" must not
+  TABS.CategoryOverrides=csv(["item_key","supplier","description","category","hidden","updated_by","updated_at"],
+    [[NAAN,"PFD Food Services","Naan Bread","Bakery","yes","Ange",""],[PEAS,"Fresh Cut","Peas","","yes","Ange",""]]);
+  TABS.ItemVisibility=withVis?csv(["item_key","scope","supplier","description","hidden","updated_by","updated_at"],
+    [[BAN,"glenorchy","Fresh Cut","Bananas","yes","Tam",""],[PEAS,"cambridge","Fresh Cut","Peas","yes","x",""]]):null;
   ok("title is Glenorchy HQ", w.document.title==="Glenorchy HQ");
   ok("header h1", w.document.querySelector("header h1").textContent==="Glenorchy HQ");
-  ok("build id", /^ghq-v1-/.test(ev("BUILD_ID")), ev("BUILD_ID"));
+  ok("build id", /^ghq-v\d+-/.test(ev("BUILD_ID")), ev("BUILD_ID"));
   ok("draft key is not Cambridge's", ev("DRAFT_KEY")==="ghq_drafts");
   await ev("loadAll()"); await new Promise(r=>setTimeout(r,200));
   ok("no load error", !w.document.querySelector(".err"), (w.document.querySelector(".err")||{}).textContent);
@@ -98,7 +111,7 @@ function serve(url){
   ok("INV: only Glenorchy", INV.length>0 && INV.every(r=>r.venue===G), INV.map(r=>r.number+"@"+r.venue));
   ok("INV: non-COGS dropped", !INV.some(r=>r.supplier==="TasWaste"));
   ok("INV: manual purchase kept, Cambridge one dropped", INV.filter(r=>r.supplier==="Woolworths").map(r=>r.total).join()==="50");
-  ok("LINES: only Glenorchy", LINES.length===4 && LINES.every(r=>r.venue===G), LINES.map(r=>r.desc+"@"+r.venue));
+  ok("LINES: only Glenorchy", LINES.length===5 && LINES.every(r=>r.venue===G), LINES.map(r=>r.desc+"@"+r.venue));
   ok("ORDERS: Cambridge order excluded", ORDERS.length===1 && ORDERS[0].id==="og1", ORDERS.map(o=>o.id));
   ok("FAVS loaded both, scoped at render", FAVS.length===2);
   const pre=SALES.filter(r=>r.weekly); const cut=new Date("2026-08-03");
@@ -119,6 +132,26 @@ function serve(url){
   ok("home shows income 2,200 (this week, Glenorchy only)", /2,200/.test(home), home.match(/Income this week[\s\S]{0,80}/)&&home.match(/Income this week[\s\S]{0,80}/)[0]);
   // spend this week: G1 330 + G2 200 + manual 50 = 580 invoiced; TasWaste and Cambridge excluded
   ok("home spend 580", /\$580\b/.test(home), (home.match(/\$5\d\d/g)||[]).slice(0,3));
+  // ---- turned-off items are per dashboard ----
+  const naan=ev(`deriveCatalogue(LINES,"PFD Food Services",new Date()).find(p=>p.desc==="Naan Bread")`);
+  ok("Naan: Cambridge's 'off' ignored", naan && naan.hidden===false, naan&&naan.hidden);
+  ok("Naan: shared category still applies", naan && naan.cat==="Bakery", naan&&naan.cat);
+  const fc=ev(`deriveCatalogue(LINES,"Fresh Cut",new Date())`);
+  const byDesc=d=>fc.find(p=>p.desc===d)||{};
+  ok("Peas: Cambridge 'off' and a foreign scope both ignored", byDesc("Peas").hidden===false);
+  ok(withVis?"Bananas: Glenorchy 'off' honoured":"Bananas: no tab yet, nothing off", byDesc("Bananas").hidden===withVis);
+  ev(`SUPPLIER="PFD Food Services"; PICKED={}; PICKED[${JSON.stringify(NAAN)}]=true;`);
+  await ev(`bulkHide(true)`);
+  const vp=POSTS[POSTS.length-1]||{};
+  ok("turn off posts item_visibility, scope glenorchy", vp.action==="item_visibility"&&vp.scope==="glenorchy", vp.action+"/"+vp.scope);
+  ok("turn off payload carries no category", vp.items&&vp.items.length===1&&vp.items[0].hidden==="yes"&&!("category" in vp.items[0]), vp.items);
+  ok("no category_bulk was sent", !POSTS.some(x=>x.action==="category_bulk"));
+  ok("Naan now off locally", ev(`HIDDEN[${JSON.stringify(NAAN)}]===true`));
+  ev(`SHOW_HIDDEN=true; PICKED={}; PICKED[${JSON.stringify(NAAN)}]=true;`);
+  await ev(`bulkHide(false)`);
+  ok("turn back on posts hidden=no", (POSTS[POSTS.length-1].items||[])[0].hidden==="no");
+  ok("Naan back on locally", ev(`!HIDDEN[${JSON.stringify(NAAN)}]`));
+  ev(`SHOW_HIDDEN=false; SUPPLIER="";`);
   // catalogue for Fresh Cut: Glenorchy lines only
   const cat=ev(`deriveCatalogue(LINES,"Fresh Cut",new Date(),{venue:"${G}"}).map(p=>p.desc)`);
   ok("catalogue: Glenorchy products only", cat.indexOf("Bananas")>-1 && cat.indexOf("Luma Only Lettuce")===-1, cat);
@@ -157,5 +190,8 @@ function serve(url){
   ev(`go('reports')`); await new Promise(r=>setTimeout(r,50));
   const rep=w.document.getElementById("app").textContent;
   ok("reports: no Cambridge/Luma/both", !/Cambridge|Luma|both kitchens|both stores/.test(rep));
+  dom.window.close();
+}
+(async()=>{ await run(true); await run(false);
   console.log(`\n${PASS} passed, ${FAIL} failed`); process.exit(FAIL?1:0);
 })().catch(e=>{console.error("HARNESS CRASH",e);process.exit(2);});
