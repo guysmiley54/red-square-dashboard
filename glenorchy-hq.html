@@ -125,6 +125,12 @@
    CategoryOverrides have no venue column and are SHARED with Cambridge Central — hiding a
    supplier or fixing a category here does it there too, by design.
 
+   TURNED-OFF ITEMS ARE NOT SHARED. Cambridge Central keeps its "off" flags in the hidden
+   column of CategoryOverrides; this dashboard ignores that column and keeps its own in the
+   ItemVisibility tab, scope "glenorchy". A product Cambridge never orders (Naan, PFD) stays
+   orderable here, and turning something off here leaves Cambridge alone. Categories in
+   CategoryOverrides are still shared.
+
    Drafts are kept under their own localStorage key (ghq_drafts). Both dashboards live on
    the same GitHub Pages origin, so a shared key would have let a Cambridge draft count
    against Glenorchy's countdown.
@@ -138,7 +144,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v1-0539"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v2-0655"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -159,6 +165,7 @@ const TAGS = [
 const TARGET_COGS_PCT = 30;
 const COMPANY_BLOCK = ["B & G Fitness Pty Ltd","Red Square Cafe Glenorchy","accounts@redsquarecafe.com.au"];
 const ACCOUNTS_EMAIL = "accounts@redsquarecafe.com.au";
+const VIS_SCOPE = "glenorchy";   // this dashboard's rows in ItemVisibility
 const CAT_DAYS=180, RATE_DAYS=90, DOW_WEEKS=6, MATCH_DAYS=14;
 
 /* Fill Usual. Conservative by instruction: average quantity per order, rounded DOWN, with
@@ -470,6 +477,10 @@ const TAB_COLUMNS={
   "Favourites":["fav_id","fav_name","venue"],
   "FavouriteLines":["fav_id","item_key","qty"],
   "CategoryOverrides":["item_key","category"],
+  /* Created by Orders.gs on the first "turn off" from this dashboard. Until then gviz hands
+     back the first sheet instead, the signature check rejects it, and the load treats that as
+     "nothing turned off". */
+  "ItemVisibility":["item_key","scope","hidden"],
   "Sales":["date","venue","sales"]
 };
 async function fetchTab(name){
@@ -539,7 +550,7 @@ async function loadAll(){
   LOAD_WARN=[];
   try{
     const warn=l=>e=>{LOAD_WARN.push(l+": "+e.message);return [];};
-    const [inv,lines,cfgRows,pmRows,manRows,ordRows,ordLineRows,setRows,favRows,favLineRows,covRows,feed,weekly]=await Promise.all([
+    const [inv,lines,cfgRows,pmRows,manRows,ordRows,ordLineRows,setRows,favRows,favLineRows,covRows,feed,weekly,visRows]=await Promise.all([
       fetchTab("Invoices"),
       fetchTab("InvoiceLines"),
       fetchTab("SupplierConfig").catch(warn("SupplierConfig")),
@@ -552,7 +563,8 @@ async function loadAll(){
       fetchTab("FavouriteLines").catch(()=>[]),
       fetchTab("CategoryOverrides").catch(()=>[]),
       fetchSalesDaily().catch(warn("sales feed")),
-      fetchWeeklySales(gvizDate(SALES_CUTOVER)).catch(warn("weekly Sales tab"))
+      fetchWeeklySales(gvizDate(SALES_CUTOVER)).catch(warn("weekly Sales tab")),
+      fetchTab("ItemVisibility").catch(()=>[])
     ]);
 
     CFG={};
@@ -595,6 +607,11 @@ async function loadAll(){
       const k=String(r.item_key||"").trim(); if(!k) return;
       const c=String(r.category||"").trim();
       if(c) COVER[k]=c;
+      /* The hidden column here is Cambridge Central's. Deliberately not read. */
+    });
+    visRows.forEach(r=>{
+      const k=String(r.item_key||"").trim();
+      if(!k||String(r.scope||"").trim().toLowerCase()!==VIS_SCOPE) return;
       if(String(r.hidden||"").trim().toLowerCase()==="yes") HIDDEN[k]=true;
     });
 
@@ -1337,7 +1354,8 @@ function renderBuilder(){
         </tbody></table>
         ${rows.length?"":`<div class="note">Nothing bought from this supplier in the last ${CAT_DAYS} days.</div>`}
         <div class="note">Tick items to change their category in bulk, or to turn them off — delivery charges,
-          admin fees and one-off lines you will never order. Turned-off items stay in every spend total and
+          admin fees and one-off lines you will never order. Turning an item off here only affects Glenorchy HQ;
+          categories are shared with Cambridge Central. Turned-off items stay in every spend total and
           report; they only leave the ordering screens. Click a product name for its unit price history.
           <b>Fill usual</b> is deliberately mean: the
           average quantity per order, rounded down, anything under ${FILL_FLOOR_CUTOFF} left at zero, and the whole
@@ -1458,12 +1476,13 @@ async function bulkHide(off){
   const keys=Object.keys(PICKED).filter(k=>PICKED[k]);
   if(!keys.length) return;
   const cat2=deriveCatalogue(LINES,SUPPLIER,new Date(),{venue:null});
+  /* Own action, own tab, own scope: nothing here touches CategoryOverrides, so Cambridge
+     Central's turned-off list is never changed from this dashboard. */
   const items=keys.map(k=>{const p=cat2.find(x=>x.key===k);
-    return {item_key:k,hidden:off?"yes":"no",supplier:p?p.supplier:SUPPLIER,description:p?p.desc:"",
-            category:COVER[k]||""};});
+    return {item_key:k,hidden:off?"yes":"no",supplier:p?p.supplier:SUPPLIER,description:p?p.desc:""};});
   keys.forEach(k=>{ if(off) HIDDEN[k]=true; else delete HIDDEN[k]; });
   PICKED={};
-  try{ await post({action:"category_bulk",items}); toast(`${keys.length} product(s) turned ${off?"off":"back on"} for everyone.`); }
+  try{ await post({action:"item_visibility",scope:VIS_SCOPE,items}); toast(`${keys.length} product(s) turned ${off?"off":"back on"} at Glenorchy.`); }
   catch(e){ if(e.message==="no-webapp") toast("Changed here only — WEBAPP_URL isn't set."); else alert(e.message); }
   route();
 }

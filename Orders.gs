@@ -41,7 +41,7 @@ var OB_VENUE = {
    was no way to tell from outside which code was actually live. doGet reports this, so the
    dashboard (and anyone with the URL) can see at a glance whether the deployment matches
    the repo. */
-var OB_BUILD = "gs-v10-0539";
+var OB_BUILD = "gs-v11-0655";
 
 var OB = {
   SHEET_ID:     "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4",   // BG Ops Data
@@ -49,6 +49,7 @@ var OB = {
   FAVS_TAB:     "Favourites",
   FAVLINES_TAB: "FavouriteLines",
   COVER_TAB:    "CategoryOverrides",
+  VIS_TAB:      "ItemVisibility",
   ORDERS_TAB:   "Orders",
   LINES_TAB:    "OrderLines",
   TARGETS_TAB:  "OrderTargets",
@@ -67,6 +68,13 @@ var SUPSET_HEADER = ["supplier","rep_email","visible","portal_only","cc","note",
 var FAVS_HEADER   = ["fav_id","fav_name","venue","supplier","created_by","created_at"];
 var FAVLINE_HEADER= ["fav_id","line_no","item_key","description","unit","qty","supplier"];
 var COVER_HEADER  = ["item_key","supplier","description","category","hidden","updated_by","updated_at"];
+var VIS_HEADER    = ["item_key","scope","supplier","description","hidden","updated_by","updated_at"];
+
+/* Turned-off items, per dashboard. Cambridge Central still uses the hidden column of
+   CategoryOverrides (category_override / category_bulk); every other dashboard gets a scope
+   here, so a product one site never orders cannot vanish from another site's catalogue.
+   Categories stay shared in CategoryOverrides. */
+var OB_VIS_SCOPES = ["glenorchy"];
 
 /* The categories the dashboard knows how to render. A free-text category would save fine
    and then show up as a chip nobody can filter on, so the list is closed. */
@@ -93,7 +101,8 @@ function doGet() {
      never returns sheet contents, because anyone can call it. */
   return out({ ok:true, service:"Orders.gs", build:OB_BUILD,
                actions:["place","send","receive","cancel","target","supplier_setting",
-                        "favourite","favourite_delete","category_override","category_bulk"],
+                        "favourite","favourite_delete","category_override","category_bulk",
+                        "item_visibility"],
                pin_configured: !!scriptPin_(), time:new Date().toISOString() });
 }
 
@@ -128,6 +137,7 @@ function doPost(e) {
       case "favourite_delete":  return out(favouriteDelete_(body, user));
       case "category_override": return out(categoryOverride_(body, user));
       case "category_bulk":     return out(categoryBulk_(body, user));
+      case "item_visibility":   return out(itemVisibility_(body, user));
       default:        return out({ ok:false, error:"unknown action" });
     }
   } catch (err) {
@@ -338,6 +348,53 @@ function categoryBulk_(body, user) {
   if (stale > 0) sh.getRange(2 + keep.length, 1, stale, COVER_HEADER.length).clearContent();
 
   return { ok:true, written:written, cleared:cleared, failed:failed };
+}
+
+/* Same read-once, write-once shape as categoryBulk_. A row exists only while the item is
+   off: turning it back on removes the row, so the tab is exactly the list of what is off. */
+function itemVisibility_(body, user) {
+  var scope = trim_(body.scope).toLowerCase();
+  if (OB_VIS_SCOPES.indexOf(scope) === -1) return { ok:false, error:"unknown scope: " + scope };
+  var items = body.items || [];
+  if (!items.length) return { ok:false, error:"no items" };
+  if (items.length > 500) return { ok:false, error:"too many items (" + items.length + ")" };
+
+  var sh = tab_(OB.VIS_TAB, VIS_HEADER);
+  var last = sh.getLastRow();
+  var rows = last > 1 ? sh.getRange(2, 1, last - 1, VIS_HEADER.length).getValues() : [];
+  var index = {};
+  for (var i = 0; i < rows.length; i++) {
+    index[String(rows[i][0]).trim() + "\u0001" + String(rows[i][1]).trim().toLowerCase()] = i;
+  }
+
+  var now = new Date(), off = 0, on = 0, failed = [], drop = {};
+  for (var k = 0; k < items.length; k++) {
+    var o = items[k];
+    var key = trim_(o.item_key).slice(0, 200);
+    var hid = trim_(o.hidden).toLowerCase();
+    if (!key) { failed.push("no item_key"); continue; }
+    if (hid !== "yes" && hid !== "no") { failed.push("hidden must be yes or no"); continue; }
+    var id = key + "\u0001" + scope;
+    var at = index.hasOwnProperty(id) ? index[id] : -1;
+    if (hid === "no") {
+      if (at >= 0) drop[at] = true;
+      on++;
+      continue;
+    }
+    var row = [key, scope, trim_(o.supplier).slice(0, 120), trim_(o.description).slice(0, 200),
+               "yes", user, now];
+    if (at >= 0) { rows[at] = row; delete drop[at]; }
+    else { index[id] = rows.length; rows.push(row); }
+    off++;
+  }
+
+  var keep = [];
+  for (var r = 0; r < rows.length; r++) if (!drop[r]) keep.push(rows[r]);
+  if (keep.length) sh.getRange(2, 1, keep.length, VIS_HEADER.length).setValues(keep);
+  var stale = (last - 1) - keep.length;
+  if (stale > 0) sh.getRange(2 + keep.length, 1, stale, VIS_HEADER.length).clearContent();
+
+  return { ok:true, scope:scope, off:off, on:on, failed:failed };
 }
 
 function writeCover_(sh, o, user) {
@@ -620,6 +677,7 @@ function setup() {
   tab_(OB.FAVS_TAB, FAVS_HEADER);
   tab_(OB.FAVLINES_TAB, FAVLINE_HEADER);
   tab_(OB.COVER_TAB, COVER_HEADER);
+  tab_(OB.VIS_TAB, VIS_HEADER);
   var pin = scriptPin_();
   Logger.log(pin ? "ORDER_PIN is set. Tabs ready." :
     "Tabs ready. NOW SET ORDER_PIN: Project Settings > Script Properties > Add, key ORDER_PIN.");
