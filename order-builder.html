@@ -129,7 +129,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v21-1350"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v22-1500"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -896,6 +896,19 @@ function deriveCatalogue(lines,supplier,now,opts){
     p.prevPrice=null;
     for(let i=p.buys.length-2;i>=0;i--){ if(p.buys[i].price!==p.price){p.prevPrice=p.buys[i].price;break;} }
     p.change=p.prevPrice?(p.price-p.prevPrice)/p.prevPrice*100:null;
+    /* WHEN the price last moved, not just by how much. A 4% rise last week and one from
+       March were rendering identically, and only one of them is worth acting on. Walk back
+       to the first delivery at the current price: that is the day it changed. */
+    let si=p.buys.length-1;
+    while(si>0&&p.buys[si-1].price===p.price) si--;
+    p.priceSince=p.buys[si].date;
+    p.priceAgeDays=Math.round((t-+p.priceSince)/864e5);
+    p.priceFresh=p.change!=null&&p.priceAgeDays<=30;
+    const ps=p.buys.filter(b=>+b.date>=t-90*864e5).map(b=>b.price);
+    p.lo90=ps.length?Math.min(...ps):p.price;
+    p.hi90=ps.length?Math.max(...ps):p.price;
+    p.moves90=(()=>{let n=0;const r=p.buys.filter(b=>+b.date>=t-90*864e5);
+      for(let i=1;i<r.length;i++) if(r[i].price!==r[i-1].price) n++; return n;})();
     /* Conservative fill: average per order, floored, with a cutoff below which the item is
        simply not suggested. */
     p.fillQty = p.avgPerOrder<FILL_FLOOR_CUTOFF ? 0 : Math.max(FILL_MIN,Math.floor(p.avgPerOrder));
@@ -1304,7 +1317,7 @@ function renderBuilder(){
             ${p.hidden?' <span class="pill warn">off</span>':""}</td>
           <td class="hide-sm"><span class="pill edit" onclick="editCategory('${esc(p.key)}')" title="Reassign for everyone">${esc(p.cat)} ✎</span>
             ${COVER[p.key]?'<br><span style="font-size:10px;color:var(--dim)">set by hand</span>':""}</td>
-          <td class="num">${money(p.price)}${p.change!=null?`<br><span class="${p.change>0?"up":"down"}" style="font-size:11px">${(p.change>0?"+":"")+Math.round(p.change*10)/10}%</span>`:""}</td>
+          <td class="num">${money(p.price)}${priceFlag(p)}</td>
           <td class="num hide-sm">${fmtD(p.lastDate)}<br><span style="color:var(--dim);font-size:11px">${p.daysSince}d</span></td>
           <td class="num hide-sm click" onclick="setQty(SUPPLIER,'${esc(p.key)}',${p.lastQty});route()"
               title="Order this quantity again" style="cursor:pointer">
@@ -1375,6 +1388,23 @@ function renderBuilder(){
       SEARCH_FOCUS=false;
     }
   }
+}
+/* The flag reads: which way, by how much, and how long ago. A move inside 30 days is filled
+   in so it stands out from an old one that happens to be the last change on record; a price
+   that has moved two or more times in 90 days is called out separately, because a supplier
+   who keeps shifting a price is a different conversation from one that rose once. */
+function priceFlag(p){
+  if(p.change==null) return `<br><span style="font-size:10px;color:var(--dim)">no change on record</span>`;
+  const up=p.change>0, pct=Math.abs(Math.round(p.change*10)/10);
+  const ago=p.priceAgeDays<=1?"today":p.priceAgeDays<14?p.priceAgeDays+"d ago"
+           :p.priceAgeDays<70?Math.round(p.priceAgeDays/7)+"w ago":Math.round(p.priceAgeDays/30)+"mo ago";
+  const style=p.priceFresh
+    ? `background:${up?"var(--red)":"var(--green)"};color:#fff;padding:1px 5px;border-radius:99px`
+    : `color:var(--${up?"red":"green"})`;
+  return `<br><span style="font-size:11px;font-weight:600;${style}"
+      title="was ${money(p.prevPrice)} until ${fmtD(p.priceSince)} · 90-day range ${money(p.lo90)}–${money(p.hi90)}">${up?"▲":"▼"} ${pct}%</span>
+    <span style="font-size:10px;color:var(--dim)"> ${ago}</span>
+    ${p.moves90>=2?`<br><span class="pill" title="${p.moves90} price changes in the last 90 days">${p.moves90} moves/90d</span>`:""}`;
 }
 function setCat(c){ CATFILT=c; route(); }
 /* Jump from a line in the order to that product in the catalogue. Any active category chip
@@ -1843,6 +1873,10 @@ let SALES_PROD_VENUE=null, SALES_FROM=null, SALES_TO=null, SALES_GROUP=[];
 const salesProdVenue=()=>SALES_PROD_VENUE===null?TAG.name:SALES_PROD_VENUE;
 function setProdVenue(v){ SALES_PROD_VENUE=v; route(); }
 const sdSales=rows=>rows.filter(r=>r.group!==LANE_KITCHEN);
+function wHead(col,label,cls){
+  const on=WASTE_SORT.col===col;
+  return `<th class="s ${cls||""} ${on?"act":""}" onclick="setWasteSort('${col}')">${label}${on?(WASTE_SORT.dir>0?" ▲":" ▼"):""}</th>`;
+}
 const SALES_MAX_DAYS=100;   // a custom range wider than this is a download, not a report
 function salesWindow(){
   if(!SALES_DAY) SALES_DAY=fmtISO(mid(new Date()));
@@ -2138,6 +2172,12 @@ function setSalesSort(c){
    is not — Coffee & Tea is dominated by the loyalty give-away, which costs margin but went
    to a paying regular. And a $0 line only counts if the SAME item also sells for money in
    this window: something never charged for is a modifier, not a give-away. */
+let WASTE_SORT={col:"value",dir:-1};
+function setWasteSort(c){
+  if(WASTE_SORT.col===c) WASTE_SORT.dir*=-1;
+  else WASTE_SORT={col:c,dir:(c==="name"||c==="group")?1:-1};
+  route();
+}
 function sdWasteCard(rows){
   /* Same store scope as the products list — wastage is a per-kitchen question, and a Luma
      chef looking at Cambridge's bin is not useful. */
@@ -2154,7 +2194,10 @@ function sdWasteCard(rows){
   let list=Object.values(m).filter(o=>o.free>0&&o.sold>0&&paid[o.name.toLowerCase()]);
   list.forEach(o=>{ o.price=o.rev/o.sold; o.value=o.free*o.price;
                     o.pct=o.free/(o.sold+o.free)*100; });
-  list.sort((a,b)=>b.value-a.value);
+  const wd=WASTE_SORT.dir;
+  const wby={ name:(a,b)=>a.name.localeCompare(b.name), group:(a,b)=>a.group.localeCompare(b.group)||a.name.localeCompare(b.name),
+              free:(a,b)=>a.free-b.free, sold:(a,b)=>a.sold-b.sold, pct:(a,b)=>a.pct-b.pct, value:(a,b)=>a.value-b.value };
+  list.sort((a,b)=>wd*(wby[WASTE_SORT.col]||wby.value)(a,b));
   if(!list.length) return `<div class="card"><div class="label">Wastage
       <span style="float:right;display:flex;gap:5px">
         ${TAGS.map(t=>`<span class="chip sm ${wv===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
@@ -2171,8 +2214,8 @@ function sdWasteCard(rows){
     <div style="font-size:13px;margin-bottom:10px"><b>${Math.round(units)}</b> items binned at
       ${wv==="both"?"both kitchens":esc(wv)}, worth <b>${money(value)}</b> at what they were selling for —
       ${pct1(pctAll)} of everything made in these groups.</div>
-    <table><thead><tr><th>Product</th><th class="hide-sm">Group</th><th class="num">Binned</th>
-      <th class="num hide-sm">Sold</th><th class="num">% wasted</th><th class="num">Value</th></tr></thead>
+    <table><thead><tr>${wHead("name","Product")}${wHead("group","Group","hide-sm")}${wHead("free","Binned","num")}
+      ${wHead("sold","Sold","num hide-sm")}${wHead("pct","% wasted","num")}${wHead("value","Value","num")}</tr></thead>
     <tbody>${list.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
       <td class="hide-sm"><span class="pill">${esc(o.group)}</span></td>
       <td class="num">${Math.round(o.free*100)/100}</td>
