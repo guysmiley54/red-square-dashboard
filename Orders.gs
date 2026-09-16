@@ -22,16 +22,26 @@
  * The PIN lives in Script Properties as ORDER_PIN. Never in this file — the repo is public.
  */
 
-/* Cambridge and Luma only. Glenorchy is rejected at the write boundary as well as filtered
-   on read, so a stale tab or a hand-edited request can't put it back into the data. */
-var OB_STORES = ["Red Square Cambridge", "Luma Kitchen"];
+/* Every venue a dashboard may write for. Cambridge Central uses the first two; Glenorchy HQ
+   (glenorchy-hq.html) uses the third. One endpoint, one set of tabs — the venue column keeps
+   the ledgers apart. Anything else is rejected at the write boundary as well as filtered on
+   read, so a stale tab or a hand-edited request can't put an unknown venue into the data. */
+var OB_STORES = ["Red Square Cambridge", "Luma Kitchen", "Red Square Glenorchy"];
+
+/* What the supplier sees at the bottom of an emailed order, and where to deliver. Keyed by
+   venue so a Glenorchy order doesn't sign off as Cambridge. */
+var OB_VENUE = {
+  "Red Square Cambridge": { addr:"66 Kennedy Drive, Cambridge TAS 7170",  signoff:"Red Square Cafe | Luma Kitchen" },
+  "Luma Kitchen":         { addr:"66 Kennedy Drive, Cambridge TAS 7170",  signoff:"Red Square Cafe | Luma Kitchen" },
+  "Red Square Glenorchy": { addr:"3/2 Howard Road, Glenorchy TAS 7010",   signoff:"Red Square Cafe Glenorchy" }
+};
 
 /* Bumped with every change to this file. An Apps Script deployment serves a SNAPSHOT, so
    saving the editor changes nothing until someone picks "New version" — and until now there
    was no way to tell from outside which code was actually live. doGet reports this, so the
    dashboard (and anyone with the URL) can see at a glance whether the deployment matches
    the repo. */
-var OB_BUILD = "gs-v9-2130";
+var OB_BUILD = "gs-v10-0539";
 
 var OB = {
   SHEET_ID:     "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4",   // BG Ops Data
@@ -45,7 +55,7 @@ var OB = {
   INVOICES_TAB: "Invoices",
   MAX_LINES:      300,     // one order; anything larger is a bug or a paste accident
   DAILY_SEND_CAP: 60,      // emails sent by this script per day, across all users
-  SIGNOFF: ["B & G Fitness Pty Ltd", "Red Square Cafe | Luma Kitchen", "accounts@redsquarecafe.com.au"],
+  SIGNOFF: ["B & G Fitness Pty Ltd", "accounts@redsquarecafe.com.au"],   // venue line inserted from OB_VENUE
   BCC: "accounts@redsquarecafe.com.au"
 };
 
@@ -176,10 +186,12 @@ function send_(body, user) {
            (l.item_code ? " [" + l.item_code + "]" : "");
   }).join("\n");
 
+  var vinfo = OB_VENUE[o.venue] || { addr:"", signoff:"Red Square Cafe" };
   var bodyText = "Hi " + supplier + ",\n\n" +
     "Could we please order the following for " + o.venue + ":\n\n" + lines +
+    (vinfo.addr ? "\n\nDeliver to: " + vinfo.addr : "") +
     "\n\nPlease confirm availability and delivery day.\n\nThanks,\n" + user + "\n" +
-    OB.SIGNOFF.join("\n");
+    [OB.SIGNOFF[0], vinfo.signoff, OB.SIGNOFF[1]].join("\n");
 
   MailApp.sendEmail({
     to: to,
