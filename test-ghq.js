@@ -141,9 +141,18 @@ async function run(withVis){
   ok("home: range bar in the filter strip, Week on", /Week.*Month.*Quarter.*All time/.test(w.document.getElementById("filters").textContent) && ev("RANGE.kind")==="week" && ev("RANGE.off")===0);
   ok("home: countdown header kept, ordering list moved out", /Left to spend/.test(home) && !/Start an order/.test(home));
   {
+    const sc=cardByLabel("Find a product");
+    ok("home search: no category chips", sc && !sc.querySelector(".chip") && !/pick a category/.test(sc.textContent), sc&&sc.textContent.slice(0,120));
+    // a category picked on the Order tab must not silently narrow the chip-less box
+    ev("GCAT_FILT='Bakery'; GSEARCH='ba'; route()"); await new Promise(r=>setTimeout(r,30));
+    const hits=rowsOf(cardByLabel("Find a product")).map(r=>r[0]);
+    ok("home search ignores the Order tab's category filter", hits.some(h=>/Bananas/.test(h)), hits);
+    ev("GCAT_FILT=''; GSEARCH=''; route()"); await new Promise(r=>setTimeout(r,30));
+  }
+  {
     const tiles=[...app().querySelectorAll(".summary .tile")].map(t=>t.textContent.replace(/\s+/g," ").trim());
     // this ordering week: spent G1 330 + G2 200 + manual 50 = 580; income 1000+1200
-    ok("home header: spent $580, income $2,200, projected COGS", tiles.length===4 && /Spent so far \$580\b/.test(tiles[0]) && /Left to spend/.test(tiles[1]) && /Income this week \$2,200/.test(tiles[2]) && /COGS %/.test(tiles[3]), tiles);
+    ok("home header: spent $580, income $2,200, projected COGS", tiles.length===4 && /Spent so far — this week \$580\b/.test(tiles[0]) && /Left to spend/.test(tiles[1]) && /Income — this week \$2,200/.test(tiles[2]) && /COGS %/.test(tiles[3]), tiles);
     const card=cardByLabel("Suppliers by spend");
     ok("home: suppliers card labelled with the week", card && /\(this week\)/.test(card.querySelector(".label").textContent), card&&card.querySelector(".label").textContent);
     const rows=rowsOf(card);
@@ -177,15 +186,30 @@ async function run(withVis){
     ok("last week: label says so, Doppio absent (nothing bought)", /\(last week\)/.test(cardByLabel("Suppliers by spend").querySelector(".label").textContent) && !rowsOf(cardByLabel("Suppliers by spend")).some(r=>r[0].startsWith("Doppio")));
     ev("setRangeKind('all')"); await new Promise(r=>setTimeout(r,30));
     ok("all time: label, every Glenorchy supplier, ‹ › hidden", /all captured data/.test(cardByLabel("Suppliers by spend").querySelector(".label").textContent) && rowsOf(cardByLabel("Suppliers by spend")).length===4 && !/‹/.test(w.document.getElementById("filters").textContent), rowsOf(cardByLabel("Suppliers by spend")).map(r=>r[0]));
+    // ---- the header follows the range (Adrian, 17 Sep): a 5-week custom range in progress
+    const tile=i=>[...app().querySelectorAll(".summary .tile")][i].textContent.replace(/\s+/g," ").trim();
+    ev(`RANGE={kind:"custom",off:0,from:"${iso(wd(-28))}",to:"${iso(wd(6))}"}; renderFilters(); route()`); await new Promise(r=>setTimeout(r,30));
+    // spend: this week 580 + G3 150 + G4 96 + G6 220 = 1,046 (G5 at −29d is outside); income: 28 past days × 1000 + 2,200
+    ok("range header: spent so far $1,046 over the 5 weeks", /^Spent so far — .*\$1,046 /.test(tile(0)), tile(0));
+    ok("range header: income $30,200 with a forecast (period live)", /^Income — .*\$30,200 Forecast \$/.test(tile(2)), tile(2));
+    ok("range header: COGS projected", /^COGS % — projected vs 30%/.test(tile(3)), tile(3));
+    // a finished week: budget minus actual is the tally to carry forward
+    ev(`RANGE={kind:"custom",off:0,from:"${iso(wd(-14))}",to:"${iso(wd(-8))}"}; renderFilters(); route()`); await new Promise(r=>setTimeout(r,30));
+    ok("past period: Spent (not so far) $96, no drafts counted", /^Spent — .*\$96 1 invoice/.test(tile(0)), tile(0));
+    ok("past period: left to spend = 30% of $7,000 − $96 = $2,004", /\$2,004/.test(tile(1)) && /30% of income/.test(tile(1)), tile(1));
+    ok("past period: income $7,000, period complete, no forecast", /\$7,000 Period complete/.test(tile(2)), tile(2));
+    ok("past period: COGS % not 'projected', 1.4%", /^COGS % vs 30% 1\.4%/.test(tile(3)), tile(3));
     ev("resetRange()"); await new Promise(r=>setTimeout(r,30));
+    ok("back to this week: header says this week", /^Spent so far — this week/.test(tile(0)), tile(0));
   }
   // ---- Order tab: the old front page
   ev("go('order')"); await new Promise(r=>setTimeout(r,30));
   const order=app().textContent;
   ok("order tab: ordering list with countdown", /Start an order — Red Square Glenorchy/.test(order) && /Left to spend/.test(order));
   ok("order tab: week stepper in the filter strip, no range chips", /Tag: Glenorchy/.test(w.document.getElementById("filters").textContent) && !/Quarter/.test(w.document.getElementById("filters").textContent));
-  ok("order tab shows income 2,200 (this week, Glenorchy only)", /2,200/.test(order), order.match(/Income this week[\s\S]{0,80}/)&&order.match(/Income this week[\s\S]{0,80}/)[0]);
+  ok("order tab shows income 2,200 (this week, Glenorchy only)", /Income — this week[\s\S]{0,30}\$2,200/.test(order), order.match(/Income — this week[\s\S]{0,80}/)&&order.match(/Income — this week[\s\S]{0,80}/)[0]);
   ok("order tab spend 580", /\$580\b/.test(order), (order.match(/\$5\d\d/g)||[]).slice(0,3));
+  ok("order tab search keeps the category chips", !![...app().querySelectorAll(".card")].find(c=>/Find a product/.test((c.querySelector(".label")||{}).textContent)&&c.querySelector(".chip")));
   // usual/wk = 4 full weeks before this one ÷ 4: Fresh Cut 150 (G5 at −29d is outside), Doppio 220, PFD 96
   const sl=ev("supplierList()"), usualOf=n=>(sl.find(x=>x.name===n)||{}).usualWk;
   ok("usual/wk: Fresh Cut 37.50", Math.abs(usualOf("Fresh Cut")-37.5)<1e-9, usualOf("Fresh Cut"));
