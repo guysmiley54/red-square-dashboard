@@ -4,7 +4,7 @@ const ok=(n,c,x)=>{ if(c){PASS++;console.log("  ok   "+n);} else {FAIL++;console
 // in-memory sheet
 const sheets={};
 function sheet(name){ return sheets[name]=sheets[name]||{rows:[],getLastRow(){return this.rows.length;},getLastColumn(){return this.rows.length?this.rows[0].length:0;},
-  appendRow(r){this.rows.push(r);}, setFrozenRows(){}, getRange(r,c,nr,nc){const self=this;return {setValues(v){for(let i=0;i<v.length;i++) self.rows[r-1+i]=v[i];return this;},setFontWeight(){return this;},clearContent(){return this;},getValues(){return self.rows.slice(r-1,r-1+(nr||1)).map(x=>x.slice(c-1,c-1+(nc||x.length)));},
+  appendRow(r){this.rows.push(r);}, setFrozenRows(){}, getRange(r,c,nr,nc){const self=this;return {setValues(v){for(let i=0;i<v.length;i++) self.rows[r-1+i]=v[i];return this;},setFontWeight(){return this;},clearContent(){for(let i=0;i<(nr||1);i++) if(self.rows[r-1+i]) self.rows[r-1+i]=self.rows[r-1+i].map(()=>"");return this;},getValues(){return self.rows.slice(r-1,r-1+(nr||1)).map(x=>x.slice(c-1,c-1+(nc||x.length)));},
   getDisplayValues(){return this.getValues().map(x=>x.map(String));}};}, getName(){return name;}, deleteRow(){},
   getDataRange(){const self=this;return {getValues(){return self.rows.map(r=>r.slice());}};}}; }
 const book={getSheetByName:n=>sheets[n]||null, insertSheet:n=>sheet(n)};
@@ -23,7 +23,7 @@ eval(src+"\n;global.__x={validateOrder_,favourite_,send_,place_,OB_STORES,OB_VEN
 const x=global.__x;
 const order=(venue)=>({order_id:"o"+venue.replace(/\W/g,""),supplier:"Fresh Cut",venue,order_date:"2026-09-16",subtotal:80,gst:0,total:80,channel:"email",lines:[{item_code:"",description:"Bananas",unit:"kg",qty:8,unit_price:10,line_total:80}]});
 
-ok("build bumped", /^gs-v1[0-9]-/.test(x.OB_BUILD), x.OB_BUILD);
+ok("build bumped", /^gs-v1[2-9]-/.test(x.OB_BUILD), x.OB_BUILD);
 ok("OB_STORES has three venues", x.OB_STORES.length===3 && x.OB_STORES.indexOf("Red Square Glenorchy")>-1);
 ok("every store has an OB_VENUE entry", x.OB_STORES.every(v=>x.OB_VENUE[v]&&x.OB_VENUE[v].addr&&x.OB_VENUE[v].signoff));
 ok("validate: Glenorchy accepted", !x.validateOrder_(order("Red Square Glenorchy")).error, x.validateOrder_(order("Red Square Glenorchy")).error);
@@ -62,6 +62,20 @@ r=post({action:"item_visibility",scope:"glenorchy",items:[{item_key:"x|peas|kg",
 ok("on removes the row, other stays", r.ok&&vis().length===1&&vis()[0][0]==="x|peas|kg", vis());
 ok("header intact", sheets.ItemVisibility.rows[0].join()==="item_key,scope,supplier,description,hidden,updated_by,updated_at");
 ok("unknown scope rejected", /unknown scope/.test(post({action:"item_visibility",scope:"cambridge",items:[{item_key:"a",hidden:"yes"}]}).error||""));
+// ---- supplier visibility, per scope
+ok("doGet lists supplier_visibility", JSON.parse(x.doGet().body).actions.indexOf("supplier_visibility")>-1);
+r=post({action:"supplier_visibility",scope:"glenorchy",supplier:"Doppio Foods",visible:"no"});
+ok("supplier off: ok", r.ok===true && r.visible==="no", r);
+const sv=()=>sheet("SupplierVisibility").rows.slice(1).filter(x=>x[0]);
+ok("supplier off: one row, scope glenorchy", sv().length===1 && sv()[0][0]==="Doppio Foods" && sv()[0][1]==="glenorchy" && sv()[0][2]==="no", sv());
+post({action:"supplier_visibility",scope:"glenorchy",supplier:"Doppio Foods",visible:"no"});
+ok("supplier off twice: still one row", sv().length===1, sv());
+post({action:"supplier_visibility",scope:"glenorchy",supplier:"Fresh Cut",visible:"no"});
+r=post({action:"supplier_visibility",scope:"glenorchy",supplier:"Doppio Foods",visible:"yes"});
+ok("supplier back on: its row gone, the other stays", r.ok===true && sv().length===1 && sv()[0][0]==="Fresh Cut", sv());
+ok("supplier visibility: bad value rejected", /yes or no/.test(post({action:"supplier_visibility",scope:"glenorchy",supplier:"Doppio Foods",visible:"maybe"}).error||""));
+ok("supplier visibility: unknown scope rejected", /unknown scope/.test(post({action:"supplier_visibility",scope:"cambridge",supplier:"Doppio Foods",visible:"no"}).error||""));
+ok("SupplierSettings untouched by supplier_visibility", sheet("SupplierSettings").rows.length===2 && sheet("SupplierSettings").rows[1][2]==="yes", sheet("SupplierSettings").rows);
 ok("bad hidden value reported", post({action:"item_visibility",scope:"glenorchy",items:[{item_key:"a",hidden:"maybe"}]}).failed.length===1);
 ok("CategoryOverrides untouched by item_visibility", camb()===before, camb());
 // Glenorchy recategorising Naan (shared) must keep Cambridge's "off"
