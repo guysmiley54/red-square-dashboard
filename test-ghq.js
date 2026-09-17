@@ -131,19 +131,67 @@ async function run(withVis){
   ok("TAG is Glenorchy", ev("TAG.name")===G && ev("TAG.addr")==="3/2 Howard Road, Glenorchy TAS 7010");
   // countdown: Cambridge draft in shared origin storage must not count
   ok("Cambridge draft ignored", ev("allDraftTotal()")===0, ev("allDraftTotal()"));
-  // home render
-  ev("route()");
-  const home=w.document.getElementById("app").textContent;
+  // ---- front page: the Supplier Explorer layout, this week by default
+  const app=()=>w.document.getElementById("app");
+  const cardByLabel=t=>[...app().querySelectorAll(".card")].find(c=>(c.querySelector(".label")||{}).textContent.indexOf(t)>-1);
+  const rowsOf=c=>[...c.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
+  ev("location.hash=''; route()");
+  const home=app().textContent;
   ok("home mentions Glenorchy, not Cambridge", /Glenorchy/.test(home) && !/Cambridge|Luma|both kitchens/.test(home));
-  ok("home shows income 2,200 (this week, Glenorchy only)", /2,200/.test(home), home.match(/Income this week[\s\S]{0,80}/)&&home.match(/Income this week[\s\S]{0,80}/)[0]);
-  // spend this week: G1 330 + G2 200 + manual 50 = 580 invoiced; TasWaste and Cambridge excluded
-  ok("home spend 580", /\$580\b/.test(home), (home.match(/\$5\d\d/g)||[]).slice(0,3));
+  ok("home: range bar in the filter strip, Week on", /Week.*Month.*Quarter.*All time/.test(w.document.getElementById("filters").textContent) && ev("RANGE.kind")==="week" && ev("RANGE.off")===0);
+  ok("home: no ordering list, no countdown", !/Start an order|Left to spend|Spend so far/.test(home));
+  {
+    const tiles=[...app().querySelectorAll(".summary .tile")].map(t=>t.textContent.replace(/\s+/g," ").trim());
+    // spend this week: G1 330 + G2 200 + manual 50 = 580; TasWaste and Cambridge excluded. Sales 1000+1200.
+    ok("home tiles: spend $580, 3 invoices, sales $2,200, COGS 26.4%", tiles.length===4 && /\$580\b/.test(tiles[0]) && /^Invoices\s?3dated/.test(tiles[1]) && /\$2,200/.test(tiles[2]) && /26\.4%/.test(tiles[3]), tiles);
+    const card=cardByLabel("Suppliers by spend");
+    ok("home: suppliers card labelled with the week", card && /\(this week\)/.test(card.querySelector(".label").textContent), card&&card.querySelector(".label").textContent);
+    const rows=rowsOf(card);
+    ok("home: sorted by total — Doppio, Fresh Cut, Woolworths", rows.map(r=>r[0].replace(/\s*(Beverage|Food)$/,"")).join("|")==="Doppio Foods|Fresh Cut|Woolworths", rows.map(r=>r[0]));
+    ok("home: header says Usual/wk at 1w", /Usual\/wk/.test(card.querySelector("thead").textContent));
+    const dop=rows.find(r=>r[0].startsWith("Doppio")), fc=rows.find(r=>r[0].startsWith("Fresh Cut")), ww=rows.find(r=>r[0].startsWith("Woolworths"));
+    ok("home: Doppio 1 invoice, $330 vs usual $55 ▲", dop&&dop[1]==="1"&&dop[2]==="$330.00"&&/\$55\.00\s*▲/.test(dop[3]), dop);
+    ok("home: Fresh Cut $200 vs usual $37.50 ▲", fc&&/\$37\.50\s*▲/.test(fc[3]), fc);
+    ok("home: Woolworths no history → — and no arrow", ww&&/^—$/.test(ww[3]), ww);
+    ok("home: footer totals $580", /\$580\.00/.test(card.querySelector("tfoot").textContent));
+    ok("home: note explains the 4-week benchmark", /4 full weeks before/.test(card.textContent));
+    ok("home: rows open the supplier drill", /rsup::/.test(card.innerHTML));
+    const gcard=cardByLabel("Spend by group");
+    const grows=rowsOf(gcard); const bev=grows.find(r=>r[0]==="Beverage");
+    ok("home groups: Beverage usual $55 ▲", bev&&/\$55\.00\s*▲/.test(bev[2]), grows);
+    ev("sortSuppliers('name')"); await new Promise(r=>setTimeout(r,30));
+    ok("home: sort by name", rowsOf(cardByLabel("Suppliers by spend"))[0][0].startsWith("Doppio") && rowsOf(cardByLabel("Suppliers by spend"))[2][0].startsWith("Woolworths"));
+    ev("sortSuppliers('spend')"); ev("sortSuppliers('spend')"); await new Promise(r=>setTimeout(r,30));   // back to spend desc
+    // 8 whole weeks as a custom range: the column is the range's own average, no arrows
+    ev(`RANGE={kind:"custom",off:0,from:"${iso(wd(-49))}",to:"${iso(wd(6))}"}; renderFilters(); route()`); await new Promise(r=>setTimeout(r,30));
+    const card8=cardByLabel("Suppliers by spend"); const rows8=rowsOf(card8);
+    const dop8=rows8.find(r=>r[0].startsWith("Doppio"));
+    ok("8w custom: header says Avg/wk, Doppio (330+220)/8 = $68.75, no arrow", /Avg\/wk/.test(card8.querySelector("thead").textContent) && dop8&&dop8[3]==="$68.75", dop8);
+    ok("8w custom: note says spend ÷ 8 weeks", /spend ÷ 8 weeks/.test(card8.textContent));
+    // stepping a custom range moves it by its own length
+    ev("shiftRange(-1)"); await new Promise(r=>setTimeout(r,30));
+    ok("custom range steps back by its own length", ev("RANGE.from")===iso(wd(-105)) && ev("RANGE.to")===iso(wd(-50)), [ev("RANGE.from"),ev("RANGE.to")]);
+    ev("setRangeKind('week')"); await new Promise(r=>setTimeout(r,30));
+    ev("shiftRange(1)"); ok("no future weeks", ev("RANGE.off")===0);
+    ev("shiftRange(-1)"); await new Promise(r=>setTimeout(r,30));
+    ok("last week: label says so, Doppio absent (nothing bought)", /\(last week\)/.test(cardByLabel("Suppliers by spend").querySelector(".label").textContent) && !rowsOf(cardByLabel("Suppliers by spend")).some(r=>r[0].startsWith("Doppio")));
+    ev("setRangeKind('all')"); await new Promise(r=>setTimeout(r,30));
+    ok("all time: label, every Glenorchy supplier, ‹ › hidden", /all captured data/.test(cardByLabel("Suppliers by spend").querySelector(".label").textContent) && rowsOf(cardByLabel("Suppliers by spend")).length===4 && !/‹/.test(w.document.getElementById("filters").textContent), rowsOf(cardByLabel("Suppliers by spend")).map(r=>r[0]));
+    ev("resetRange()"); await new Promise(r=>setTimeout(r,30));
+  }
+  // ---- Order tab: the old front page
+  ev("go('order')"); await new Promise(r=>setTimeout(r,30));
+  const order=app().textContent;
+  ok("order tab: ordering list with countdown", /Start an order — Red Square Glenorchy/.test(order) && /Left to spend/.test(order));
+  ok("order tab: week stepper in the filter strip, no range chips", /Tag: Glenorchy/.test(w.document.getElementById("filters").textContent) && !/Quarter/.test(w.document.getElementById("filters").textContent));
+  ok("order tab shows income 2,200 (this week, Glenorchy only)", /2,200/.test(order), order.match(/Income this week[\s\S]{0,80}/)&&order.match(/Income this week[\s\S]{0,80}/)[0]);
+  ok("order tab spend 580", /\$580\b/.test(order), (order.match(/\$5\d\d/g)||[]).slice(0,3));
   // usual/wk = 4 full weeks before this one ÷ 4: Fresh Cut 150 (G5 at −29d is outside), Doppio 220, PFD 96
   const sl=ev("supplierList()"), usualOf=n=>(sl.find(x=>x.name===n)||{}).usualWk;
   ok("usual/wk: Fresh Cut 37.50", Math.abs(usualOf("Fresh Cut")-37.5)<1e-9, usualOf("Fresh Cut"));
   ok("usual/wk: Doppio 55.00", Math.abs(usualOf("Doppio Foods")-55)<1e-9, usualOf("Doppio Foods"));
   ok("usual/wk: PFD 24.00 (G5 at −29d excluded)", Math.abs(usualOf("PFD Food Services")-24)<1e-9, usualOf("PFD Food Services"));
-  ok("home shows Usual/wk column", /Usual\/wk/.test(home) && /\$37\.50/.test(home) && /\$55\.00/.test(home));
+  ok("order tab shows Usual/wk column", /Usual\/wk/.test(order) && /\$37\.50/.test(order) && /\$55\.00/.test(order));
   // ---- turned-off items are per dashboard ----
   const naan=ev(`deriveCatalogue(LINES,"PFD Food Services",new Date()).find(p=>p.desc==="Naan Bread")`);
   ok("Naan: Cambridge's 'off' ignored", naan && naan.hidden===false, naan&&naan.hidden);
@@ -203,33 +251,8 @@ async function run(withVis){
   const rep=w.document.getElementById("app").textContent;
   ok("reports: no Cambridge/Luma/both", !/Cambridge|Luma|both kitchens|both stores/.test(rep));
   // ---- top 10s, default range = This week
-  ok("reports default range is This week", ev("RANGE.preset")==="This week" && /week of/.test(rep));
-  {
-    const app0=w.document.getElementById("app");
-    const card=[...app0.querySelectorAll(".card")].find(c=>/Suppliers by spend/.test((c.querySelector(".label")||{}).textContent));
-    const rows=[...card.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
-    ok("suppliers: header says Usual/wk at 1w", /Usual\/wk/.test(card.querySelector("thead").textContent));
-    const dop=rows.find(r=>r[0].startsWith("Doppio")), fc=rows.find(r=>r[0].startsWith("Fresh Cut")), ww=rows.find(r=>r[0].startsWith("Woolworths"));
-    ok("suppliers: Doppio $330 vs usual $55 ▲", dop&&dop[1]==="$330.00"&&/\$55\.00\s*▲/.test(dop[2]), dop);
-    ok("suppliers: Fresh Cut $200 vs usual $37.50 ▲", fc&&/\$37\.50\s*▲/.test(fc[2]), fc);
-    ok("suppliers: Woolworths no history → — and no arrow", ww&&/^—$/.test(ww[2]), ww);
-    ok("suppliers: note explains the 4-week benchmark", /4 full weeks before/.test(card.textContent));
-    const gcard=[...app0.querySelectorAll(".card")].find(c=>/Spend by group/.test((c.querySelector(".label")||{}).textContent));
-    const grows=[...gcard.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
-    const bev=grows.find(r=>r[0]==="Beverage");
-    ok("groups: Beverage usual $55 ▲", bev&&/\$55\.00\s*▲/.test(bev[2]), grows);
-    ev("setRange('8w')"); await new Promise(r=>setTimeout(r,50));
-    const app8=w.document.getElementById("app");
-    const card8=[...app8.querySelectorAll(".card")].find(c=>/Suppliers by spend/.test((c.querySelector(".label")||{}).textContent));
-    const rows8=[...card8.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
-    const dop8=rows8.find(r=>r[0].startsWith("Doppio"));
-    ok("8w: header says Avg/wk, Doppio (330+220)/8 = $68.75, no arrow", /Avg\/wk/.test(card8.querySelector("thead").textContent) && dop8&&dop8[2]==="$68.75", dop8);
-    ok("8w: note says spend ÷ 8 weeks", /spend ÷ 8 weeks/.test(card8.textContent));
-    ev("resetRange()"); await new Promise(r=>setTimeout(r,50));
-  }
-  const app=()=>w.document.getElementById("app");
-  const cardByLabel=t=>[...app().querySelectorAll(".card")].find(c=>(c.querySelector(".label")||{}).textContent.indexOf(t)>-1);
-  const rowsOf=c=>[...c.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
+  ok("reports default range is this week", ev("RANGE.kind")==="week" && ev("RANGE.off")===0 && /\(this week\)/.test(rep));
+  ok("reports: supplier/group cards moved to the front page", !/Suppliers by spend|Spend by group/.test(rep));
   const bought=cardByLabel("Top 10 purchased");
   ok("bought card present", !!bought);
   const br=rowsOf(bought);
@@ -265,15 +288,15 @@ async function run(withVis){
   ev("setSoldBy('sales')");
   // wide range: the feed is not pulled
   const fetches0=FETCHES.length;
-  ev("setRange('26w')"); await new Promise(r=>setTimeout(r,50));
+  ev(`RANGE={kind:"custom",off:0,from:"${iso(wd(-175))}",to:"${iso(wd(6))}"}; renderFilters(); route()`); await new Promise(r=>setTimeout(r,50));
   const sold26=cardByLabel("Top 10 sold");
-  ok("26w: feed not fetched, says 13w or shorter", /13w or shorter/.test(sold26.textContent) && !FETCHES.slice(fetches0).some(u=>/select A,C,D,E,F,G,H/.test(u)), sold26.textContent.slice(0,80));
+  ok("26w: feed not fetched, says Week/Month/Quarter", /Week, Month or Quarter/.test(sold26.textContent) && !FETCHES.slice(fetches0).some(u=>/select A,C,D,E,F,G,H/.test(u)), sold26.textContent.slice(0,80));
   const b26=rowsOf(cardByLabel("Top 10 purchased"));
   ok("26w: Naan now in the purchased list with no price change on record", b26.some(r=>r[0]==="Naan Bread"&&/—/.test(r[5])), b26.map(r=>r[0]));
   const peas26=b26.find(r=>r[0]==="Peas");
   ok("26w: Peas baseline falls back to first price in range (18 → 20 still ▲ 11.1%)", peas26&&/▲ 11\.1%/.test(peas26[5]), peas26&&peas26[5]);
   // a range before the feed existed
-  ev("RANGE={preset:'custom',from:'2026-07-06',to:'2026-07-12'}; route()"); await new Promise(r=>setTimeout(r,50));
+  ev("RANGE={kind:'custom',off:0,from:'2026-07-06',to:'2026-07-12'}; renderFilters(); route()"); await new Promise(r=>setTimeout(r,50));
   ok("pre-cutover: sold card explains, no fetch", /only exist from 3\/8\/2026|only exist from 03\/08\/2026/.test(cardByLabel("Top 10 sold").textContent) && !FETCHES.slice(fetches0).some(u=>/select A,C,D,E,F,G,H/.test(u)), cardByLabel("Top 10 sold").textContent.slice(0,90));
   ev("resetRange()");
   dom.window.close();
