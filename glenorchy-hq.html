@@ -144,7 +144,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v3-1054"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v4-1120"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -951,6 +951,21 @@ function stableCat(p){
   return best?best[0]:categorise(p.supplier,p.desc,p.buys[0].invCategory,p.key);
 }
 
+/* ---- "Usual week": the benchmark a week's spend is read against. Supplier Explorer's rule,
+   the one that has proved practical: a window shorter than four weeks is NOT divided by its
+   own span — a fortnightly supplier would read as double in the week they delivered and
+   vanish the next. Take the real spend over the AVG_WEEKS complete weeks before `before`
+   and divide by AVG_WEEKS. Weeks with no delivery count as zero weeks, because a supplier you
+   buy from fortnightly really does average half as much. `before` is a week start, so the
+   current (partial) week never dilutes its own benchmark. Same row filter as spendRows. */
+const AVG_WEEKS=4;
+function usualWeek(before,keyOf){
+  const end=mid(before), start=addD(end,-7*AVG_WEEKS), m={};
+  INV.forEach(r=>{ if(!r.date||r.date<start||r.date>=end||!supActive(r.supplier)) return;
+    const k=keyOf(r); m[k]=(m[k]||0)+r.total; });
+  Object.keys(m).forEach(k=>m[k]/=AVG_WEEKS);
+  return m;
+}
 function supplierList(now,opts){
   opts=opts||{};
   const venue=opts.venue===undefined?TAG.name:opts.venue;
@@ -973,10 +988,10 @@ function supplierList(now,opts){
     }
     if(!s.last||r.date>s.last) s.last=r.date;
   });
-  const wks=CAT_DAYS/7;
+  const wks=CAT_DAYS/7, usual=usualWeek(wk.start,r=>r.supplier);
   return Object.values(m).map(s=>{
     const cfg=sset(s.name);
-    s.group=supGroup(s.name); s.avgWk=s.spend/wks;
+    s.group=supGroup(s.name); s.avgWk=s.spend/wks; s.usualWk=usual[s.name]||0;
     /* Against the same point of the week across recent weeks, averaged over ALL of them —
        including the ones with no delivery, since a supplier you buy from fortnightly really
        does average half as much. A supplier with no history at this point of the week has
@@ -1151,7 +1166,9 @@ function renderHome(){
       ${portalCount?`<div style="margin-bottom:10px"><span class="chip sm ${HIDE_PORTAL?"on":""}" onclick="togglePortal()">${HIDE_PORTAL?"portal-only hidden":"portal-only shown"} (${portalCount})</span></div>`:""}
       <table><thead><tr>
         <th style="width:30px"></th>
-        <th>Supplier</th><th class="num">Spend so far</th><th class="num hide-sm">Last delivery</th><th class="num">Draft</th>
+        <th>Supplier</th><th class="num">Spend so far</th>
+        <th class="num hide-sm" title="Average per week over the ${AVG_WEEKS} full weeks before this one">Usual/wk</th>
+        <th class="num hide-sm">Last delivery</th><th class="num">Draft</th>
       </tr></thead><tbody>
       ${shown.map(s=>{
         const d=DRAFTS[draftId(s.name,TAG.name)], n=d?Object.keys(d.qty||{}).length:0;
@@ -1166,6 +1183,7 @@ function renderHome(){
           <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.portal?' <span class="pill">portal</span>':""}${s.rep?"":' <span class="pill">no rep email</span>'}</td>
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
             ${v!=null?`<br><span class="${s.week>=s.usualToDate?"up":"down"}" style="font-size:11px">${s.week>=s.usualToDate?"+":"−"}${money0(Math.abs(s.week-s.usualToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.usualToDate)} by ${esc(DAYSHORT)}</span>`:""}</td>
+          <td class="num hide-sm">${s.usualWk?money(s.usualWk):'<span style="color:var(--dim)">—</span>'}</td>
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
           <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
         </tr>`
@@ -1177,7 +1195,9 @@ function renderHome(){
         <b>${esc(TAG.name)}</b>.
         <b>Spend so far</b> is this store's invoices for that supplier this week to date. Underneath is how that
         compares with the same day over the last 6 weeks — like for like, because measuring a Tuesday against a
-        whole week would show almost every supplier as down until Friday. Cost of goods only.</div>
+        whole week would show almost every supplier as down until Friday. <b>Usual/wk</b> is the average over the
+        ${AVG_WEEKS} full weeks before this one — a whole-week figure, so it is what Sunday's number should land near,
+        not Tuesday's. Cost of goods only.</div>
     </div>
     ${productSearchCard()}`;
   const g=document.getElementById("gsearch");
@@ -1610,9 +1630,15 @@ function spendRows(range){
     (byGrp[g]=byGrp[g]||{name:g,spend:0,n:0}).spend+=r.total; byGrp[g].n++;
   });
   const weeks=Math.max(1,(range.end-range.start)/864e5/7);
-  const fin=o=>{o.perWk=o.spend/weeks;return o;};
-  return {sup:Object.values(bySup).map(fin).sort((a,b)=>b.spend-a.spend),
-          grp:Object.values(byGrp).map(fin).sort((a,b)=>b.spend-a.spend), weeks};
+  /* Under four weeks the range's own per-week rate is noise (see usualWeek); the column
+     becomes the benchmark from before the range, and the arrow says how this range sits
+     against it. Four weeks or more, the range's own average is a fair number and stands. */
+  const short=weeks<AVG_WEEKS;
+  const uS=short?usualWeek(range.start,r=>r.supplier):{}, uG=short?usualWeek(range.start,rowGroup):{};
+  const fin=u=>o=>{ o.perWk=o.spend/weeks; o.avgWk=short?(u[o.name]||0):o.perWk;
+    o.trend=short&&o.avgWk>0?(o.perWk-o.avgWk)/o.avgWk:null; return o; };
+  return {sup:Object.values(bySup).map(fin(uS)).sort((a,b)=>b.spend-a.spend),
+          grp:Object.values(byGrp).map(fin(uG)).sort((a,b)=>b.spend-a.spend), weeks, short};
 }
 function rangeBar(){
   const r=reportRange();
@@ -1642,27 +1668,33 @@ function applyCustom(){
   RANGE.to=(document.getElementById("rto")||{}).value||null;
   route();
 }
+const trendMark=o=>o.trend==null?"":o.trend>0.1?' <span class="up">▲</span>':o.trend<-0.1?' <span class="down">▼</span>':' <span style="color:var(--dim)">–</span>';
 function renderReports(){
   const m=weekModel(), range=reportRange(), d=spendRows(range), prods=rangeProducts(range);
   const total=d.sup.reduce((s,x)=>s+x.spend,0);
+  const avgNote=d.short
+    ?`<b>Usual/wk</b> is the average over the ${AVG_WEEKS} full weeks before ${fmtD(range.start)}, not this range —
+       a week divided by itself is just the week. ▲▼ marks a range more than 10% off its usual.`
+    :`<b>Avg/wk</b> is spend ÷ ${Math.round(d.weeks*10)/10} weeks.`;
+  const avgHead=d.short?"Usual/wk":"Avg/wk";
   document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}${rangeBar()}
     <div class="grid2">${repBoughtCard(range,prods)}${repSoldCard(range)}</div>
     ${repCreepCard(range,prods)}
     <div class="grid2">
       <div class="card"><div class="label">Suppliers by spend — in range</div>
-        <table><thead><tr><th>Supplier</th><th class="num">Spend</th><th class="num hide-sm">Per week</th><th class="num">%</th></tr></thead>
+        <table><thead><tr><th>Supplier</th><th class="num">Spend</th><th class="num hide-sm">${avgHead}</th><th class="num">%</th></tr></thead>
         <tbody>${d.sup.map(s=>`<tr class="click" onclick="go('rsup::${encodeURIComponent(s.name)}')">
           <td><b>${esc(s.name)}</b>${sset(s.name).portal_only?' <span class="pill">portal</span>':""}</td>
-          <td class="num">${money(s.spend)}</td><td class="num hide-sm">${money(s.perWk)}</td>
+          <td class="num">${money(s.spend)}</td><td class="num hide-sm">${s.avgWk?money(s.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(s)}</td>
           <td class="num">${total?pct1(s.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
         <div class="note">Totals follow the range above, not a fixed window. Portal-only suppliers are included —
-          hidden from ordering, never from spend.</div>
+          hidden from ordering, never from spend. ${avgNote}</div>
       </div>
       <div class="card"><div class="label">Spend by group — in range</div>
-        <table><thead><tr><th>Group</th><th class="num">Spend</th><th class="num hide-sm">Per week</th><th class="num">%</th></tr></thead>
+        <table><thead><tr><th>Group</th><th class="num">Spend</th><th class="num hide-sm">${avgHead}</th><th class="num">%</th></tr></thead>
         <tbody>${d.grp.map(g=>`<tr class="click" onclick="go('grp::${encodeURIComponent(g.name)}')">
           <td><b>${esc(g.name)}</b></td><td class="num">${money(g.spend)}</td>
-          <td class="num hide-sm">${money(g.perWk)}</td><td class="num">${total?pct1(g.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
+          <td class="num hide-sm">${g.avgWk?money(g.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(g)}</td><td class="num">${total?pct1(g.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
         <div class="note">Cost of goods only — ${money(total)} over ${Math.round(d.weeks*10)/10} weeks.</div>
       </div>
     </div>`;

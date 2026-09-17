@@ -19,11 +19,11 @@ const TABS={
   Invoices: csv(["invoice_number","invoice_date","total","subtotal","gst","supplier","venue","category","type","source","scanned"],[
     ["G1", iso(wd(0)), "330.00","300.00","30.00","Doppio Foods",G,"Beverage","invoice","email",iso(wd(0))+" 09:00:00"],
     ["G2", iso(wd(1)), "200.00","200.00","0.00","Fresh Cut",G,"Food","invoice","email",iso(wd(1))+" 09:00:00"],
-    ["G3", iso(dm(20)),"150.00","150.00","0.00","Fresh Cut",G,"Food","invoice","email",iso(dm(20))+" 09:00:00"],
+    ["G3", iso(wd(-20)),"150.00","150.00","0.00","Fresh Cut",G,"Food","invoice","email",iso(wd(-20))+" 09:00:00"],
     ["G9", iso(wd(0)), "400.00","400.00","0.00","TasWaste",G,"Waste Management","invoice","email",iso(wd(0))+" 09:00:00"],
-    ["G4", iso(dm(10)),"96.00","96.00","0.00","PFD Food Services",G,"Food","invoice","email",iso(dm(10))+" 09:00:00"],
-    ["G5", iso(dm(30)),"90.00","90.00","0.00","Fresh Cut",G,"Food","invoice","email",iso(dm(30))+" 09:00:00"],
-    ["G6", iso(dm(25)),"220.00","220.00","0.00","Doppio Foods",G,"Beverage","invoice","email",iso(dm(25))+" 09:00:00"],
+    ["G4", iso(wd(-10)),"96.00","96.00","0.00","PFD Food Services",G,"Food","invoice","email",iso(wd(-10))+" 09:00:00"],
+    ["G5", iso(wd(-29)),"90.00","90.00","0.00","Fresh Cut",G,"Food","invoice","email",iso(wd(-29))+" 09:00:00"],   // outside the 4-week window
+    ["G6", iso(wd(-25)),"220.00","220.00","0.00","Doppio Foods",G,"Beverage","invoice","email",iso(wd(-25))+" 09:00:00"],
     ["C1", iso(wd(0)), "999.00","900.00","99.00","Doppio Foods",C,"Beverage","invoice","email",iso(wd(0))+" 09:00:00"],
     ["L1", iso(wd(1)), "555.00","555.00","0.00","Fresh Cut",L,"Food","invoice","email",iso(wd(1))+" 09:00:00"]
   ]),
@@ -138,6 +138,12 @@ async function run(withVis){
   ok("home shows income 2,200 (this week, Glenorchy only)", /2,200/.test(home), home.match(/Income this week[\s\S]{0,80}/)&&home.match(/Income this week[\s\S]{0,80}/)[0]);
   // spend this week: G1 330 + G2 200 + manual 50 = 580 invoiced; TasWaste and Cambridge excluded
   ok("home spend 580", /\$580\b/.test(home), (home.match(/\$5\d\d/g)||[]).slice(0,3));
+  // usual/wk = 4 full weeks before this one ÷ 4: Fresh Cut 150 (G5 at −29d is outside), Doppio 220, PFD 96
+  const sl=ev("supplierList()"), usualOf=n=>(sl.find(x=>x.name===n)||{}).usualWk;
+  ok("usual/wk: Fresh Cut 37.50", Math.abs(usualOf("Fresh Cut")-37.5)<1e-9, usualOf("Fresh Cut"));
+  ok("usual/wk: Doppio 55.00", Math.abs(usualOf("Doppio Foods")-55)<1e-9, usualOf("Doppio Foods"));
+  ok("usual/wk: PFD 24.00 (G5 at −29d excluded)", Math.abs(usualOf("PFD Food Services")-24)<1e-9, usualOf("PFD Food Services"));
+  ok("home shows Usual/wk column", /Usual\/wk/.test(home) && /\$37\.50/.test(home) && /\$55\.00/.test(home));
   // ---- turned-off items are per dashboard ----
   const naan=ev(`deriveCatalogue(LINES,"PFD Food Services",new Date()).find(p=>p.desc==="Naan Bread")`);
   ok("Naan: Cambridge's 'off' ignored", naan && naan.hidden===false, naan&&naan.hidden);
@@ -198,6 +204,29 @@ async function run(withVis){
   ok("reports: no Cambridge/Luma/both", !/Cambridge|Luma|both kitchens|both stores/.test(rep));
   // ---- top 10s, default range = This week
   ok("reports default range is This week", ev("RANGE.preset")==="This week" && /week of/.test(rep));
+  {
+    const app0=w.document.getElementById("app");
+    const card=[...app0.querySelectorAll(".card")].find(c=>/Suppliers by spend/.test((c.querySelector(".label")||{}).textContent));
+    const rows=[...card.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
+    ok("suppliers: header says Usual/wk at 1w", /Usual\/wk/.test(card.querySelector("thead").textContent));
+    const dop=rows.find(r=>r[0].startsWith("Doppio")), fc=rows.find(r=>r[0].startsWith("Fresh Cut")), ww=rows.find(r=>r[0].startsWith("Woolworths"));
+    ok("suppliers: Doppio $330 vs usual $55 ▲", dop&&dop[1]==="$330.00"&&/\$55\.00\s*▲/.test(dop[2]), dop);
+    ok("suppliers: Fresh Cut $200 vs usual $37.50 ▲", fc&&/\$37\.50\s*▲/.test(fc[2]), fc);
+    ok("suppliers: Woolworths no history → — and no arrow", ww&&/^—$/.test(ww[2]), ww);
+    ok("suppliers: note explains the 4-week benchmark", /4 full weeks before/.test(card.textContent));
+    const gcard=[...app0.querySelectorAll(".card")].find(c=>/Spend by group/.test((c.querySelector(".label")||{}).textContent));
+    const grows=[...gcard.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
+    const bev=grows.find(r=>r[0]==="Beverage");
+    ok("groups: Beverage usual $55 ▲", bev&&/\$55\.00\s*▲/.test(bev[2]), grows);
+    ev("setRange('8w')"); await new Promise(r=>setTimeout(r,50));
+    const app8=w.document.getElementById("app");
+    const card8=[...app8.querySelectorAll(".card")].find(c=>/Suppliers by spend/.test((c.querySelector(".label")||{}).textContent));
+    const rows8=[...card8.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
+    const dop8=rows8.find(r=>r[0].startsWith("Doppio"));
+    ok("8w: header says Avg/wk, Doppio (330+220)/8 = $68.75, no arrow", /Avg\/wk/.test(card8.querySelector("thead").textContent) && dop8&&dop8[2]==="$68.75", dop8);
+    ok("8w: note says spend ÷ 8 weeks", /spend ÷ 8 weeks/.test(card8.textContent));
+    ev("resetRange()"); await new Promise(r=>setTimeout(r,50));
+  }
   const app=()=>w.document.getElementById("app");
   const cardByLabel=t=>[...app().querySelectorAll(".card")].find(c=>(c.querySelector(".label")||{}).textContent.indexOf(t)>-1);
   const rowsOf=c=>[...c.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
@@ -205,7 +234,7 @@ async function run(withVis){
   ok("bought card present", !!bought);
   const br=rowsOf(bought);
   ok("bought: Blend Beans first (300 > 100)", br[0]&&br[0][0]==="Blend Beans 1kg"&&/\$300\.00/.test(br[0][3]), br.map(r=>r[0]+" "+r[3]));
-  ok("bought: this week only — Naan (10d ago) absent", !br.some(r=>r[0]==="Naan Bread"));
+  ok("bought: this week only — Naan (last week) absent", !br.some(r=>r[0]==="Naan Bread"));
   ok("bought: fee line stripped", !br.some(r=>/Delivery Fee/.test(r[0])));
   ok("bought: 3 products, $500 total", /3 products · \$500\.00/.test(bought.textContent), bought.querySelector(".note").textContent.slice(0,60));
   const peas=br.find(r=>r[0]==="Peas"), beans=br.find(r=>r[0]==="Blend Beans 1kg"), ban=br.find(r=>r[0]==="Bananas");
