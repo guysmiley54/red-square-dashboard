@@ -146,7 +146,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v5-1139"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v5-1146"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1233,27 +1233,6 @@ function togglePortal(){ HIDE_PORTAL=!HIDE_PORTAL; route(); }
    for reading the books, the Order tab is for spending against them. */
 let SUPP_SORT={key:"spend",dir:-1};
 function sortSuppliers(k){ if(SUPP_SORT.key===k) SUPP_SORT.dir*=-1; else SUPP_SORT={key:k,dir:k==="name"?1:-1}; route(); }
-function rangeStats(range){
-  const inv=INV.filter(r=>r.date&&r.date>=range.start&&r.date<=range.end&&supActive(r.supplier));
-  const spend=inv.reduce((s,r)=>s+r.total,0);
-  const sales=SALES.filter(r=>r.date>=range.start&&r.date<=range.end).reduce((s,r)=>s+r.sales,0);
-  return {spend,n:inv.length,suppliers:new Set(inv.map(r=>r.supplier)).size,sales,cogs:sales>0?spend/sales*100:null};
-}
-function statGrid(range){
-  const s=rangeStats(range);
-  const live=range.kind==="week"&&RANGE.off===0;
-  const cls=s.cogs===null?"":s.cogs<=TARGET_COGS_PCT-2?"good":s.cogs<=TARGET_COGS_PCT+2?"amber":"over";
-  return `<div class="summary">
-    <div class="tile"><div class="k">Spend</div><div class="v">${money0(s.spend)}</div>
-      <div class="sub">${esc(range.label)} · ${s.suppliers} supplier(s) · cost of goods only</div></div>
-    <div class="tile"><div class="k">Invoices</div><div class="v">${s.n}</div><div class="sub">dated in the period</div></div>
-    <div class="tile"><div class="k">Sales</div><div class="v">${s.sales>0?money0(s.sales):"—"}</div>
-      <div class="sub">${s.sales>0?"same period":"no sales captured for this period"}</div></div>
-    <div class="tile ${cls}"><div class="k">COGS % vs ${TARGET_COGS_PCT}%</div><div class="v">${s.cogs===null?"—":pct1(s.cogs)}</div>
-      <div class="sub">${s.cogs===null?"needs sales":live?"week in progress — deliveries are lumpy, read the month":
-        s.cogs<=TARGET_COGS_PCT?(TARGET_COGS_PCT-s.cogs).toFixed(1)+" points under target":(s.cogs-TARGET_COGS_PCT).toFixed(1)+" points over target"}</div></div>
-  </div>`;
-}
 function avgNoteFor(d,range){
   return d.short
     ?`<b>Usual/wk</b> is the average over the ${AVG_WEEKS} full weeks before ${fmtD(range.start)}, not this range —
@@ -1262,14 +1241,14 @@ function avgNoteFor(d,range){
 }
 const wksLabel=w=>{const n=Math.round(w*10)/10;return n+(n===1?" week":" weeks");};
 function renderHome(){
-  const range=reportRange(), d=spendRows(range);
+  const m=weekModel(), range=reportRange(), d=spendRows(range);
   const total=d.sup.reduce((s,x)=>s+x.spend,0), nInv=d.sup.reduce((s,x)=>s+x.n,0);
   const K={name:x=>x.name.toLowerCase(),n:x=>x.n,spend:x=>x.spend,avgWk:x=>x.avgWk||0,last:x=>+(x.last||0)};
   const fn=K[SUPP_SORT.key]||K.spend;
   const sup=d.sup.slice().sort((a,b)=>{const x=fn(a),y=fn(b);return (x<y?-1:x>y?1:0)*SUPP_SORT.dir||a.name.localeCompare(b.name);});
   const head=(k,l,cls)=>`<th class="s ${cls||""} ${SUPP_SORT.key===k?"act":""}" onclick="sortSuppliers('${k}')">${l}${SUPP_SORT.key===k?(SUPP_SORT.dir<0?" ▼":" ▲"):""}</th>`;
   const avgHead=d.short?"Usual/wk":"Avg/wk";
-  document.getElementById("app").innerHTML=`${warnBar()}${statGrid(range)}
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
     ${productSearchCard()}
     <div class="card"><div class="label">Suppliers by spend — ${esc(range.label)}</div>
       <table><thead><tr>${head("name","Supplier")}${head("n","Invoices","num hide-sm")}${head("spend","Total","num")}
@@ -1775,8 +1754,8 @@ function resetRange(){ RANGE={kind:"week",off:0,from:null,to:null}; renderFilter
 const trendMark=o=>o.trend==null?"":o.trend>0.1?' <span class="up">▲</span>':o.trend<-0.1?' <span class="down">▼</span>':' <span style="color:var(--dim)">–</span>';
 /* Product-level reading of the range. Supplier and group totals are the front page. */
 function renderReports(){
-  const range=reportRange(), prods=rangeProducts(range);
-  document.getElementById("app").innerHTML=`${warnBar()}${statGrid(range)}
+  const m=weekModel(), range=reportRange(), prods=rangeProducts(range);
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
     <div class="grid2">${repBoughtCard(range,prods)}${repSoldCard(range)}</div>
     ${repCreepCard(range,prods)}`;
 }
@@ -1920,12 +1899,12 @@ function repCreepCard(range,prods){
 }
 
 function renderGroupDrill(group){
-  const range=reportRange(), bySup={};
+  const m=weekModel(), range=reportRange(), bySup={};
   INV.forEach(r=>{ if(rowGroup(r)!==group||!r.date||r.date<range.start||r.date>range.end) return;
     (bySup[r.supplier]=bySup[r.supplier]||{name:r.supplier,spend:0,n:0}).spend+=r.total; bySup[r.supplier].n++; });
   const rows=Object.values(bySup).sort((a,b)=>b.spend-a.spend);
   const tot=rows.reduce((s,r)=>s+r.spend,0);
-  document.getElementById("app").innerHTML=`${statGrid(range)}
+  document.getElementById("app").innerHTML=`${summaryBar(m)}
     <a class="back" onclick="go('')">All suppliers</a>
     <div class="card"><div class="label">${esc(group)} — ${esc(range.label)}</div>
       <div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(tot)}</div>
@@ -1940,11 +1919,12 @@ function renderGroupDrill(group){
    about the products themselves — what they cost and how that has moved — and a range that
    kept resetting the answer made the price history useless. Full history. */
 function renderSupplierProducts(name){
+  const m=weekModel();
   const all=sortCat(deriveCatalogue(LINES,name,new Date(),{venue:null}));
   const rows=all.filter(p=>SHOW_HIDDEN||!p.hidden);
   const hiddenN=all.length-rows.length;
   const spend=rows.reduce((s,p)=>s+p.spendTotal,0);
-  document.getElementById("app").innerHTML=`
+  document.getElementById("app").innerHTML=`${summaryBar(m)}
     <a class="back" onclick="go('')">All suppliers</a>
     <div style="margin-bottom:10px"><a class="btn outline" onclick="go('s::${encodeURIComponent(name)}')">🛒 Build order</a></div>
     <div class="card">
@@ -1974,6 +1954,7 @@ function renderSupplierProducts(name){
 }
 /* Unit price history: the movement over time, not just the latest figure. */
 function renderPriceHistory(key){
+  const m=weekModel();
   const sup=(LINES.find(l=>l.key===key)||{}).supplier;
   const p=sup?deriveCatalogue(LINES,sup,new Date(),{venue:null}).find(x=>x.key===key):null;
   if(!p){ document.getElementById("app").innerHTML=`<a class="back" onclick="go('')">All suppliers</a>
@@ -1997,7 +1978,7 @@ function renderPriceHistory(key){
   const ys=v=>hi===lo?base/2:pad+(1-(v-lo)/(hi-lo))*(base-2*pad);
   const qmax=Math.max(...b90.map(b=>b.qty),1);
   const path=b90.map((b,i)=>(i?"L":"M")+xs(b.date).toFixed(1)+" "+ys(b.price).toFixed(1)).join(" ");
-  document.getElementById("app").innerHTML=`
+  document.getElementById("app").innerHTML=`${summaryBar(m)}
     <a class="back" onclick="go('rsup::'+encodeURIComponent('${esc(p.supplier)}'))">${esc(p.supplier)} products</a>
     <div class="card">
       <div class="label">Unit price history</div>

@@ -139,11 +139,11 @@ async function run(withVis){
   const home=app().textContent;
   ok("home mentions Glenorchy, not Cambridge", /Glenorchy/.test(home) && !/Cambridge|Luma|both kitchens/.test(home));
   ok("home: range bar in the filter strip, Week on", /Week.*Month.*Quarter.*All time/.test(w.document.getElementById("filters").textContent) && ev("RANGE.kind")==="week" && ev("RANGE.off")===0);
-  ok("home: no ordering list, no countdown", !/Start an order|Left to spend|Spend so far/.test(home));
+  ok("home: countdown header kept, ordering list moved out", /Left to spend/.test(home) && !/Start an order/.test(home));
   {
     const tiles=[...app().querySelectorAll(".summary .tile")].map(t=>t.textContent.replace(/\s+/g," ").trim());
-    // spend this week: G1 330 + G2 200 + manual 50 = 580; TasWaste and Cambridge excluded. Sales 1000+1200.
-    ok("home tiles: spend $580, 3 invoices, sales $2,200, COGS 26.4%", tiles.length===4 && /\$580\b/.test(tiles[0]) && /^Invoices\s?3dated/.test(tiles[1]) && /\$2,200/.test(tiles[2]) && /26\.4%/.test(tiles[3]), tiles);
+    // this ordering week: spent G1 330 + G2 200 + manual 50 = 580; income 1000+1200
+    ok("home header: spent $580, income $2,200, projected COGS", tiles.length===4 && /Spent so far \$580\b/.test(tiles[0]) && /Left to spend/.test(tiles[1]) && /Income this week \$2,200/.test(tiles[2]) && /COGS %/.test(tiles[3]), tiles);
     const card=cardByLabel("Suppliers by spend");
     ok("home: suppliers card labelled with the week", card && /\(this week\)/.test(card.querySelector(".label").textContent), card&&card.querySelector(".label").textContent);
     const rows=rowsOf(card);
