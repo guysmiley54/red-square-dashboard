@@ -102,11 +102,9 @@
     <span id="buildtag" style="font-size:9px;color:#666"></span></div>
   <div class="tag" id="tagpick"></div>
   <span class="spacer"></span>
-  <a class="hbtn" onclick="go('order')">Order</a>
-  <a class="hbtn" onclick="go('sales')">Sales</a>
-  <a class="hbtn" onclick="go('placed')">Placed</a>
-  <a class="hbtn" onclick="go('favs')">Favourites</a>
   <a class="hbtn" onclick="go('reports')">Reports</a>
+  <a class="hbtn" onclick="go('sales')">Sales</a>
+  <a class="hbtn" onclick="go('order')">Order</a>
   <a class="hbtn" onclick="go('admin')">Admin</a>
   <button onclick="loadAll()">↻</button>
 </header>
@@ -146,7 +144,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v8-1222"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v9-0810"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -583,7 +581,7 @@ async function loadAll(){
        downstream can reintroduce it. */
     INV=inv.map(r=>({venue:r.venue||"",supplier:r.supplier||"",number:String(r.invoice_number||""),
       date:gvizDate(r.invoice_date)||gvizDate(r.scanned),subtotal:num_(r.subtotal),gst:num_(r.gst),
-      total:num_(r.total),category:r.category||"",type:r.type||"invoice",src:r.source||"",
+      total:num_(r.total),freight:num_(r.freight),category:r.category||"",type:r.type||"invoice",src:r.source||"",
       scannedAt:gvizDateTime(r.scanned)}))
       .filter(r=>r.supplier&&r.date&&r.type!=="superseded"&&LEDGER_VENUES.indexOf(r.venue)>=0);
 
@@ -1252,12 +1250,18 @@ function route(){
    it is safe to scan once the base is spelled out beside it, which it was not when a bare
    red percentage sat next to a full-week average it had nothing to do with. */
 const DAYSHORT=new Date().toLocaleDateString("en-AU",{weekday:"short"});
+/* Placed and Favourites only mean anything while ordering, so they sit inside the Order tab
+   as a chip row rather than in the header (Adrian, 18 Sep). */
+function orderTabs(cur){
+  const t=(k,l)=>`<span class="chip sm ${cur===k?"on":""}" onclick="go('${k}')">${l}</span>`;
+  return `<div style="display:flex;gap:6px;margin-bottom:10px">${t("order","Order")}${t("placed","Placed orders")}${t("favs","Favourites")}</div>`;
+}
 function renderOrderHome(){
   const m=weekModel(), all=supplierList();
   const shown=all.filter(s=>s.orderable&&(!HIDE_PORTAL||!s.portal));
   const portalCount=all.filter(s=>s.orderable&&s.portal).length;
   document.getElementById("app").innerHTML=`
-    ${warnBar()}${summaryBar(m)}
+    ${warnBar()}${summaryBar(m)}${orderTabs("order")}
     <div class="card">
       <div class="label">Start an order — ${esc(TAG.name)}</div>
       ${portalCount?`<div style="margin-bottom:10px"><span class="chip sm ${HIDE_PORTAL?"on":""}" onclick="togglePortal()">${HIDE_PORTAL?"portal-only hidden":"portal-only shown"} (${portalCount})</span></div>`:""}
@@ -2013,44 +2017,83 @@ function renderGroupDrill(group){
         <td><b>${esc(s.name)}</b></td><td class="num">${money(s.spend)}</td><td class="num">${s.n}</td></tr>`).join("")}</tbody></table>
     </div>`;
 }
-/* The Supplier Explorer products layout: what was bought, how much, what it cost, and how
-   today's price compares with the average actually paid across the range. */
-/* Deliberately NOT filtered by the report range. Drilling into a supplier is a question
-   about the products themselves — what they cost and how that has moved — and a range that
-   kept resetting the answer made the price history useless. Full history. */
+/* ================= SUPPLIER DRILL =================
+   The Supplier Explorer supplier page (Adrian, 18 Sep): a statement, the products bought,
+   the invoices — every one of them for the range in the bar above, Week by default. The
+   180-day catalogue this used to show belongs to ordering and still drives the builder.
+
+   Statement rows are WHOLE weeks or months, whichever the toggle says, covering the range —
+   built from the range's periods first and then filled completely, so a Week range shows
+   that week, a Month range under the Week toggle shows the four or five weeks it touches,
+   and nothing from outside the range appears. Reconcile these against the supplier's own
+   statement; a difference is a missing invoice or a billing error. */
+let STMT_PERIOD="week", SUPP_PROD_SORT={key:"change",dir:-1};
+function setStmt(v){ STMT_PERIOD=v; route(); }
+function sortSuppProds(k){ if(SUPP_PROD_SORT.key===k) SUPP_PROD_SORT.dir*=-1; else SUPP_PROD_SORT={key:k,dir:k==="name"||k==="cat"?1:-1}; route(); }
+function statementCard(name,range){
+  const wk=STMT_PERIOD==="week";
+  const pKey=d=>wk?fmtISO(weekStart(d)):d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+  const pName=k=>{ if(wk){ const a=gvizDate(k); return fmtD(a)+" – "+fmtD(addD(a,6)); }
+                   const [y,m]=k.split("-"); return new Date(+y,+m-1,1).toLocaleDateString("en-AU",{month:"long",year:"numeric"}); };
+  const keys=new Set(); for(let d=mid(range.start); +d<=+range.end; d=addD(d,1)) keys.add(pKey(d));
+  const per={};
+  INV.forEach(r=>{ if(r.supplier!==name||!r.date) return; const k=pKey(r.date); if(!keys.has(k)) return;
+    const m=per[k]||(per[k]={n:0,sub:0,gst:0,freight:0,credits:0,total:0});
+    m.n++; m.sub+=r.subtotal; m.gst+=r.gst; m.freight+=r.freight||0; m.total+=r.total; if(r.type==="credit_note") m.credits+=r.total; });
+  const mkeys=Object.keys(per).sort().reverse().slice(0,wk?16:12);
+  const tot=mkeys.reduce((a,k)=>a+per[k].total,0), anyFreight=mkeys.some(k=>per[k].freight);
+  const email=supplierEmail(name);
+  return `<div class="card"><div class="label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>${wk?"Weekly":"Monthly"} statement — ${esc(name)}</span>
+      <span style="margin-left:auto;display:flex;gap:5px">
+        <span class="chip sm ${wk?"":"on"}" onclick="setStmt('month')">Month</span>
+        <span class="chip sm ${wk?"on":""}" onclick="setStmt('week')">Week</span></span></div>
+    ${email?`<div style="font-size:12px;margin-bottom:8px;color:var(--dim)">Contact: <a href="mailto:${esc(email)}" style="color:var(--red)">${esc(email)}</a></div>`:""}
+    ${mkeys.length?`<table><thead><tr><th>${wk?"Week":"Month"}</th><th class="num">Invoices</th><th class="num hide-sm">Subtotal</th>
+      <th class="num hide-sm">GST</th>${anyFreight?'<th class="num hide-sm">Freight</th>':""}<th class="num hide-sm">Credits</th><th class="num">Total</th></tr></thead>
+      <tbody>${mkeys.map(k=>{const m=per[k];return `<tr><td>${pName(k)}</td><td class="num">${m.n}</td>
+        <td class="num hide-sm">${money(m.sub)}</td><td class="num hide-sm">${money(m.gst)}</td>${anyFreight?`<td class="num hide-sm">${money(m.freight)}</td>`:""}
+        <td class="num hide-sm">${m.credits?money(m.credits):""}</td><td class="num"><b>${money(m.total)}</b></td></tr>`;}).join("")}
+        <tr style="border-top:2px solid var(--ink)"><td><b>Total shown</b></td><td class="num"></td><td class="num hide-sm"></td>
+        <td class="num hide-sm"></td>${anyFreight?'<td class="num hide-sm"></td>':""}<td class="num hide-sm"></td><td class="num"><b>${money(tot)}</b></td></tr>
+      </tbody></table>`:`<div class="note">No invoices from ${esc(name)} in ${esc(range.label)}.</div>`}
+    <div class="note">Reconcile these totals against the supplier's own statement — differences mean a missing invoice or a
+      billing error. Whole ${wk?"weeks":"months"} covering ${esc(range.label)}, not the range itself.</div></div>`;
+}
 function renderSupplierProducts(name){
-  const m=rangeModel();
-  const all=sortCat(deriveCatalogue(LINES,name,new Date(),{venue:null}));
-  const rows=all.filter(p=>SHOW_HIDDEN||!p.hidden);
-  const hiddenN=all.length-rows.length;
-  const spend=rows.reduce((s,p)=>s+p.spendTotal,0);
+  const m=rangeModel(), range=reportRange();
+  const all=rangeProducts(range).filter(p=>p.supplier===name).map(p=>{p.hidden=!!HIDDEN[p.key];return p;});
+  const rows=all.filter(p=>SHOW_HIDDEN||!p.hidden), hiddenN=all.length-rows.length;
+  const K={name:p=>p.desc.toLowerCase(),cat:p=>p.cat.toLowerCase(),qty:p=>p.qty,spend:p=>p.spend,price:p=>p.price,
+           was:p=>p.base,change:p=>p.change==null?-Infinity:p.change};
+  const fn=K[SUPP_PROD_SORT.key]||K.change;
+  rows.sort((a,b)=>{const x=fn(a),y=fn(b);return (x<y?-1:x>y?1:0)*SUPP_PROD_SORT.dir||a.desc.localeCompare(b.desc);});
+  const head=(k,l,cls)=>`<th class="s ${cls||""} ${SUPP_PROD_SORT.key===k?"act":""}" onclick="sortSuppProds('${k}')">${l}${SUPP_PROD_SORT.key===k?(SUPP_PROD_SORT.dir<0?" ▼":" ▲"):""}</th>`;
+  const spend=rows.reduce((a,p)=>a+p.spend,0);
   document.getElementById("app").innerHTML=`${summaryBar(m)}
     <a class="back" onclick="go('')">All suppliers</a>
     <div style="margin-bottom:10px"><a class="btn outline" onclick="go('s::${encodeURIComponent(name)}')">🛒 Build order</a></div>
+    ${statementCard(name,range)}
     <div class="card">
-      <div class="label">${esc(name)} — products — last ${CAT_DAYS} days</div>
-      ${hiddenN?`<div style="margin-bottom:8px"><span class="chip sm ${SHOW_HIDDEN?"on":""}" onclick="toggleHidden()">${SHOW_HIDDEN?"hiding":"show"} ${hiddenN} turned-off item(s)</span></div>`:""}
-      <div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(spend)}</div>
-      <table><thead><tr>
-        ${sortHead("name","Product")}${sortHead("cat","Category","hide-sm")}${sortHead("qty","Qty","num")}
-        ${sortHead("spend","Spend","num")}${sortHead("price","Unit price","num")}${sortHead("last","Last bought","num hide-sm")}
-      </tr></thead><tbody>
-      ${rows.map(p=>{
-        const avgPaid=p.qtyTotal?p.spendTotal/p.qtyTotal:0;
-        const vs=avgPaid?((p.price-avgPaid)/avgPaid*100):0;
-        return `<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
-          <td><b>${esc(p.desc)}</b>${p.variants.length>1?` <span class="pill">${p.variants.length} merged</span>`:""}</td>
-          <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
-          <td class="num">${Math.round(p.qtyTotal*100)/100} ${esc(p.unit||"")}</td>
-          <td class="num">${money(p.spendTotal)}</td>
-          <td class="num">${money(p.price)}${Math.abs(vs)>=1?`<br><span class="${vs>0?"up":"down"}" style="font-size:11px">${vs>0?"+":""}${Math.round(vs)}% vs avg</span>`:""}</td>
-          <td class="num hide-sm">${fmtD(p.lastDate)}</td></tr>`;}).join("")}
-      </tbody></table>
-      ${rows.length?"":'<div class="note">Nothing bought from this supplier in the last '+CAT_DAYS+' days.</div>'}
-      <div class="note">Click a product for its unit price history. This view ignores the report range on
-        purpose — it is about the products, not the period.</div>
+      <div class="label">Products (${rows.length}) — ${esc(range.label)}
+        ${hiddenN?`<span class="chip sm ${SHOW_HIDDEN?"on":""}" onclick="toggleHidden()" style="margin-left:8px">${SHOW_HIDDEN?"hiding":"show"} ${hiddenN} turned-off</span>`:""}</div>
+      ${rows.length?`<div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(spend)}</div>
+      <table><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}${head("qty","Qty","num")}
+        ${head("spend","Spend","num")}${head("price","Price","num")}${head("was","Was","num hide-sm")}${head("change","Change","num")}</tr></thead>
+      <tbody>${rows.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
+        <td><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}${p.hidden?' <span class="pill">off</span>':""}</td>
+        <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
+        <td class="num">${Math.round(p.qty*100)/100}</td>
+        <td class="num">${money(p.spend)}</td>
+        <td class="num"><b>${money(p.price)}</b></td>
+        <td class="num hide-sm" title="${p.baseFromBefore?"last paid before the range, "+fmtD(p.baseDate):"first price inside the range"}">${p.baseFromBefore?money(p.base):'<span style="color:var(--dim)">—</span>'}</td>
+        <td class="num">${creepChip(p)}</td></tr>`).join("")}</tbody></table>
+      <div class="note">Line totals with delivery and fees stripped, so this will not match the statement to the cent.
+        <b>Was</b> is the last price paid before the range; Change compares the latest price in the range with it, and
+        is blank when nothing was bought before. Tap a product for its price history.</div>`
+      :`<div class="note">No product lines from ${esc(name)} in ${esc(range.label)}.</div>`}
     </div>
-    ${invoicePanel(name,null,60)}`;
+    ${invoicePanel(name,null,60,range)}`;
 }
 /* Unit price history: the movement over time, not just the latest figure. */
 function renderPriceHistory(key){
@@ -2598,15 +2641,16 @@ ${venueChips(wv)}</div>
    rather than a product rolled up across many of them. */
 let OPEN_INV=null;
 function toggleInv(k){ OPEN_INV = OPEN_INV===k ? null : k; route(); }
-function invoicePanel(supplier,venue,limit){
+function invoicePanel(supplier,venue,limit,range){
   return `<div class="card">
-    <div class="label">Invoices — ${esc(supplier)}${venue?" · "+esc(venue):""}</div>
-    ${invoiceTable(supplier,venue,limit)}</div>`;
+    <div class="label">Invoices — ${esc(supplier)}${venue?" · "+esc(venue):""}${range?" · "+esc(range.label):""}</div>
+    ${invoiceTable(supplier,venue,limit,range)}</div>`;
 }
-function invoiceTable(supplier,venue,limit){
-  const rows=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)&&r.date)
+function invoiceTable(supplier,venue,limit,range){
+  const rows=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)&&r.date
+                         &&(!range||(r.date>=range.start&&r.date<=range.end)))
                 .sort((a,b)=>b.date-a.date).slice(0,limit||40);
-  if(!rows.length) return `<div class="note">No invoices for this supplier${venue?" at "+esc(venue):""} in the data.</div>`;
+  if(!rows.length) return `<div class="note">No invoices for this supplier${venue?" at "+esc(venue):""}${range?" in "+esc(range.label):" in the data"}.</div>`;
   const tot=rows.reduce((s,r)=>s+r.total,0);
   return `<div style="font-size:13px;color:var(--dim);margin:6px 0 8px">${rows.length} invoice(s), ${money(tot)}</div>
     <table><thead><tr><th>Date</th><th class="hide-sm">Invoice</th><th class="hide-sm">Venue</th>
@@ -2646,8 +2690,7 @@ function renderPlaced(){
   rec.closed.forEach(c=>status[c.o.id]={state:"closed",inv:c.inv,how:c.how});
   const rows=ORDERS.concat(LOCAL_ORDERS).filter(o=>o.venue===TAG.name&&o.date>=addD(m.wk.start,-28))
                    .sort((a,b)=>b.date-a.date);
-  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
-    <a class="back" onclick="go('')">All suppliers</a>
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}${orderTabs("placed")}
     <div class="card"><div class="label">Orders placed — last 4 weeks · ${esc(TAG.name)}</div>
       <table><thead><tr><th>Placed</th><th>Supplier</th><th class="hide-sm">Deliver</th><th class="num hide-sm">Items</th>
         <th class="num">Total</th><th>Reconciliation</th><th class="num"></th></tr></thead>
@@ -2817,8 +2860,7 @@ function recallFav(id){
 }
 function renderFavs(){
   const m=weekModel();
-  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
-    <a class="back" onclick="go('')">All suppliers</a>
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}${orderTabs("favs")}
     <div class="card"><div class="label">Saved favourites — ${esc(TAG.name)}</div>
       <table><thead><tr><th>Name</th><th class="hide-sm">Supplier</th><th class="num">Items</th><th class="num"></th></tr></thead>
       <tbody>${FAVS.filter(f=>f.venue===TAG.name).map(f=>`<tr><td><b>${esc(f.name)}</b>${f.by?`<br><span style="color:var(--dim);font-size:11px">${esc(f.by)}</span>`:""}</td>

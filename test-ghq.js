@@ -206,7 +206,7 @@ async function run(withVis){
     // ---- catch-up: the month's tally up to the Sunday before this week, folded into the envelope
     ok("catch-up chip present in a live week, off", /catch-up/.test(w.document.getElementById("filters").textContent) && ev("CATCHUP")===false);
     ev("setRangeKind('month')"); ok("no catch-up chip outside week mode", !/catch-up/.test(w.document.getElementById("filters").textContent));
-    ev("setRangeKind('week')"); ev("toggleCatchup()"); await new Promise(r=>setTimeout(r,30));
+    ev("setRangeKind('week')"); const rem0=ev("weekModel().remaining"); ev("toggleCatchup()"); await new Promise(r=>setTimeout(r,30));
     {
       const m0=new Date(mon.getFullYear(),mon.getMonth(),1), dayBefore=wd(-1);
       // fixture income is 1,000 on every day wd(-42)..wd(-1); spend is the fixture invoices in the window
@@ -215,16 +215,54 @@ async function run(withVis){
       const expect=days*1000*0.3-spendIn;
       const cu=ev("weekModel().catchup");
       ok("catch-up tally = 30% of month income before this week − spend then", cu && Math.abs(cu.tally-expect)<1e-6, [cu&&cu.tally,expect,days,spendIn]);
-      ok("catch-up moves left-to-spend by the tally", Math.abs(ev("weekModel().remaining")-(1200+expect))<1e-6, ev("weekModel().remaining"));
+      ok("catch-up moves left-to-spend by the tally", Math.abs(ev("weekModel().remaining")-(rem0+expect))<1e-6, [ev("weekModel().remaining"),rem0,expect]);
       ok("tile explains the catch-up", new RegExp(expect<0?"less \\$.* over from":"plus \\$.* under from").test(tile(1)) || Math.abs(expect)<0.5, tile(1));
-      ok("Order tab sees the same envelope", (()=>{ ev("go('order')"); return Math.abs(ev("weekModel().remaining")-(1200+expect))<1e-6 && /catch-up on/.test(w.document.getElementById("filters").textContent); })());
+      ok("Order tab sees the same envelope", (()=>{ ev("go('order')"); return Math.abs(ev("weekModel().remaining")-(rem0+expect))<1e-6 && /catch-up on/.test(w.document.getElementById("filters").textContent); })());
       ev("toggleCatchup(); location.hash=''; route()"); await new Promise(r=>setTimeout(r,30));
-      ok("catch-up off again: left to spend back to $1,200", Math.abs(ev("weekModel().remaining")-1200)<1e-6);
+      ok("catch-up off again: left to spend back where it was", Math.abs(ev("weekModel().remaining")-rem0)<1e-6);
     }
+  }
+  // ---- nav: one button per job; Placed and Favourites live inside the Order tab
+  {
+    const nav=[...w.document.querySelectorAll("header a.hbtn")].map(a=>a.textContent.trim());
+    ok("header is Reports · Sales · Order · Admin", nav.join("|")==="Reports|Sales|Order|Admin", nav);
+  }
+  // ---- supplier drill: the Explorer page, everything for the range (this week)
+  {
+    ev("go('rsup::Fresh%20Cut')"); await new Promise(r=>setTimeout(r,30));
+    if(withVis){
+      const p1=rowsOf(cardByLabel("Products ("));
+      ok("drill: turned-off Bananas hidden by default, chip offers it", p1.length===1 && /show 1 turned-off/.test(cardByLabel("Products (").textContent), p1.map(r=>r[0]));
+      ev("SHOW_HIDDEN=true; route()"); await new Promise(r=>setTimeout(r,30));
+    }
+    const st=cardByLabel("Weekly statement");
+    ok("drill: weekly statement card, contact email", st && /rep@freshcut\.example/.test(st.textContent), st&&st.textContent.slice(0,80));
+    const srows=rowsOf(st);
+    ok("drill: one week row — 1 invoice, $200, total shown $200", srows.length===2 && srows[0][1]==="1" && srows[0][5]==="$200.00" && /Total shown.*\$200\.00/.test(srows[1].join(" ")), srows);
+    const pc=cardByLabel("Products (");
+    const prows=rowsOf(pc);
+    ok("drill: products in the range only — Peas and Bananas, not Luma lettuce", prows.length===2 && prows.every(r=>/Peas|Bananas/.test(r[0])), prows.map(r=>r[0]));
+    ok("drill: sorted by change — Peas ▲ 11.1% first, Bananas no change", /^Peas/.test(prows[0][0]) && /▲ 11\.1%/.test(prows[0][6]) && /—/.test(prows[1][6]), prows);
+    ok("drill: Peas 'was' $18.00 from before the range", prows[0][5]==="$18.00", prows[0]);
+    const ic=cardByLabel("Invoices — Fresh Cut");
+    ok("drill: invoices scoped to the range — only G2", ic && /1 invoice\(s\), \$200\.00/.test(ic.textContent) && !/G3|G5/.test(ic.innerHTML), ic&&ic.textContent.slice(0,60));
+    ev("setStmt('month')"); await new Promise(r=>setTimeout(r,30));
+    ok("drill: month toggle relabels the statement", !!cardByLabel("Monthly statement"));
+    ev("setStmt('week')");
+    // widen to 5 weeks: G3 (−20d) joins, G5 (−29d) does not
+    ev(`RANGE={kind:"custom",off:0,from:"${iso(wd(-28))}",to:"${iso(wd(6))}"}; renderFilters(); route()`); await new Promise(r=>setTimeout(r,30));
+    const st5=rowsOf(cardByLabel("Weekly statement"));
+    ok("drill 5w: two week rows, total shown $350", st5.length===3 && /\$350\.00/.test(st5[2].join(" ")), st5);
+    ok("drill 5w: invoices G2 and G3, $350", /2 invoice\(s\), \$350\.00/.test(cardByLabel("Invoices — Fresh Cut").textContent));
+    const p5=rowsOf(cardByLabel("Products ("));
+    const ban5=p5.find(r=>/^Bananas/.test(r[0]));
+    ok("drill 5w: Bananas 25 kg, $250 across both invoices", ban5 && ban5[2]==="25" && ban5[3]==="$250.00", ban5);
+    ev("SHOW_HIDDEN=false; resetRange()"); await new Promise(r=>setTimeout(r,30));
   }
   // ---- Order tab: the old front page
   ev("go('order')"); await new Promise(r=>setTimeout(r,30));
   const order=app().textContent;
+  ok("order tab: chip row Order · Placed orders · Favourites", /Order\s*Placed orders\s*Favourites/.test(order.replace(/\s+/g," ")), order.slice(0,200));
   ok("order tab: ordering list with countdown", /Start an order — Red Square Glenorchy/.test(order) && /Left to spend/.test(order));
   ok("order tab: week stepper in the filter strip, no range chips", /Tag: Glenorchy/.test(w.document.getElementById("filters").textContent) && !/Quarter/.test(w.document.getElementById("filters").textContent));
   ok("order tab shows income 2,200 (this week, Glenorchy only)", /Income — this week[\s\S]{0,30}\$2,200/.test(order), order.match(/Income — this week[\s\S]{0,80}/)&&order.match(/Income — this week[\s\S]{0,80}/)[0]);
@@ -280,6 +318,7 @@ async function run(withVis){
   ev(`go('placed')`); await new Promise(r=>setTimeout(r,50));
   const placed=w.document.getElementById("app").textContent;
   ok("placed: no Cambridge order", !/5,000|Ange/.test(placed) && /Tam|80/.test(placed));
+  ok("placed: chip row present, Placed on", !![...app().querySelectorAll(".chip.on")].find(c=>/Placed orders/.test(c.textContent)));
   // sales tab: item feed
   ev(`go('sales')`); await new Promise(r=>setTimeout(r,400));
   ev(`route()`); await new Promise(r=>setTimeout(r,50));
