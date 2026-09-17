@@ -144,7 +144,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v2-0655"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v3-1054"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -873,15 +873,16 @@ function weekModel(today){
 /* Ordering data is scoped to the active tag (only one here). venue:null crosses every
    ledger venue, which for Glenorchy HQ is the same thing — kept so the code matches
    Cambridge Central line for line. */
+/* Charges are not stock. "admin\s*fee" only ever caught the literal phrase, so "Admin
+   service fee", "Distribution Fee" and "Min Order Charge" all stayed in the catalogue —
+   and Fill Usual duly ordered twenty-two admin fees. Checked against all 2,030 distinct
+   descriptions in the data: this removes exactly six lines, every one a real charge.
+   Shared by the catalogue and the Reports top-10s, so both agree on what a product is. */
+const FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|\bfees?\b|\bcharges?\b|\bcartage\b|\bmin(imum)?\.?\s*order\b/i;
 function deriveCatalogue(lines,supplier,now,opts){
   opts=opts||{};
   const venue=opts.venue===undefined?TAG.name:opts.venue;
   const listDays=opts.listDays||CAT_DAYS, rateDays=opts.rateDays||RATE_DAYS;
-  /* Charges are not stock. "admin\s*fee" only ever caught the literal phrase, so "Admin
-     service fee", "Distribution Fee" and "Min Order Charge" all stayed in the catalogue —
-     and Fill Usual duly ordered twenty-two admin fees. Checked against all 2,030 distinct
-     descriptions in the data: this removes exactly six lines, every one a real charge. */
-  const FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|\bfees?\b|\bcharges?\b|\bcartage\b|\bmin(imum)?\.?\s*order\b/i;
   const t=+(now||new Date()),listFrom=t-listDays*864e5,rateFrom=t-rateDays*864e5;
   const map={};
   (lines||[]).forEach(l=>{
@@ -1642,9 +1643,11 @@ function applyCustom(){
   route();
 }
 function renderReports(){
-  const m=weekModel(), range=reportRange(), d=spendRows(range);
+  const m=weekModel(), range=reportRange(), d=spendRows(range), prods=rangeProducts(range);
   const total=d.sup.reduce((s,x)=>s+x.spend,0);
   document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}${rangeBar()}
+    <div class="grid2">${repBoughtCard(range,prods)}${repSoldCard(range)}</div>
+    ${repCreepCard(range,prods)}
     <div class="grid2">
       <div class="card"><div class="label">Suppliers by spend — in range</div>
         <table><thead><tr><th>Supplier</th><th class="num">Spend</th><th class="num hide-sm">Per week</th><th class="num">%</th></tr></thead>
@@ -1664,6 +1667,145 @@ function renderReports(){
       </div>
     </div>`;
 }
+/* ================= REPORTS: TOP 10s =================
+   The ordering screens answer "what does X cost today". These answer "where did the money
+   go" and "what did we actually sell" for the range on the chips above, which is a different
+   question and belongs with the other spend reports.
+
+   Products come from invoice lines (what you buy IS the catalogue — no master list exists),
+   grouped by the same key the ordering screens use, charges stripped by the same FEE test,
+   inactive suppliers excluded the same way spendRows does it. Line totals, not invoice
+   totals, so the column will not add up to "Suppliers by spend" — fees and GST live there. */
+let REP_SOLD_BY="sales", REP_CREEP_DIR="up";
+function setSoldBy(k){ REP_SOLD_BY=k; route(); }
+function setCreepDir(k){ REP_CREEP_DIR=k; route(); }
+
+function rangeProducts(range){
+  const map={};
+  LINES.forEach(l=>{
+    if(!l.date||!(l.price>0)||!(l.qty>0)||FEE.test(l.desc)||!supActive(l.supplier)) return;
+    if(l.date>range.end) return;
+    const k=l.key||prodKey(l.supplier,l.code,l.desc,l.unit);
+    const p=map[k]||(map[k]={key:k,supplier:l.supplier,desc:l.desc,unit:l.unit,cat:l.cat||"",before:[],inRange:[]});
+    if(l.date<range.start) p.before.push(l);
+    else { p.inRange.push(l); p.desc=l.desc; p.unit=l.unit; }
+  });
+  return Object.values(map).filter(p=>p.inRange.length).map(p=>{
+    p.inRange.sort((a,b)=>a.date-b.date); p.before.sort((a,b)=>a.date-b.date);
+    p.qty=p.inRange.reduce((s,b)=>s+b.qty,0);
+    p.spend=p.inRange.reduce((s,b)=>s+b.total,0);
+    p.price=p.inRange[p.inRange.length-1].price;
+    /* Baseline is the last price paid BEFORE the range — "what were we paying". With nothing
+       bought before it, the first price inside the range stands in, so a rise mid-range still
+       shows and a steady price reads as no change rather than as a phantom rise. */
+    const b0=p.before.length?p.before[p.before.length-1]:p.inRange[0];
+    p.base=b0.price; p.baseDate=b0.date; p.baseFromBefore=!!p.before.length;
+    p.change=p.base?(p.price-p.base)/p.base*100:null;
+    /* Extra paid: every delivery in the range priced against the baseline. Negative = saved. */
+    p.extra=p.inRange.reduce((s,b)=>s+b.qty*(b.price-p.base),0);
+    return p;
+  });
+}
+function creepChip(p){
+  if(p.change==null||Math.abs(p.change)<0.05) return `<span style="color:var(--dim)">—</span>`;
+  const up=p.change>0;
+  return `<span class="${up?"up":"down"}" title="was ${money(p.base)} ${p.baseFromBefore?"before this range ("+fmtD(p.baseDate)+")":"at the start of the range"}">${up?"▲":"▼"} ${Math.abs(Math.round(p.change*10)/10)}%</span>`;
+}
+const signed=v=>(v<0?"\u2212":"")+money(Math.abs(v));
+const qtyFmt=(q,u)=>`${Math.round(q*100)/100}${u?` <span style="color:var(--dim);font-size:11px">${esc(u)}</span>`:""}`;
+
+function repBoughtCard(range,prods){
+  const list=prods.slice().sort((a,b)=>b.spend-a.spend);
+  const tot=list.reduce((s,p)=>s+p.spend,0);
+  const top=list.slice(0,10);
+  return `<div class="card"><div class="label">Top 10 purchased — by spend in range</div>
+    ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Supplier</th><th class="num">Qty</th>
+      <th class="num">Spend</th><th class="num hide-sm">%</th><th class="num">Price</th></tr></thead>
+      <tbody>${top.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
+        <td><b>${esc(p.desc)}</b></td>
+        <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
+        <td class="num">${qtyFmt(p.qty,p.unit)}</td>
+        <td class="num"><b>${money(p.spend)}</b></td>
+        <td class="num hide-sm" style="color:var(--dim)">${tot?pct1(p.spend/tot*100):""}</td>
+        <td class="num">${money(p.price)} ${creepChip(p)}</td></tr>`).join("")}</tbody></table>
+      <div class="note">${list.length} products · ${money(tot)} on product lines in ${esc(range.label)}. Line totals with
+        delivery and fees stripped, so this will not match the supplier totals to the cent. Price is the latest paid
+        in the range; the arrow compares it with what you were paying before the range. Tap a row for the history.</div>`
+      :`<div class="note">No product lines dated in ${esc(range.label)}.</div>`}</div>`;
+}
+
+function repSoldCard(range){
+  const feedStart=gvizDate(SALES_CUTOVER);
+  const days=Math.round((+mid(range.end)-+mid(range.start))/864e5)+1;
+  const head=`<div class="label">Top 10 sold — in range
+    <span style="float:right;display:flex;gap:5px">
+      <span class="chip sm ${REP_SOLD_BY==="sales"?"on":""}" onclick="setSoldBy('sales')">by revenue</span>
+      <span class="chip sm ${REP_SOLD_BY==="qty"?"on":""}" onclick="setSoldBy('qty')">by units</span></span></div>`;
+  if(feedStart&&range.end<feedStart)
+    return `<div class="card">${head}<div class="note">Item-level sales only exist from ${fmtD(feedStart)} and this range
+      ends before that. Weekly totals are all the platform kept until then.</div></div>`;
+  if(days>SALES_MAX_DAYS)
+    return `<div class="card">${head}<div class="note">That range is ${days} days. The item feed is 108,000 rows, so anything
+      past ${SALES_MAX_DAYS} days is a download, not a report — 13w or shorter shows the list.</div></div>`;
+  const start=feedStart&&range.start<feedStart?feedStart:range.start;
+  const w={start,end:range.end}, k=sdKey(w);
+  if(!SD[k]){ loadSalesWeek(w);
+    return `<div class="card">${head}<div class="note">Loading the item-level feed for ${esc(range.label)}…</div></div>`; }
+  if(SD_ERR&&!SD[k].length)
+    return `<div class="card">${head}<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div></div>`;
+  /* Paid units only. A $0 line is a loyalty coffee or a binned sandwich — counting it as sold
+     would inflate anything these numbers go on to feed. Kitchen requests are not sales. */
+  const rows=sdSales(SD[k]).filter(r=>r.sales>0), m={};
+  rows.forEach(r=>{ const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",qty:0,sales:0});
+    o.qty+=r.qty; o.sales+=r.sales; });
+  const list=Object.values(m).sort((a,b)=>REP_SOLD_BY==="qty"?b.qty-a.qty:b.sales-a.sales);
+  const rev=list.reduce((s,o)=>s+o.sales,0), units=list.reduce((s,o)=>s+o.qty,0);
+  const top=list.slice(0,10);
+  return `<div class="card">${head}
+    ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Category</th><th class="num">Units</th>
+      <th class="num">Revenue</th><th class="num">%</th></tr></thead>
+      <tbody>${top.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
+        <td class="hide-sm">${o.group?`<span class="pill">${esc(o.group)}</span>`:""}</td>
+        <td class="num">${Math.round(o.qty*100)/100}</td>
+        <td class="num"><b>${money(o.sales)}</b></td>
+        <td class="num" style="color:var(--dim)">${REP_SOLD_BY==="qty"?(units?pct1(o.qty/units*100):""):(rev?pct1(o.sales/rev*100):"")}</td></tr>`).join("")}</tbody></table>
+      <div class="note">${list.length} products · ${money(rev)} paid sales${start>range.start?` from ${fmtD(start)} (the feed starts there)`:""}.
+        Paid units only — $0 lines (loyalty coffees, wastage) and kitchen requests are excluded.
+        % is share of ${REP_SOLD_BY==="qty"?"units":"revenue"} across every product in the range.</div>`
+      :`<div class="note">No paid item sales in ${esc(range.label)}.</div>`}</div>`;
+}
+
+function repCreepCard(range,prods){
+  const moved=prods.filter(p=>p.change!=null&&Math.abs(p.extra)>=0.005);
+  const ups=moved.filter(p=>p.extra>0).sort((a,b)=>b.extra-a.extra);
+  const downs=moved.filter(p=>p.extra<0).sort((a,b)=>a.extra-b.extra);
+  const upTot=ups.reduce((s,p)=>s+p.extra,0), downTot=downs.reduce((s,p)=>s+p.extra,0);
+  const list=(REP_CREEP_DIR==="up"?ups:downs).slice(0,10);
+  const head=`<div class="label">Price creep — what price moves cost in range
+    <span style="float:right;display:flex;gap:5px">
+      <span class="chip sm ${REP_CREEP_DIR==="up"?"on":""}" onclick="setCreepDir('up')">rises (${ups.length})</span>
+      <span class="chip sm ${REP_CREEP_DIR==="down"?"on":""}" onclick="setCreepDir('down')">falls (${downs.length})</span></span></div>`;
+  if(!moved.length)
+    return `<div class="card">${head}<div class="note">Nothing bought in ${esc(range.label)} is priced differently from
+      what you were paying before it.</div></div>`;
+  return `<div class="card">${head}
+    <div style="font-size:13px;margin-bottom:8px">Rises cost <b class="up">${money(upTot)}</b> ·
+      falls saved <b class="down">${money(-downTot)}</b> · net <b>${signed(upTot+downTot)}</b>${upTot+downTot<0?" saved":" extra"} in ${esc(range.label)}</div>
+    ${list.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Supplier</th><th class="num hide-sm">Was → now</th>
+      <th class="num">Change</th><th class="num hide-sm">Qty</th><th class="num">${REP_CREEP_DIR==="up"?"Extra paid":"Saved"}</th></tr></thead>
+      <tbody>${list.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
+        <td><b>${esc(p.desc)}</b></td>
+        <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
+        <td class="num hide-sm">${money(p.base)} → ${money(p.price)}</td>
+        <td class="num">${creepChip(p)}</td>
+        <td class="num hide-sm">${qtyFmt(p.qty,p.unit)}</td>
+        <td class="num"><b>${money(Math.abs(p.extra))}</b></td></tr>`).join("")}</tbody></table>`
+      :`<div class="note">No ${REP_CREEP_DIR==="up"?"rises":"falls"} in this range.</div>`}
+    <div class="note">Extra paid = units bought in the range × (price paid − the price you were paying before the range).
+      Where nothing was bought before the range, the first price inside it is the baseline. Sorted by dollars, not
+      percent — a 3% rise on milk outranks a 30% rise on saffron. Tap a row for the full price history.</div></div>`;
+}
+
 function renderGroupDrill(group){
   const m=weekModel(), range=reportRange(), bySup={};
   INV.forEach(r=>{ if(rowGroup(r)!==group||!r.date||r.date<range.start||r.date>range.end) return;
