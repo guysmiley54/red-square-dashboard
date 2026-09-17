@@ -190,17 +190,37 @@ async function run(withVis){
     const tile=i=>[...app().querySelectorAll(".summary .tile")][i].textContent.replace(/\s+/g," ").trim();
     ev(`RANGE={kind:"custom",off:0,from:"${iso(wd(-28))}",to:"${iso(wd(6))}"}; renderFilters(); route()`); await new Promise(r=>setTimeout(r,30));
     // spend: this week 580 + G3 150 + G4 96 + G6 220 = 1,046 (G5 at −29d is outside); income: 28 past days × 1000 + 2,200
-    ok("range header: spent so far $1,046 over the 5 weeks", /^Spent so far — .*\$1,046 /.test(tile(0)), tile(0));
-    ok("range header: income $30,200 with a forecast (period live)", /^Income — .*\$30,200 Forecast \$/.test(tile(2)), tile(2));
-    ok("range header: COGS projected", /^COGS % — projected vs 30%/.test(tile(3)), tile(3));
+    // books mode: no forecast. spent 1,046 + og1 80 awaiting invoice = 1,126; income 30,200 to date
+    ok("5w live: Spent to date $1,126 (incl. $80 awaiting invoice), no forecast", /^Spent — .*\$1,126 .*awaiting invoice.*to date/.test(tile(0)) && !/Forecast/.test(app().textContent), tile(0));
+    ok("5w live: tally = 30% × 30,200 − 1,126 = +$7,934 under so far", /^Tally vs 30%.*\+\$7,934 .*\$9,060 allowed.*under so far/.test(tile(1)), tile(1));
+    ok("5w live: income $30,200 to date, no forecast", /^Income — .*\$30,200 to date, no forecast/.test(tile(2)), tile(2));
+    ok("5w live: COGS % actual 3.5%, not projected", /^COGS % vs 30% 3\.5%/.test(tile(3)), tile(3));
     // a finished week: budget minus actual is the tally to carry forward
     ev(`RANGE={kind:"custom",off:0,from:"${iso(wd(-14))}",to:"${iso(wd(-8))}"}; renderFilters(); route()`); await new Promise(r=>setTimeout(r,30));
-    ok("past period: Spent (not so far) $96, no drafts counted", /^Spent — .*\$96 1 invoice/.test(tile(0)), tile(0));
-    ok("past period: left to spend = 30% of $7,000 − $96 = $2,004", /\$2,004/.test(tile(1)) && /30% of income/.test(tile(1)), tile(1));
-    ok("past period: income $7,000, period complete, no forecast", /\$7,000 Period complete/.test(tile(2)), tile(2));
-    ok("past period: COGS % not 'projected', 1.4%", /^COGS % vs 30% 1\.4%/.test(tile(3)), tile(3));
+    ok("past week: Spent $96, 1 invoice, not 'to date'", /^Spent — .*\$96 1 invoice\(s\)$/.test(tile(0)), tile(0));
+    ok("past week: tally = 30% of $7,000 − $96 = +$2,004 under", /\+\$2,004 .*\$2,100 allowed.*under$/.test(tile(1)), tile(1));
+    ok("past week: income $7,000, period complete", /\$7,000 period complete/.test(tile(2)), tile(2));
+    ok("past week: COGS % 1.4%", /^COGS % vs 30% 1\.4%/.test(tile(3)), tile(3));
     ev("resetRange()"); await new Promise(r=>setTimeout(r,30));
-    ok("back to this week: header says this week", /^Spent so far — this week/.test(tile(0)), tile(0));
+    ok("back to this week: countdown again", /^Spent so far — this week/.test(tile(0)) && /Forecast/.test(tile(2)), tile(0));
+    // ---- catch-up: the month's tally up to the Sunday before this week, folded into the envelope
+    ok("catch-up chip present in a live week, off", /catch-up/.test(w.document.getElementById("filters").textContent) && ev("CATCHUP")===false);
+    ev("setRangeKind('month')"); ok("no catch-up chip outside week mode", !/catch-up/.test(w.document.getElementById("filters").textContent));
+    ev("setRangeKind('week')"); ev("toggleCatchup()"); await new Promise(r=>setTimeout(r,30));
+    {
+      const m0=new Date(mon.getFullYear(),mon.getMonth(),1), dayBefore=wd(-1);
+      // fixture income is 1,000 on every day wd(-42)..wd(-1); spend is the fixture invoices in the window
+      let days=0; for(let d=new Date(m0); d<=dayBefore; d.setDate(d.getDate()+1)) if(d>=wd(-42)) days++;
+      const spendIn=[[wd(-20),150],[wd(-10),96],[wd(-25),220],[wd(-29),90]].filter(([d])=>d>=m0&&d<=dayBefore).reduce((a,[,v])=>a+v,0);
+      const expect=days*1000*0.3-spendIn;
+      const cu=ev("weekModel().catchup");
+      ok("catch-up tally = 30% of month income before this week − spend then", cu && Math.abs(cu.tally-expect)<1e-6, [cu&&cu.tally,expect,days,spendIn]);
+      ok("catch-up moves left-to-spend by the tally", Math.abs(ev("weekModel().remaining")-(1200+expect))<1e-6, ev("weekModel().remaining"));
+      ok("tile explains the catch-up", new RegExp(expect<0?"less \\$.* over from":"plus \\$.* under from").test(tile(1)) || Math.abs(expect)<0.5, tile(1));
+      ok("Order tab sees the same envelope", (()=>{ ev("go('order')"); return Math.abs(ev("weekModel().remaining")-(1200+expect))<1e-6 && /catch-up on/.test(w.document.getElementById("filters").textContent); })());
+      ev("toggleCatchup(); location.hash=''; route()"); await new Promise(r=>setTimeout(r,30));
+      ok("catch-up off again: left to spend back to $1,200", Math.abs(ev("weekModel().remaining")-1200)<1e-6);
+    }
   }
   // ---- Order tab: the old front page
   ev("go('order')"); await new Promise(r=>setTimeout(r,30));

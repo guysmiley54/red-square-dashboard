@@ -146,7 +146,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v7-1209"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v8-1222"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -741,7 +741,11 @@ function parseOrders(rows,lineRows){
 /* ================= INCOME, SPEND, COUNTDOWN =================
    One ledger, one venue. */
 const currentWeek=today=>{const s=addD(weekStart(today||new Date()),WEEK_OFF*7);
-  const e=addD(s,6);e.setHours(23,59,59,999);return {start:s,end:e};};
+  const e=addD(s,6);e.setHours(23,59,59,999);return {start:s,end:e,kind:"week"};};
+/* Catch-up: off on every load, so it is reached for, never left on. One state for the front
+   page and the Order tab, so the envelope is the same number wherever it is read. */
+let CATCHUP=false;
+function toggleCatchup(){ CATCHUP=!CATCHUP; renderFilters(); route(); }
 const weekLabel=wk=>fmtD(wk.start)+" – "+fmtD(wk.end)+(WEEK_OFF===0?" (this week)":WEEK_OFF===-1?" (last week)":"");
 function dailySales(rows){
   const m={};
@@ -871,19 +875,44 @@ function gstRate(supplier){
 
    A finished period's "left to spend" is budget minus actual, which is the running tally —
    a heavy week after a quiet weekend shows here as the amount to claw back next period. */
-function periodModel(period,today){
+/* FORECAST ONLY IN WEEK MODE (Adrian, 17 Sep). The countdown — income forecast, 30%
+   envelope, minus what is used — is a lever for the orders about to go out, and a lever
+   needs a short horizon. Over a month "left to spend $8k" is true and useless, and
+   forecasting spend to fix it would presume the decision instead of informing it. So a
+   live week is a countdown; anything else is the books to date, no forecast anywhere, and
+   the fourth tile is the TALLY: 30% of income to date minus spend to date. Negative is the
+   amount to claw back; the week countdown is where it gets clawed back. */
+function periodModel(period,today,opts){
+  opts=opts||{};
   const now=today||new Date(), t=mid(now);
   const map=dailySales(SALES);
-  const profile=dowProfile(map,weekStart(t),DOW_WEEKS);
-  const sales=forecastPeriod(map,period,now,profile);
-  const cap=capturedSpend(INV,period);
   const live=+t>=+mid(period.start)&&+t<=+period.end;
+  const countdown=live&&period.kind==="week";
+  const profile=countdown?dowProfile(map,weekStart(t),DOW_WEEKS):Array(7).fill(0);
+  const sales=forecastPeriod(map,period,now,profile);
+  if(!countdown) sales.forecast=sales.actual;
+  const cap=capturedSpend(INV,period);
   const open=openOrders(ORDERS.concat(LOCAL_ORDERS),INV,period,now);
   const committed=open.reduce((s,o)=>s+o.total,0);
   const drafted=live?allDraftTotal():0;
-  const budget=sales.forecast*TARGET_COGS_PCT/100;
   const used=cap.cogs+committed+drafted;
-  return {wk:period,period,live,sales,cap,open,committed,drafted,used,budget,remaining:budget-used,
+  /* Catch-up: the calendar month's tally up to the day before this week, folded into this
+     week's envelope. Resets by itself in a week that starts on the 1st. Open orders from
+     those earlier weeks count as their spend, exactly as they do inside a week. */
+  let catchup=null;
+  if(countdown&&opts.catchup){
+    const from=new Date(period.start.getFullYear(),period.start.getMonth(),1), to=endOfDay(addD(period.start,-1));
+    if(+from<=+to){
+      const win={start:from,end:to};
+      const inc=Object.keys(map).reduce((a,k)=>{const d=gvizDate(k);return d&&d>=from&&d<=to?a+map[k]:a;},0);
+      const sp=capturedSpend(INV,win).cogs+openOrders(ORDERS.concat(LOCAL_ORDERS),INV,win,now).reduce((a,o)=>a+o.total,0);
+      catchup={from,to,income:inc,spend:sp,tally:inc*TARGET_COGS_PCT/100-sp};
+    } else catchup={from,to,income:0,spend:0,tally:0};
+  }
+  const budget=sales.forecast*TARGET_COGS_PCT/100+(catchup?catchup.tally:0);
+  const allowed=sales.actual*TARGET_COGS_PCT/100;           // books mode: what 30% of income to date allows
+  return {wk:period,period,live,countdown,catchup,sales,cap,open,committed,drafted,used,budget,remaining:budget-used,
+    allowed,tally:allowed-(cap.cogs+committed),
     cogsActual: sales.actual>0?cap.cogs/sales.actual*100:0,
     cogsProjected: sales.forecast>0?used/sales.forecast*100:0};
 }
@@ -891,10 +920,10 @@ function periodModel(period,today){
 function weekModel(today){
   const wk=currentWeek(today);
   wk.short=WEEK_OFF===0?"this week":WEEK_OFF===-1?"last week":fmtD(wk.start)+" – "+fmtD(wk.end);
-  return periodModel(wk,today);
+  return periodModel(wk,today,{catchup:CATCHUP});
 }
 /* Reading routes: whatever the range bar says. */
-function rangeModel(today){ return periodModel(reportRange(),today); }
+function rangeModel(today){ return periodModel(reportRange(),today,{catchup:CATCHUP}); }
 
 /* ================= CATALOGUE ================= */
 /* No master product list exists in the platform. What you buy IS the catalogue, derived
@@ -1120,7 +1149,8 @@ function renderFilters(){
     <span class="chip sm" onclick="stepWeek(-1)">‹</span>
     <span class="chip sm on" style="cursor:default">${esc(weekLabel(currentWeek()))}</span>
     <span class="chip sm" onclick="stepWeek(1)" ${WEEK_OFF>=0?'style="opacity:.35"':""}>›</span>
-    ${WEEK_OFF!==0?`<span class="chip sm" onclick="thisWeek()">this week</span>`:""}`;
+    ${WEEK_OFF!==0?`<span class="chip sm" onclick="thisWeek()">this week</span>`:""}
+    ${catchupChip(WEEK_OFF===0)}`;
 }
 function stepWeek(d){ if(WEEK_OFF+d>0) return; WEEK_OFF+=d; renderFilters(); route(); }
 /* Ordering routes carry the ordering-week stepper; everything else reads the books through
@@ -1132,6 +1162,7 @@ function go(h){ location.hash=h; route(); }
 function warnBar(){ return LOAD_WARN.length?`<div class="err"><b>Some data didn't load.</b><br>${LOAD_WARN.map(esc).join("<br>")}</div>`:""; }
 
 function summaryBar(m){
+  if(!m.countdown) return booksBar(m);
   const b=Math.max(m.budget,1), seg=v=>Math.max(0,Math.min(100,v/b*100));
   const over=m.used>m.budget&&m.budget>0;
   const cls=m.cogsProjected<=TARGET_COGS_PCT?"good":"over";
@@ -1151,7 +1182,7 @@ function summaryBar(m){
       <div class="v">${m.budget>0?money0(m.remaining):"—"}</div>
       <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i></div>
       <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Awaiting invoice ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span></div>
-      <div class="sub">${money0(m.used)} of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of ${m.live?"forecast ":""}income${over?" — <b style='color:var(--red)'>over</b>":""}</div>
+      <div class="sub">${money0(m.used)} of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${m.catchup?` ${m.catchup.tally<0?"less":"plus"} ${money0(Math.abs(m.catchup.tally))} ${m.catchup.tally<0?"over":"under"} from ${fmtD(m.catchup.from)} – ${fmtD(m.catchup.to)}`:""}${over?" — <b style='color:var(--red)'>over</b>":""}</div>
     </div>
     <div class="tile">
       <div class="k">Income — ${esc(when)}</div>
@@ -1162,6 +1193,34 @@ function summaryBar(m){
       <div class="k">COGS %${m.live?" — projected":""} vs ${TARGET_COGS_PCT}%</div>
       <div class="v">${m.sales.forecast>0?pct1(m.cogsProjected):"—"}</div>
       <div class="sub">${m.live&&m.sales.actual>0?`${pct1(m.cogsActual)} on income so far. `:""}One venue, one set of books.</div>
+    </div></div>`;
+}
+/* The books to date — no forecast. Same four positions as the countdown so the eye lands in
+   the same place: what went out, where that leaves you, what came in, the percentage. */
+function booksBar(m){
+  const when=m.period.short||m.period.label||"";
+  const spent=m.cap.cogs+m.committed, under=m.tally>=0;
+  const cls=m.sales.actual>0?(m.cogsActual<=TARGET_COGS_PCT-2?"good":m.cogsActual<=TARGET_COGS_PCT+2?"amber":"over"):"";
+  return `<div class="summary">
+    <div class="tile">
+      <div class="k">Spent — ${esc(when)}</div>
+      <div class="v">${money0(spent)}</div>
+      <div class="sub">${m.cap.n} invoice(s)${m.committed?` · ${money0(m.committed)} awaiting invoice`:""}${m.live?" · to date":""}</div>
+    </div>
+    <div class="tile ${m.sales.actual>0?(under?"good":"over"):""}">
+      <div class="k">Tally vs ${TARGET_COGS_PCT}% — ${esc(ENTITY)}</div>
+      <div class="v">${m.sales.actual>0?(under?"+":"−")+money0(Math.abs(m.tally)):"—"}</div>
+      <div class="sub">${m.sales.actual>0?`${money0(m.allowed)} allowed at ${TARGET_COGS_PCT}% of income, ${money0(spent)} spent — <b>${under?"under":"over"}</b>${m.live?" so far":""}`:"needs income"}</div>
+    </div>
+    <div class="tile">
+      <div class="k">Income — ${esc(when)}</div>
+      <div class="v">${money0(m.sales.actual)}</div>
+      <div class="sub">${m.live?"to date, no forecast":"period complete"}</div>
+    </div>
+    <div class="tile ${cls}">
+      <div class="k">COGS % vs ${TARGET_COGS_PCT}%</div>
+      <div class="v">${m.sales.actual>0?pct1(m.cogsActual):"—"}</div>
+      <div class="sub">${m.sales.actual>0?(m.cogsActual<=TARGET_COGS_PCT?(TARGET_COGS_PCT-m.cogsActual).toFixed(1)+" points under target":(m.cogsActual-TARGET_COGS_PCT).toFixed(1)+" points over target"):"needs income"}. One venue, one set of books.</div>
     </div></div>`;
 }
 
@@ -1765,8 +1824,15 @@ function rangeBar(){
     <input type="date" id="rfrom" value="${fmtISO(r.start)}" onchange="applyRangeDates()">
     <span style="color:var(--dim);font-size:12px">→</span>
     <input type="date" id="rto" value="${fmtISO(mid(r.end))}" onchange="applyRangeDates()">
+    ${catchupChip(RANGE.kind==="week"&&o===0)}
     <span style="flex:1"></span>
     <span style="font-size:12px;color:var(--dim)">${esc(r.label)}</span>`;
+}
+/* One chip, only where a week envelope is on screen. Off on every load. */
+function catchupChip(show){
+  if(!show) return "";
+  return `<span class="chip sm ${CATCHUP?"on":""}" onclick="toggleCatchup()"
+    title="Fold this month's tally so far (30% of income less spend, up to the day before this week) into this week's envelope">catch-up${CATCHUP?" on":""}</span>`;
 }
 function setRangeKind(k){ RANGE={kind:k,off:0,from:null,to:null}; renderFilters(); route(); }
 function shiftRange(d){
