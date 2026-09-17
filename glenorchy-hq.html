@@ -144,7 +144,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v9-0810"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v10-0830"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -484,6 +484,8 @@ const TAB_COLUMNS={
      back the first sheet instead, the signature check rejects it, and the load treats that as
      "nothing turned off". */
   "ItemVisibility":["item_key","scope","hidden"],
+  /* Same story: created by Orders.gs on the first supplier turned off from this dashboard. */
+  "SupplierVisibility":["supplier","scope","visible"],
   "Sales":["date","venue","sales"]
 };
 async function fetchTab(name){
@@ -553,7 +555,7 @@ async function loadAll(){
   LOAD_WARN=[];
   try{
     const warn=l=>e=>{LOAD_WARN.push(l+": "+e.message);return [];};
-    const [inv,lines,cfgRows,pmRows,manRows,ordRows,ordLineRows,setRows,favRows,favLineRows,covRows,feed,weekly,visRows]=await Promise.all([
+    const [inv,lines,cfgRows,pmRows,manRows,ordRows,ordLineRows,setRows,favRows,favLineRows,covRows,feed,weekly,visRows,supVisRows]=await Promise.all([
       fetchTab("Invoices"),
       fetchTab("InvoiceLines"),
       fetchTab("SupplierConfig").catch(warn("SupplierConfig")),
@@ -567,7 +569,8 @@ async function loadAll(){
       fetchTab("CategoryOverrides").catch(()=>[]),
       fetchSalesDaily().catch(warn("sales feed")),
       fetchWeeklySales(gvizDate(SALES_CUTOVER)).catch(warn("weekly Sales tab")),
-      fetchTab("ItemVisibility").catch(()=>[])
+      fetchTab("ItemVisibility").catch(()=>[]),
+      fetchTab("SupplierVisibility").catch(()=>[])
     ]);
 
     CFG={};
@@ -643,12 +646,21 @@ async function loadAll(){
     LINES.forEach(l=>{ l.key=prodKey(l.supplier,l.code,l.desc,l.unit);
                        l.cat=categorise(l.supplier,l.desc,l.invCategory,l.key); });
 
+    /* Rep email, portal-only, cc and note are facts about the supplier and stay shared with
+       Cambridge Central. VISIBLE IS NOT: the SupplierSettings column is Cambridge's list and is
+       deliberately not read. This dashboard's list is the SupplierVisibility tab, scope
+       glenorchy, a row per supplier turned off here (Adrian, 18 Sep 2026 — "the lists should
+       be independent, it is overall cleaner"). */
     SSET={};
     setRows.forEach(r=>{const k=norm(r.supplier);if(!k)return;
       SSET[k]={rep_email:String(r.rep_email||"").trim(),
-               visible:String(r.visible||"").trim().toLowerCase()!=="no",
+               visible:true,
                portal_only:String(r.portal_only||"").trim().toLowerCase()==="yes",
                cc:String(r.cc||"").trim(), note:String(r.note||"").trim()};});
+    supVisRows.forEach(r=>{
+      const k=norm(r.supplier); if(!k||String(r.scope||"").trim().toLowerCase()!==VIS_SCOPE) return;
+      if(String(r.visible||"").trim().toLowerCase()==="no") SSET[k]=Object.assign({},SSET[k]||{},{visible:false});
+    });
 
     const favLines={};
     favLineRows.forEach(r=>{const id=String(r.fav_id||"").trim();if(!id)return;
@@ -2883,7 +2895,7 @@ function renderAdmin(){
   const list=supplierList(), overrides=Object.keys(COVER);
   document.getElementById("app").innerHTML=`
     <a class="back" onclick="go('')">All suppliers</a>
-    <div class="card"><div class="label">Supplier settings — global, one setting everywhere</div>
+    <div class="card"><div class="label">Supplier settings</div>
       <table><thead><tr><th>Supplier</th><th>Sales rep email</th><th class="num">Visible</th><th class="num">Portal only</th></tr></thead>
       <tbody>${list.map(s=>{const c=sset(s.name);return `<tr>
         <td><b>${esc(s.name)}</b>${s.lines?"":' <span class="pill">no line items</span>'}</td>
@@ -2896,7 +2908,9 @@ function renderAdmin(){
         <b>Sales rep email</b> is who you order from, deliberately separate from the address invoices arrive from —
         the greyed placeholder is what the invoices suggest, and it's usually a no-reply robot.<br>
         <b>Portal only</b> keeps a supplier off the ordering list while their invoices still count toward spend and
-        COGS. <b>Visible</b> hides them from ordering entirely. Both apply to every view, for everyone.
+        COGS. Rep email and portal-only are shared with Cambridge Central — they are facts about the supplier.
+        <b>Visible</b> is <b>this dashboard's list only</b>: unticking hides the supplier from Glenorchy HQ's
+        Order tab and nowhere else. Never from spend, reports or the statement.
       </div>
     </div>
     <div class="card"><div class="label">Category overrides — ${overrides.length} set by hand</div>
@@ -2911,7 +2925,10 @@ function renderAdmin(){
 async function saveSupplier(name,field,value){
   const cur=sset(name);
   SSET[norm(name)]=Object.assign({},cur,{[field]: field==="visible"?value!=="no":field==="portal_only"?value==="yes":value});
-  try{ await post({action:"supplier_setting",supplier:name,field,value}); toast("Saved for everyone."); }
+  try{
+    if(field==="visible"){ await post({action:"supplier_visibility",supplier:name,scope:VIS_SCOPE,visible:value}); toast("Saved — Glenorchy HQ only."); }
+    else { await post({action:"supplier_setting",supplier:name,field,value}); toast("Saved for everyone."); }
+  }
   catch(e){ if(e.message==="no-webapp") toast("Not saved — WEBAPP_URL isn't set."); else alert(e.message); }
 }
 

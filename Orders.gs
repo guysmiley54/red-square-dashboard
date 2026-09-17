@@ -41,7 +41,7 @@ var OB_VENUE = {
    was no way to tell from outside which code was actually live. doGet reports this, so the
    dashboard (and anyone with the URL) can see at a glance whether the deployment matches
    the repo. */
-var OB_BUILD = "gs-v11-0655";
+var OB_BUILD = "gs-v12-0830";
 
 var OB = {
   SHEET_ID:     "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4",   // BG Ops Data
@@ -50,6 +50,7 @@ var OB = {
   FAVLINES_TAB: "FavouriteLines",
   COVER_TAB:    "CategoryOverrides",
   VIS_TAB:      "ItemVisibility",
+  SUPVIS_TAB:   "SupplierVisibility",
   ORDERS_TAB:   "Orders",
   LINES_TAB:    "OrderLines",
   TARGETS_TAB:  "OrderTargets",
@@ -75,6 +76,10 @@ var VIS_HEADER    = ["item_key","scope","supplier","description","hidden","updat
    here, so a product one site never orders cannot vanish from another site's catalogue.
    Categories stay shared in CategoryOverrides. */
 var OB_VIS_SCOPES = ["glenorchy"];
+/* Per-dashboard supplier visibility (18 Sep 2026). SupplierSettings.visible is shared and
+   stays Cambridge Central's; a dashboard with its own scope keeps its "off" suppliers here.
+   A row exists only while the supplier is off, so a clean start is an empty tab. */
+var SUPVIS_HEADER = ["supplier","scope","visible","updated_by","updated_at"];
 
 /* The categories the dashboard knows how to render. A free-text category would save fine
    and then show up as a chip nobody can filter on, so the list is closed. */
@@ -102,7 +107,7 @@ function doGet() {
   return out({ ok:true, service:"Orders.gs", build:OB_BUILD,
                actions:["place","send","receive","cancel","target","supplier_setting",
                         "favourite","favourite_delete","category_override","category_bulk",
-                        "item_visibility"],
+                        "item_visibility","supplier_visibility"],
                pin_configured: !!scriptPin_(), time:new Date().toISOString() });
 }
 
@@ -138,6 +143,7 @@ function doPost(e) {
       case "category_override": return out(categoryOverride_(body, user));
       case "category_bulk":     return out(categoryBulk_(body, user));
       case "item_visibility":   return out(itemVisibility_(body, user));
+      case "supplier_visibility": return out(supplierVisibility_(body, user));
       default:        return out({ ok:false, error:"unknown action" });
     }
   } catch (err) {
@@ -395,6 +401,31 @@ function itemVisibility_(body, user) {
   if (stale > 0) sh.getRange(2 + keep.length, 1, stale, VIS_HEADER.length).clearContent();
 
   return { ok:true, scope:scope, off:off, on:on, failed:failed };
+}
+
+/* One supplier, one scope, visible yes|no. Same read-once write-once shape as itemVisibility_. */
+function supplierVisibility_(body, user) {
+  var scope = trim_(body.scope).toLowerCase();
+  if (OB_VIS_SCOPES.indexOf(scope) === -1) return { ok:false, error:"unknown scope: " + scope };
+  var name = trim_(body.supplier).slice(0, 120);
+  var vis = trim_(body.visible).toLowerCase();
+  if (!name) return { ok:false, error:"no supplier" };
+  if (vis !== "yes" && vis !== "no") return { ok:false, error:"visible must be yes or no" };
+
+  var sh = tab_(OB.SUPVIS_TAB, SUPVIS_HEADER);
+  var last = sh.getLastRow();
+  var rows = last > 1 ? sh.getRange(2, 1, last - 1, SUPVIS_HEADER.length).getValues() : [];
+  var keep = [];
+  for (var i = 0; i < rows.length; i++) {
+    var same = String(rows[i][0]).trim().toLowerCase() === name.toLowerCase()
+            && String(rows[i][1]).trim().toLowerCase() === scope;
+    if (!same) keep.push(rows[i]);
+  }
+  if (vis === "no") keep.push([name, scope, "no", user, new Date()]);
+  if (keep.length) sh.getRange(2, 1, keep.length, SUPVIS_HEADER.length).setValues(keep);
+  var stale = (last - 1) - keep.length;
+  if (stale > 0) sh.getRange(2 + keep.length, 1, stale, SUPVIS_HEADER.length).clearContent();
+  return { ok:true, scope:scope, supplier:name, visible:vis };
 }
 
 function writeCover_(sh, o, user) {
@@ -678,6 +709,7 @@ function setup() {
   tab_(OB.FAVLINES_TAB, FAVLINE_HEADER);
   tab_(OB.COVER_TAB, COVER_HEADER);
   tab_(OB.VIS_TAB, VIS_HEADER);
+  tab_(OB.SUPVIS_TAB, SUPVIS_HEADER);
   var pin = scriptPin_();
   Logger.log(pin ? "ORDER_PIN is set. Tabs ready." :
     "Tabs ready. NOW SET ORDER_PIN: Project Settings > Script Properties > Add, key ORDER_PIN.");
