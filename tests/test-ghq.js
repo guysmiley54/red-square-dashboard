@@ -49,7 +49,7 @@ const TABS={
   ]),
   OrderLines: csv(["order_id","line_no","item_code","description","unit","qty","unit_price","line_total"],[
     ["og1","1","","Bananas","kg","8","10","80"],["oc1","1","","Bananas","kg","500","10","5000"]]),
-  SupplierSettings: csv(["supplier","rep_email","visible","portal_only","cc","note"],[["Fresh Cut","rep@freshcut.example","no","no","",""]]),
+  SupplierSettings: csv(["supplier","rep_email","visible","portal_only","cc","note"],[["Fresh Cut","rep@freshcut.example","no","yes","",""]]),   // Cambridge's flags: both ignored here
   SupplierVisibility: null,   // per run: present (Doppio off here, PFD off for a foreign scope) or absent (gviz trap)
   Favourites: csv(["fav_id","fav_name","venue","supplier","created_by","created_at"],[["f1","Glen weekly",G,"Fresh Cut","Tam",""],["f2","Camb weekly",C,"Fresh Cut","Ange",""]]),
   FavouriteLines: csv(["fav_id","line_no","item_key","description","unit","qty","supplier"],[["f1","1","x","Bananas","kg","4","Fresh Cut"],["f2","1","x","Bananas","kg","40","Fresh Cut"]]),
@@ -69,19 +69,35 @@ const feedDaily=csv(["date","venue","sales"],[
   ...[1,2,3,4,5,6].flatMap(w=>[0,1,2,3,4,5,6].map(d=>[iso(wd(d-7*w)),C,"9000"])),
   ["2026-08-10",G,"500"],["2026-08-04",G,"500"]   // inside the overlap fortnight
 ]);
-const feedItems=csv(["timestamp","venue","category","department","item","qty","sales"],[
+const FEED_ROWS=[
   [iso(wd(0))+" 08:15:00",G,"Beverage D/H","Coffee / Tea","Flat White","20","100"],
   [iso(wd(0))+" 09:15:00",G,"Beverage D/H","Coffee / Tea","Flat White","2","0"],
   [iso(wd(0))+" 12:15:00",G,"Food T/A","Takeaway","Ham Roll","5","50"],
+  [iso(wd(0))+" 12:16:00",G,"Food T/A","Takeaway","Ham Roll","2","0"],          // binned (Sandwiches via Overrides)
+  [iso(wd(0))+" 12:17:00",G,"Food T/A","Takeaway","Egg Sandwich","4","20"],
+  [iso(wd(0))+" 12:18:00",G,"Food T/A","Takeaway","Egg Sandwich","1","0"],      // binned
   [iso(wd(0))+" 12:20:00",G,"No Cat.","","Mystery Item","1","9"],
   [iso(wd(0))+" 08:15:00",C,"Beverage D/H","Coffee","Cambridge Latte","200","1000"],
-  [iso(wd(0))+" 08:15:00",L,"Luma Food D/H","Luma Kitchen","Luma Bowl","200","1000"]
-]);
+  [iso(wd(0))+" 08:15:00",L,"Luma Food D/H","Luma Kitchen","Luma Bowl","200","1000"],
+  // the four complete weeks before this one: Flat White 25 a week ($125), Ham Roll 8 a week ($80)
+  ...[7,14,21,28].flatMap(d=>[[iso(wd(-d))+" 08:15:00",G,"Beverage D/H","Coffee / Tea","Flat White","25","125"],
+                              [iso(wd(-d))+" 12:15:00",G,"Food T/A","Takeaway","Ham Roll","8","80"]])
+];
+const FEED_HEAD=["timestamp","venue","category","department","item","qty","sales"];
+// gviz does the date filtering on the live sheet; the fake server has to as well, or "usual"
+// (the weeks BEFORE the range) would just be the range again
+function feedItemsFor(tq){
+  const m=/date '(\d{4}-\d{2}-\d{2})' and B <= date '(\d{4}-\d{2}-\d{2})'/.exec(tq);
+  const rows=m?FEED_ROWS.filter(r=>r[0].slice(0,10)>=m[1]&&r[0].slice(0,10)<=m[2]):FEED_ROWS;
+  return csv(FEED_HEAD,rows);
+}
+const overrides=csv(["kind","from","group"],[["item","Ham Roll","Sandwiches"],["item","Egg Sandwich","Sandwiches"]]);
 
 function serve(url){
   const u=new URL(url); const sheet=u.searchParams.get("sheet"); const tq=u.searchParams.get("tq")||"";
-  if(sheet==="SalesFeed"){ if(/select B, C, sum\(H\)/.test(tq)) return feedDaily; if(/select A,C,D,E,F,G,H/.test(tq)) return feedItems; return feedItems; }
-  if(sheet==="Overrides"||sheet==="ItemMap") return TABS.Invoices;   // the gviz trap: wrong tab, HTTP 200
+  if(sheet==="SalesFeed"){ if(/select B, C, sum\(H\)/.test(tq)) return feedDaily; return feedItemsFor(tq); }
+  if(sheet==="Overrides") return overrides;
+  if(sheet==="ItemMap") return TABS.Invoices;   // the gviz trap: wrong tab, HTTP 200
   if(TABS[sheet]!=null) return TABS[sheet];
   return TABS.Invoices;   // gviz trap for anything unknown
 }
@@ -106,8 +122,9 @@ async function run(withVis){
   // Cambridge Central turned Naan off and gave it a category; the category must apply here, the "off" must not
   TABS.CategoryOverrides=csv(["item_key","supplier","description","category","hidden","updated_by","updated_at"],
     [[NAAN,"PFD Food Services","Naan Bread","Bakery","yes","Ange",""],[PEAS,"Fresh Cut","Peas","","yes","Ange",""]]);
-  TABS.SupplierVisibility=withVis?csv(["supplier","scope","visible","updated_by","updated_at"],
-    [["Doppio Foods","glenorchy","no","Tam",""],["PFD Food Services","cambridge","no","x",""]]):null;
+  // Doppio off (a legacy row: visible=no, no ordering column value), PFD portal, Fresh Cut off under a FOREIGN scope
+  TABS.SupplierVisibility=withVis?csv(["supplier","scope","visible","updated_by","updated_at","ordering"],
+    [["Doppio Foods","glenorchy","no","Tam","",""],["PFD Food Services","glenorchy","yes","Tam","","portal"],["Fresh Cut","cambridge","no","x","","off"]]):null;
   TABS.ItemVisibility=withVis?csv(["item_key","scope","supplier","description","hidden","updated_by","updated_at"],
     [[BAN,"glenorchy","Fresh Cut","Bananas","yes","Tam",""],[PEAS,"cambridge","Fresh Cut","Peas","yes","x",""]]):null;
   ok("title is Glenorchy HQ", w.document.title==="Glenorchy HQ");
@@ -188,7 +205,9 @@ async function run(withVis){
     ev("shiftRange(-1)"); await new Promise(r=>setTimeout(r,30));
     ok("last week: label says so, Doppio absent (nothing bought)", /\(last week\)/.test(cardByLabel("Suppliers by spend").querySelector(".label").textContent) && !rowsOf(cardByLabel("Suppliers by spend")).some(r=>r[0].startsWith("Doppio")));
     ev("setRangeKind('all')"); await new Promise(r=>setTimeout(r,30));
-    ok("all time: label, every Glenorchy supplier, ‹ › hidden", /all captured data/.test(cardByLabel("Suppliers by spend").querySelector(".label").textContent) && rowsOf(cardByLabel("Suppliers by spend")).length===4 && !/‹/.test(w.document.getElementById("filters").textContent), rowsOf(cardByLabel("Suppliers by spend")).map(r=>r[0]));
+    // "all time" ends today: on a Monday the Tuesday-dated fixtures (G2, Woolworths) are still in the future
+    const allN=wd(1)<=today?4:3;
+    ok("all time: label, every Glenorchy supplier to date, ‹ › hidden", /all captured data/.test(cardByLabel("Suppliers by spend").querySelector(".label").textContent) && rowsOf(cardByLabel("Suppliers by spend")).length===allN && !/‹/.test(w.document.getElementById("filters").textContent), rowsOf(cardByLabel("Suppliers by spend")).map(r=>r[0]));
     // ---- the header follows the range (Adrian, 17 Sep): a 5-week custom range in progress
     const tile=i=>[...app().querySelectorAll(".summary .tile")][i].textContent.replace(/\s+/g," ").trim();
     ev(`RANGE={kind:"custom",off:0,from:"${iso(wd(-28))}",to:"${iso(wd(6))}"}; renderFilters(); route()`); await new Promise(r=>setTimeout(r,30));
@@ -269,20 +288,38 @@ async function run(withVis){
   // ---- supplier visibility is this dashboard's own list
   {
     const names=ev("supplierList().filter(s=>s.orderable).map(s=>s.name)");
-    ok("Cambridge's visible=no on Fresh Cut ignored — Fresh Cut orderable", names.indexOf("Fresh Cut")>-1, names);
-    ok(withVis?"Doppio off here (SupplierVisibility, scope glenorchy)":"no tab yet — Doppio orderable", (names.indexOf("Doppio Foods")>-1)!==withVis, names);
-    ok("PFD off under a foreign scope — still orderable here", names.indexOf("PFD Food Services")>-1, names);
-    ok("hidden supplier still counts in spend", ev("spendRows(reportRange()).sup.some(x=>x.name==='Doppio Foods')"));
+    ok("Cambridge's visible=no / portal_only=yes on Fresh Cut ignored — Fresh Cut orderable, not portal", names.indexOf("Fresh Cut")>-1 && ev("sset('Fresh Cut').ordering")==="here", names);
+    ok(withVis?"Doppio off here (legacy visible=no row reads as off)":"no tab yet — Doppio orderable", (names.indexOf("Doppio Foods")>-1)!==withVis && ev("sset('Doppio Foods').ordering")===(withVis?"off":"here"), names);
+    ok(withVis?"PFD portal — not orderable here":"no tab yet — PFD orderable", (names.indexOf("PFD Food Services")>-1)!==withVis && ev("sset('PFD Food Services').ordering")===(withVis?"portal":"here"), names);
+    ok("foreign-scope Fresh Cut row ignored", ev("sset('Fresh Cut').ordering")==="here");
+    ok("off and portal suppliers still count in spend", ev("spendRows(reportRange()).sup.some(x=>x.name==='Doppio Foods')") && ev("spendRows({start:new Date(2000,0,1),end:new Date(2100,0,1),label:'x'}).sup.some(x=>x.name==='PFD Food Services')"));
+    ok("no portal reveal chip on the Order tab", !/portal-only/.test(order));
+    if(withVis){
+      ev("setRangeKind('all')"); ev("go('rsup::PFD%20Food%20Services')"); await new Promise(r=>setTimeout(r,30));
+      const t=app().textContent;
+      ok("portal supplier drill: note instead of Build order", /own portal/.test(t) && !/Build order/.test(t));
+      ev("go('rsup::Doppio%20Foods')"); await new Promise(r=>setTimeout(r,30));
+      const t2=app().textContent;
+      ok("off supplier drill: no button, no note", !/own portal/.test(t2) && !/Build order/.test(t2));
+      ev("resetRange()");
+    }
+    ev("go('rsup::Fresh%20Cut')"); await new Promise(r=>setTimeout(r,30));
+    ok("order-here supplier drill: Build order button", /Build order/.test(app().textContent));
+    // Admin: one Ordering column, three chips, per-dashboard write
+    ev("go('admin')"); await new Promise(r=>setTimeout(r,30));
+    const ths=[...app().querySelectorAll("table thead th")].map(t=>t.textContent.trim());
+    ok("admin: Ordering column, no Visible / Portal only ticks", ths.indexOf("Ordering — Glenorchy HQ")>-1 && ths.indexOf("Visible")<0 && ths.indexOf("Portal only")<0, ths);
     const n0=POSTS.length;
-    await ev("saveSupplier('Fresh Cut','visible','no')");
+    await ev("saveOrdering('Fresh Cut','portal')");
     const vp=POSTS[POSTS.length-1]||{};
-    ok("Admin untick posts supplier_visibility, scope glenorchy", POSTS.length===n0+1 && vp.action==="supplier_visibility" && vp.scope==="glenorchy" && vp.supplier==="Fresh Cut" && vp.visible==="no", vp);
-    ok("no supplier_setting sent for visible", !POSTS.slice(n0).some(x=>x.action==="supplier_setting"));
-    ok("Fresh Cut now off locally", ev("!sset('Fresh Cut').visible"));
-    await ev("saveSupplier('Fresh Cut','visible','yes')");
-    ok("tick back on", ev("sset('Fresh Cut').visible") && POSTS[POSTS.length-1].visible==="yes");
+    ok("Admin chip posts supplier_visibility with ordering, scope glenorchy", POSTS.length===n0+1 && vp.action==="supplier_visibility" && vp.scope==="glenorchy" && vp.supplier==="Fresh Cut" && vp.ordering==="portal", vp);
+    ok("Fresh Cut now portal locally — off the order list, in spend", ev("sset('Fresh Cut').portal_only") && !ev("supplierList().find(s=>s.name==='Fresh Cut').orderable") && ev("spendRows(reportRange()).sup.some(x=>x.name==='Fresh Cut')"));
+    await ev("saveOrdering('Fresh Cut','here')");
+    ok("back to order here", ev("sset('Fresh Cut').orderHere") && POSTS[POSTS.length-1].ordering==="here");
+    ok("bad ordering value ignored", (await ev("saveOrdering('Fresh Cut','maybe')"), ev("sset('Fresh Cut').ordering")==="here" && POSTS[POSTS.length-1].ordering==="here"));
     await ev("saveSupplier('Fresh Cut','rep_email','new@x.example')");
     ok("rep email still goes to the shared supplier_setting", POSTS[POSTS.length-1].action==="supplier_setting" && POSTS[POSTS.length-1].field==="rep_email");
+    ev("SSET[norm('Fresh Cut')].rep_email='rep@freshcut.example'; go('order')"); await new Promise(r=>setTimeout(r,30));
   }
   ok("order tab: ordering list with countdown", /Start an order — Red Square Glenorchy/.test(order) && /Left to spend/.test(order));
   ok("order tab: week stepper in the filter strip, no range chips", /Tag: Glenorchy/.test(w.document.getElementById("filters").textContent) && !/Quarter/.test(w.document.getElementById("filters").textContent));
@@ -295,6 +332,7 @@ async function run(withVis){
   ok("usual/wk: Doppio 55.00", Math.abs(usualOf("Doppio Foods")-55)<1e-9, usualOf("Doppio Foods"));
   ok("usual/wk: PFD 24.00 (G5 at −29d excluded)", Math.abs(usualOf("PFD Food Services")-24)<1e-9, usualOf("PFD Food Services"));
   ok("order tab shows Usual/wk column", /Usual\/wk/.test(order) && /\$37\.50/.test(order) && (withVis||/\$55\.00/.test(order)));
+  ok(withVis?"order tab: PFD (portal) and Doppio (off) absent":"order tab: everyone present", withVis?!/PFD Food Services|Doppio Foods/.test(order):/PFD Food Services/.test(order)&&/Doppio Foods/.test(order));
   // ---- turned-off items are per dashboard ----
   const naan=ev(`deriveCatalogue(LINES,"PFD Food Services",new Date()).find(p=>p.desc==="Naan Bread")`);
   ok("Naan: Cambridge's 'off' ignored", naan && naan.hidden===false, naan&&naan.hidden);
@@ -344,7 +382,7 @@ async function run(withVis){
   ev(`go('sales')`); await new Promise(r=>setTimeout(r,400));
   ev(`route()`); await new Promise(r=>setTimeout(r,50));
   const sd=ev(`Object.values(SD).flat()`);
-  ok("item feed: only Glenorchy rows", sd.length===4 && sd.every(r=>r.venue===G), sd.map(r=>r.item+"@"+r.venue));
+  ok("item feed: only Glenorchy rows, this week only", sd.length===7 && sd.every(r=>r.venue===G), sd.map(r=>r.item+"@"+r.venue));
   ok("item feed: 'No Cat.' -> Uncategorised", (sd.find(r=>r.item==="Mystery Item")||{}).group==="Uncategorised", sd.map(r=>r.item+":"+r.group));
   const sales=w.document.getElementById("app").textContent;
   ok("sales page: no store chips / Both", !/Both/.test(sales) && !/both kitchens/.test(sales));
@@ -360,14 +398,14 @@ async function run(withVis){
   const bought=cardByLabel("Top 10 purchased");
   ok("bought card present", !!bought);
   const br=rowsOf(bought);
-  ok("bought: Blend Beans first (300 > 100)", br[0]&&br[0][0]==="Blend Beans 1kg"&&/\$300\.00/.test(br[0][3]), br.map(r=>r[0]+" "+r[3]));
+  ok("bought: Blend Beans first (300 > 100)", br[0]&&br[0][0]==="Blend Beans 1kg"&&/\$300\.00/.test(br[0][4]), br.map(r=>r[0]+" "+r[4]));
   ok("bought: this week only — Naan (last week) absent", !br.some(r=>r[0]==="Naan Bread"));
   ok("bought: fee line stripped", !br.some(r=>/Delivery Fee/.test(r[0])));
   ok("bought: 3 products, $500 total", /3 products · \$500\.00/.test(bought.textContent), bought.querySelector(".note").textContent.slice(0,60));
   const peas=br.find(r=>r[0]==="Peas"), beans=br.find(r=>r[0]==="Blend Beans 1kg"), ban=br.find(r=>r[0]==="Bananas");
-  ok("bought: Peas ▲ 11.1% vs $18 before range", peas&&/▲ 11\.1%/.test(peas[5]), peas&&peas[5]);
-  ok("bought: Beans ▼ 9.1% vs $110 before range", beans&&/▼ 9\.1%/.test(beans[5]), beans&&beans[5]);
-  ok("bought: Bananas steady", ban&&/—/.test(ban[5])&&!/[▲▼]/.test(ban[5]), ban&&ban[5]);
+  ok("bought: Peas ▲ 11.1% vs $18 before range", peas&&/▲ 11\.1%/.test(peas[6]), peas&&peas[6]);
+  ok("bought: Beans ▼ 9.1% vs $110 before range", beans&&/▼ 9\.1%/.test(beans[6]), beans&&beans[6]);
+  ok("bought: Bananas steady", ban&&/—/.test(ban[6])&&!/[▲▼]/.test(ban[6]), ban&&ban[6]);
   ok("bought: rows link to price history", /rprod::/.test(bought.innerHTML));
   // creep
   const creep=cardByLabel("Price creep");
@@ -384,21 +422,48 @@ async function run(withVis){
   const sold=cardByLabel("Top 10 sold");
   ok("sold card present", !!sold);
   const sr=rowsOf(sold);
-  ok("sold: Flat White first, 20 paid units (the $0 loyalty line excluded), $100, 62.9%", sr[0]&&sr[0][0]==="Flat White"&&sr[0][2]==="20"&&sr[0][3]==="$100.00"&&sr[0][4]==="62.9%", sr[0]);
-  ok("sold: 3 products, $159 paid", /3 products · \$159\.00 paid sales/.test(sold.textContent), sold.querySelector(".note").textContent.slice(0,50));
-  ev("setSoldBy('qty')"); await new Promise(r=>setTimeout(r,50));
-  const sq=rowsOf(cardByLabel("Top 10 sold"));
-  ok("sold by units: Flat White 20 = 76.9% of 26 units", sq[0]&&sq[0][0]==="Flat White"&&sq[0][4]==="76.9%", sq[0]);
-  ev("setSoldBy('sales')");
+  ok("sold: Flat White first, $100 (the $0 loyalty line excluded), 20 units, 55.9% of $179", sr[0]&&sr[0][0]==="Flat White"&&sr[0][2]==="$100.00"&&sr[0][4]==="20"&&sr[0][5]==="55.9%", sr[0]);
+  ok("sold: 4 products, $179 paid", /4 products · \$179\.00 paid sales/.test(sold.textContent), sold.querySelector(".note").textContent.slice(0,50));
+  // usual: the prior 4 weeks load second; wait for them
+  await new Promise(r=>setTimeout(r,400)); ev("route()"); await new Promise(r=>setTimeout(r,50));
+  {
+    const sc=ev("rangeScale(reportRange())");
+    const mult=sc.weeks*(sc.live?sc.frac:1);             // this week, pro-rated
+    const rows=rowsOf(cardByLabel("Top 10 sold"));
+    const fw=rows.find(r=>r[0]==="Flat White"), hr=rows.find(r=>r[0]==="Ham Roll"), eg=rows.find(r=>r[0]==="Egg Sandwich");
+    const near=(txt,v)=>Math.abs(parseFloat(String(txt).replace(/[^0-9.]/g,""))-Math.round(v))<=1;
+    ok("sold usual: Flat White usual revenue = $125/wk pro-rated, ▲ (100 > usual)", fw&&near(fw[3],125*mult)&&(100>125*mult*1.1?/▲/.test(fw[3]):true), [fw&&fw[3],125*mult]);
+    ok("sold usual: Ham Roll usual $80/wk pro-rated", hr&&near(hr[3],80*mult), [hr&&hr[3],80*mult]);
+    ok("sold usual: Egg Sandwich never seen before — no usual, no arrow", eg&&/—/.test(eg[3])&&!/[▲▼]/.test(eg[3]), eg);
+    ok("sold: note explains usual and pro-rating", new RegExp(sc.live?"pro-rated to the "+sc.elapsed+" of "+sc.days+" days":"rate over the 4 full weeks").test(cardByLabel("Top 10 sold").textContent));
+    ev("setSoldBy('qty')"); await new Promise(r=>setTimeout(r,50));
+    const sq=rowsOf(cardByLabel("Top 10 sold"));
+    ok("sold by units: Flat White 20 = 66.7% of 30 units, usual 25/wk pro-rated", sq[0]&&sq[0][0]==="Flat White"&&sq[0][5]==="66.7%"&&near(sq[0][3],25*mult), sq[0]);
+    ev("setSoldBy('sales')");
+    // wastage, always by % wasted: Ham Roll 2 of 7 = 28.6% before Egg Sandwich 1 of 5 = 20%
+    const wc=cardByLabel("Wastage — in range");
+    const wr=rowsOf(wc);
+    ok("wastage card on Reports, Ham Roll 28.6% first then Egg Sandwich 20.0%", wc&&wr.length===3&&wr[0][0]==="Ham Roll"&&wr[0][4]==="28.6%"&&wr[1][0]==="Egg Sandwich"&&wr[1][4]==="20%", wr);
+    ok("wastage: value at own selling price — Ham Roll 2 × $10 = $20, total $25", wr[0][5]==="$20.00"&&/\$25\.00/.test(wr[2].join(" ")), wr);
+    ok("wastage: red at 25%+", wc.querySelector("tbody tr td.up")!==null);
+    ok("wastage: Flat White's $0 loyalty line is not wastage (Coffee & Tea)", !wr.some(r=>r[0]==="Flat White"));
+    // purchases usual: Bananas 15 kg at −20d → 3.75/wk; Beans 2 kg at −25d → 0.5/wk; Peas only at −29d → none
+    const br2=rowsOf(cardByLabel("Top 10 purchased"));
+    const ban=br2.find(r=>r[0]==="Bananas"), bea=br2.find(r=>r[0]==="Blend Beans 1kg"), pea=br2.find(r=>r[0]==="Peas");
+    const nearQ=(txt,v)=>Math.abs(parseFloat(String(txt).replace(/[^0-9.]/g,""))-Math.round(v*10)/10)<0.06;
+    ok("bought usual: Bananas 3.75/wk pro-rated, ▲ (10 kg bought)", ban&&nearQ(ban[3],3.75*mult)&&/▲/.test(ban[3]), [ban&&ban[3],3.75*mult]);
+    ok("bought usual: Beans 0.5/wk pro-rated, ▲ (3 kg)", bea&&nearQ(bea[3],0.5*mult)&&/▲/.test(bea[3]), [bea&&bea[3],0.5*mult]);
+    ok("bought usual: Peas nothing in the 4 weeks before — blank", pea&&/—/.test(pea[3])&&!/[▲▼]/.test(pea[3]), pea);
+  }
   // wide range: the feed is not pulled
   const fetches0=FETCHES.length;
   ev(`RANGE={kind:"custom",off:0,from:"${iso(wd(-175))}",to:"${iso(wd(6))}"}; renderFilters(); route()`); await new Promise(r=>setTimeout(r,50));
   const sold26=cardByLabel("Top 10 sold");
   ok("26w: feed not fetched, says Week/Month/Quarter", /Week, Month or Quarter/.test(sold26.textContent) && !FETCHES.slice(fetches0).some(u=>/select A,C,D,E,F,G,H/.test(u)), sold26.textContent.slice(0,80));
   const b26=rowsOf(cardByLabel("Top 10 purchased"));
-  ok("26w: Naan now in the purchased list with no price change on record", b26.some(r=>r[0]==="Naan Bread"&&/—/.test(r[5])), b26.map(r=>r[0]));
+  ok("26w: Naan now in the purchased list with no price change on record", b26.some(r=>r[0]==="Naan Bread"&&/—/.test(r[6])), b26.map(r=>r[0]));
   const peas26=b26.find(r=>r[0]==="Peas");
-  ok("26w: Peas baseline falls back to first price in range (18 → 20 still ▲ 11.1%)", peas26&&/▲ 11\.1%/.test(peas26[5]), peas26&&peas26[5]);
+  ok("26w: Peas baseline falls back to first price in range (18 → 20 still ▲ 11.1%)", peas26&&/▲ 11\.1%/.test(peas26[6]), peas26&&peas26[6]);
   // a range before the feed existed
   ev("RANGE={kind:'custom',off:0,from:'2026-07-06',to:'2026-07-12'}; renderFilters(); route()"); await new Promise(r=>setTimeout(r,50));
   ok("pre-cutover: sold card explains, no fetch", /only exist from 3\/8\/2026|only exist from 03\/08\/2026/.test(cardByLabel("Top 10 sold").textContent) && !FETCHES.slice(fetches0).some(u=>/select A,C,D,E,F,G,H/.test(u)), cardByLabel("Top 10 sold").textContent.slice(0,90));
