@@ -144,7 +144,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v12-1232"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v13-1243"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1911,12 +1911,13 @@ function usualMark(actual,usual,kind){
   if(!(usual>0)) return "";
   const up=actual>usual*1.1, down=actual<usual*0.9;
   if(!up&&!down) return ' <span style="color:var(--dim)">–</span>';
-  const good=kind==="sales"?up:down;
-  return ` <span class="${good?"down":"up"}" title="usual ${Math.round(usual*10)/10}">${up?"▲":"▼"}</span>`;
+  const good=(kind==="sales"||kind==="money")?up:down;
+  const fmt=kind==="money"?money0(usual):String(Math.round(usual*10)/10);
+  return ` <span class="${good?"down":"up"}" title="usual ${fmt}">${up?"▲":"▼"}</span>`;
 }
-const usualNote=sc=>`<b>Usual</b> is the product's rate over the ${AVG_WEEKS} full weeks before the range, scaled to
-  ${sc.weeks===1?"a week":wksLabel(sc.weeks)}${sc.live?` and pro-rated to the ${sc.elapsed} of ${sc.days} days so far`:""};
-  ▲▼ marks more or less than 10% off it, blank where nothing was seen before.`;
+const usualNote=sc=>`▲▼ compares with the product's <b>usual</b> — its rate over the ${AVG_WEEKS} full weeks before the range,
+  scaled to ${sc.weeks===1?"a week":wksLabel(sc.weeks)}${sc.live?` and pro-rated to the ${sc.elapsed} of ${sc.days} days so far`:""};
+  more or less than 10% off it earns an arrow, hover for the figure, nothing where the product was not seen before.`;
 function rangeProducts(range){
   const map={}, sc=rangeScale(range), uFrom=addD(mid(range.start),-7*AVG_WEEKS);
   LINES.forEach(l=>{
@@ -1960,12 +1961,11 @@ function repBoughtCard(range,prods){
   const sc=rangeScale(range);
   return `<div class="card"><div class="label">Top 10 purchased — by spend in range</div>
     ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Supplier</th><th class="num">Qty</th>
-      <th class="num">Usual</th><th class="num">Spend</th><th class="num hide-sm">%</th><th class="num">Price</th></tr></thead>
+      <th class="num">Spend</th><th class="num hide-sm">%</th><th class="num">Price</th></tr></thead>
       <tbody>${top.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
         <td><b>${esc(p.desc)}</b></td>
         <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
-        <td class="num">${qtyFmt(p.qty,p.unit)}</td>
-        <td class="num">${p.usualQty>0?Math.round(p.usualQty*10)/10:'<span style="color:var(--dim)">—</span>'}${usualMark(p.qty,p.usualQty,"spend")}</td>
+        <td class="num">${qtyFmt(p.qty,p.unit)}${usualMark(p.qty,p.usualQty,"spend")}</td>
         <td class="num"><b>${money(p.spend)}</b></td>
         <td class="num hide-sm" style="color:var(--dim)">${tot?pct1(p.spend/tot*100):""}</td>
         <td class="num">${money(p.price)} ${creepChip(p)}</td></tr>`).join("")}</tbody></table>
@@ -2018,9 +2018,12 @@ function repSoldCard(range){
   const sc=rangeScale(range), byQty=REP_SOLD_BY==="qty";
   /* Paid units only. A $0 line is a loyalty coffee or a binned sandwich — counting it as sold
      would inflate anything these numbers go on to feed. Kitchen requests are not sales. */
-  const rows=sdSales(f.rows).filter(r=>r.sales>0), m={};
+  const rows=sdSales(f.rows).filter(r=>r.sales>0), m={}, tradingDays={};
   rows.forEach(r=>{ const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",qty:0,sales:0,uq:0,us:0});
-    o.qty+=r.qty; o.sales+=r.sales; });
+    o.qty+=r.qty; o.sales+=r.sales; tradingDays[fmtISO(r.ts)]=1; });
+  /* Units/day over the days that actually traded in the range, so a Monday-morning week is
+     not divided by seven. */
+  const nDays=Math.max(1,Object.keys(tradingDays).length);
   if(f.prior){
     const pw=f.prior.days/7, mult=sc.weeks*(sc.live?sc.frac:1)/pw;
     f.prior.rows.forEach(r=>{ if(!(r.sales>0)||!m[r.item]) return; m[r.item].uq+=r.qty*mult; m[r.item].us+=r.sales*mult; });
@@ -2028,21 +2031,21 @@ function repSoldCard(range){
   const list=Object.values(m).sort((a,b)=>byQty?b.qty-a.qty:b.sales-a.sales);
   const rev=list.reduce((s,o)=>s+o.sales,0), units=list.reduce((s,o)=>s+o.qty,0);
   const top=list.slice(0,10);
-  const usualCell=o=>{ if(f.priorPending) return '<span style="color:var(--dim)">…</span>';
-    const u=byQty?o.uq:o.us, a=byQty?o.qty:o.sales;
-    return (u>0?(byQty?Math.round(u*10)/10:money0(u)):'<span style="color:var(--dim)">—</span>')+usualMark(a,u,"sales"); };
+  const mark=o=>{ if(f.priorPending) return ' <span style="color:var(--dim)">…</span>';
+    return byQty?usualMark(o.qty,o.uq,"sales"):usualMark(o.sales,o.us,"money"); };
   return `<div class="card">${head}
     ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Category</th><th class="num">${byQty?"Units":"Revenue"}</th>
-      <th class="num">Usual</th><th class="num hide-sm">${byQty?"Revenue":"Units"}</th><th class="num">%</th></tr></thead>
+      <th class="num hide-sm">${byQty?"Revenue":"Units"}</th><th class="num" title="units over the ${nDays} trading day(s) in the range">Units/day</th><th class="num">%</th></tr></thead>
       <tbody>${top.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
         <td class="hide-sm">${o.group?`<span class="pill">${esc(o.group)}</span>`:""}</td>
-        <td class="num"><b>${byQty?Math.round(o.qty*100)/100:money(o.sales)}</b></td>
-        <td class="num">${usualCell(o)}</td>
+        <td class="num"><b>${byQty?Math.round(o.qty*100)/100:money(o.sales)}</b>${mark(o)}</td>
         <td class="num hide-sm">${byQty?money(o.sales):Math.round(o.qty*100)/100}</td>
+        <td class="num">${Math.round(o.qty/nDays*10)/10}</td>
         <td class="num" style="color:var(--dim)">${byQty?(units?pct1(o.qty/units*100):""):(rev?pct1(o.sales/rev*100):"")}</td></tr>`).join("")}</tbody></table>
       <div class="note">${list.length} products · ${money(rev)} paid sales${f.start>range.start?` from ${fmtD(f.start)} (the feed starts there)`:""}.
         Paid units only — $0 lines (loyalty coffees, wastage) and kitchen requests are excluded.
-        % is share of ${byQty?"units":"revenue"} across every product in the range. ${usualNote(sc)}</div>`
+        % is share of ${byQty?"units":"revenue"} across every product in the range. Units/day is over the ${nDays}
+        trading day(s) in the range. ${usualNote(sc)}</div>`
       :`<div class="note">No paid item sales in ${esc(range.label)}.</div>`}</div>`;
 }
 
