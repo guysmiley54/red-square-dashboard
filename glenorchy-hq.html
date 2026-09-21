@@ -91,6 +91,11 @@
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:40;display:flex;align-items:center;justify-content:center;padding:16px}
   .modal .box{background:#fff;border-radius:12px;padding:18px;max-width:680px;width:100%;max-height:88vh;overflow:auto}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .help h2{font-size:17px;margin:22px 0 8px} .help h2:first-child{margin-top:0}
+  .help p,.help li{font-size:14px;line-height:1.55} .help ol,.help ul{padding-left:22px;margin:6px 0}
+  .help img{display:block;width:100%;max-width:1150px;border:1px solid var(--line);border-radius:8px;margin:8px 0 4px}
+  .help .cap{font-size:12px;color:var(--dim);margin-bottom:10px}
+  .help .b{display:inline-block;width:18px;height:18px;border-radius:50%;background:var(--red);color:#fff;font:700 11px/18px sans-serif;text-align:center;margin-right:4px}
   @media (max-width:760px){.grid2{grid-template-columns:1fr}}
   .sw{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
 </style>
@@ -106,6 +111,7 @@
   <a class="hbtn" onclick="go('sales')">Sales</a>
   <a class="hbtn" onclick="go('order')">Order</a>
   <a class="hbtn" onclick="go('admin')">Admin</a>
+  <a class="hbtn" onclick="go('help')" title="How to use this page">?</a>
   <button onclick="loadAll()">↻</button>
 </header>
 <div id="filters"></div>
@@ -144,7 +150,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v13-1243"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v14-1256"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1158,7 +1164,7 @@ function renderFilters(){
   /* The Sales tab carries its own period control. Showing the ordering week stepper above it
      put two date pickers on one screen where only the lower one moved the data. */
   const h=decodeURIComponent(location.hash.slice(1));
-  if(h==="sales"){ document.getElementById("filters").innerHTML=""; return; }
+  if(h==="sales"||h==="help"){ document.getElementById("filters").innerHTML=""; return; }
   if(!isOrderingRoute(h)){ document.getElementById("filters").innerHTML=rangeBar(); return; }
   document.getElementById("filters").innerHTML=`
     <span class="chip sm on" style="cursor:default" title="Ordering for delivery to ${esc(TAG.name)}">Tag: ${esc(TAG.short)}</span>
@@ -1247,6 +1253,7 @@ function route(){
   const h=decodeURIComponent(location.hash.slice(1));
   renderFilters();          // the bar belongs to the route, so it is decided here, once
   if(h==="order"){ SUPPLIER=""; return renderOrderHome(); }
+  if(h==="help") return renderHelp();
   if(h==="admin") return renderAdmin();
   if(h==="favs") return renderFavs();
   if(h==="reports") return renderReports();
@@ -2989,6 +2996,84 @@ async function deleteFav(id){
   try{ await post({action:"favourite_delete",fav_id:id}); }
   catch(e){ if(e.message!=="no-webapp"){ alert(e.message); return; } }
   FAVS=FAVS.filter(x=>x.id!==id); route();
+}
+
+/* ================= HELP =================
+   For the crew. Screenshots live in help/ next to this file (annotated from the test data,
+   so no real figures travel with a forwarded link); the badges in each picture are numbered
+   to match the text. Keep this page in step with the layout — a stale help page is worse
+   than none. */
+function renderHelp(){
+  const B=n=>`<span class="b">${n}</span>`;
+  document.getElementById("app").innerHTML=`<div class="card help">
+    <h2>What this is</h2>
+    <p>One page for how Glenorchy is trading against what it is buying. It reads the same invoices and sales feed
+      I do, updates itself, and works on a phone. Nothing here can be broken by clicking on it.</p>
+
+    <h2>Getting around</h2>
+    <img src="help/nav.png" alt="The header">
+    <p>${B(1)}<b>Reports</b> — top 10 bought, top 10 sold, wastage, price creep. ${B(2)}<b>Sales</b> — the day-by-day
+      sales view. ${B(3)}<b>Order</b> — the ordering tool, if you use it. ${B(4)}<b>Admin</b> — supplier settings. ${B(5)}<b>?</b> — this page.
+      The <b>Glenorchy HQ</b> logo is the front page: suppliers by spend. <b>↻</b> reloads the numbers.</p>
+
+    <h2>The date range</h2>
+    <img src="help/range-bar.png" alt="The range bar">
+    <p>The grey bar sits at the top of the front page, Reports and every supplier page, and <b>everything below it
+      follows it</b>. Change it once and every card changes.</p>
+    <ul>
+      <li>${B(1)}<b>‹ ›</b> step back and forward one period at a time. You cannot step into the future.</li>
+      <li>${B(2)}<b>Week · Month · Quarter · All time</b> pick the period. Week is Monday to Sunday. It opens on Week.</li>
+      <li>${B(3)}The two dates set any range you like — pick a from and a to and the page follows.</li>
+      <li>${B(4)}<b>catch-up</b> is only there in the current week; see the header below.</li>
+    </ul>
+    <p><b>On a Monday</b> "Week" is only a few hours of trading. Tap <b>‹</b> once to see last week in full — that is
+      the week you would have had in the Monday email.</p>
+
+    <h2>The four boxes at the top</h2>
+    <img src="help/header-week.png" alt="The header in the current week">
+    <p>In the <b>current week</b> this is the countdown against the 30% target: what has been spent, what is left to
+      spend, income so far with a forecast for the rest of the week, and where COGS is projected to land. If
+      <b>Left to spend</b> goes red we are over for the week. <b>catch-up</b> folds this month's over- or under-spend so
+      far into the week's envelope — use it after a heavy week to see what you have to claw back.</p>
+    <img src="help/header-month.png" alt="The header for a month">
+    <p>For <b>any other range</b> there is no forecast, just the books: what was spent, the <b>tally</b> against 30% of
+      income (green is under, red is over — the amount to claw back next period), income, and the actual COGS %.</p>
+
+    <h2>Front page — suppliers by spend</h2>
+    <img src="help/front-page.png" alt="Suppliers by spend">
+    <p>Every supplier we bought from in the range, biggest first. <b>Usual/wk</b> is what we normally spend on them
+      per week (the four full weeks before); a red ▲ means this range is more than 10% over that, green ▼ under. Tap a
+      column heading to sort, tap a supplier to open it.</p>
+
+    <h2>Finding the wastage</h2>
+    <ol>
+      <li>Tap <b>Reports</b>.</li>
+      <li>Check the range bar says the week you want — on a Monday, tap <b>‹</b> for last week.</li>
+      <li>Scroll to <b>Wastage</b>.</li>
+    </ol>
+    <img src="help/reports-wastage.png" alt="The wastage card">
+    <p>Worst first by % wasted, red at 25% or more. <b>Value</b> is what the binned items would have sold for, so it is
+      what the bin actually cost. It counts a $0 sale in a perishable group (sandwiches, cakes, hot takeaway, grab &amp;
+      go) for an item that also sold for money — a loyalty coffee is not wastage.</p>
+
+    <h2>The rest of Reports</h2>
+    <img src="help/reports-top10.png" alt="Top 10 purchased and sold">
+    <p><b>Top 10 purchased</b>: what the money went on. The arrow after the quantity compares with what we usually buy
+      of it (hover for the figure); the arrow after the price is a price change against what we were paying before
+      the range. <b>Top 10 sold</b>: by revenue or by units, with units per trading day and the same arrow against the
+      usual. <b>Price creep</b>, further down, is which price rises are actually costing money, in dollars — the top
+      row is the phone call worth making.</p>
+
+    <h2>A supplier's page</h2>
+    <img src="help/supplier.png" alt="A supplier page">
+    <p>Tap any supplier on the front page. A weekly or monthly statement to reconcile against theirs, every product we
+      bought from them in the range with its price and any change, and the invoices themselves — tap one to see its
+      lines. All for the range in the bar.</p>
+
+    <h2>Questions</h2>
+    <p>Anything confusing, or anything you want that is not here — tell Adrian. The page changes every week or so and
+      the build number under the logo says which version you are on.</p>
+  </div>`;
 }
 
 /* ================= ADMIN ================= */
