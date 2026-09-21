@@ -57,7 +57,7 @@
 </head>
 <body>
 <header>
-  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span id="buildtag" style="font-size:9px;color:#666;margin-left:6px"></span></a>
+  <a onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer;color:#fff;text-decoration:none"><div class="sq"></div><h1>Supplier Explorer</h1><span style="font-size:9px;color:#666;margin-left:6px">build-053328</span></a>
   <div class="crumb" id="crumb"></div>
   <button onclick="loadAll()">↻ refresh</button>
   <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
@@ -69,11 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-111940"; console.log("Supplier Explorer " + BUILD_ID);
-/* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
-   hardcoded copy of this string and silently fell six builds behind, which made a paste that
-   had landed indistinguishable from one that had not. */
-{ const el = document.getElementById("buildtag"); if (el) el.textContent = BUILD_ID; }
+const BUILD_ID = "build-053328"; console.log("Supplier Explorer " + BUILD_ID);
 const SHEET_ID = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 
 /* Live POS sales feed (BG Sales Data). From SALES_CUTOVER onward, daily sales come
@@ -172,11 +168,8 @@ function supGroup(name){ const c=CFG[norm(name)]; return (c&&c.group)||"Ungroupe
 // category ("Smallgoods", "Dairy"), a whitelist would silently drop it out of COGS and
 // you'd get a wrong number that looks plausible. This way it lands in COGS by default
 // and shows up in the "unmapped" note so it can be mapped properly.
-// "waste management" is the SupplierConfig group Veolia carries. It was missing, so on
-// 11 Sep 2026 $12,757.62 of bin collection sat inside COGS on the live dashboard.
 const NON_COGS=new Set(["cleaning","equipment","repairs","maintenance","utilities","energy",
-  "overheads","admin","insurance","rent","subscriptions","freight","waste","misc","other",
-  "waste management","gas","electricity","repairs & maintenance","repairs and maintenance"]);
+  "overheads","admin","insurance","rent","subscriptions","freight","waste","misc","other"]);
 // Groups we already know about — anything outside this is flagged, not hidden.
 const KNOWN_GROUPS=new Set(["food","beverage","packaging","coffee",...NON_COGS]);
 // Split spend into COGS vs excluded, and collect anything unrecognised.
@@ -195,17 +188,6 @@ function cogsSplit(byGroup){
 // fall back to the row's own category so they still count toward the right bucket
 // rather than dropping into "Ungrouped". Manual purchases carry their entry-form category.
 function rowGroup(r){ const g=supGroup(r.supplier); return g!=="Ungrouped"?g:(r.category||"Ungrouped"); }
-// True if this row is a non-COGS bill (rent, energy, waste, repairs...). Same exclusion
-// list the COGS card and the forecast use, so all three agree on what cost of goods is.
-function isNonCogs(r){ return NON_COGS.has(String(rowGroup(r)||"").trim().toLowerCase()); }
-// Home-page visibility of those bills. Default HIDDEN: the front page is for purchasing,
-// and a rent invoice otherwise sits at the top of the supplier list every month and buries
-// the food spend. Persisted per browser; try/catch for the same reason as fcHidden -
-// Safari private mode throws on localStorage.
-const NONCOGS_KEY = "se_show_noncogs";
-function nonCogsShown(){ try{ return localStorage.getItem(NONCOGS_KEY)==="1"; }catch(e){ return false; } }
-function setNonCogsShown(v){ try{ localStorage.setItem(NONCOGS_KEY, v?"1":"0"); }catch(e){} }
-function toggleNonCogs(){ setNonCogsShown(!nonCogsShown()); renderFilters(); route(); }
 function supActive(name){ const c=CFG[norm(name)]; return c?c.active:true; }
 
 const norm = s => String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
@@ -245,18 +227,6 @@ function inScope(venue,date){
   return true;
 }
 function scopedInv(){ return INV.filter(r=>supActive(r.supplier)&&inScope(r.venue,r.date)); }
-// Home-page rows: scopedInv minus non-COGS bills unless the toggle is on. Deliberately NOT
-// folded into scopedInv(): Reports feeds cogsSplit(), and hiding the excluded rows there
-// would make it report $0 excluded while looking perfectly healthy.
-function scopedInvHome(){
-  const rows = scopedInv();
-  return nonCogsShown() ? rows : rows.filter(r=>!isNonCogs(r));
-}
-// What the toggle is holding back, for the chip. Hidden money should not be invisible money.
-function nonCogsHidden(){
-  const rows = scopedInv().filter(isNonCogs);
-  return { n: rows.length, total: rows.reduce((a,r)=>a+(+r.total||0),0) };
-}
 // Venue filter only, ignoring the date range — for figures that must mean the same thing
 // no matter which window you're viewing through (90-day average, price-change history).
 function venueOk(v){ return !FILTER.venues.length || FILTER.venues.indexOf(v)!==-1; }
@@ -342,51 +312,14 @@ function mailto(to,subject,body){
 }
 
 /* ================= FETCH ================= */
-
-/* gviz does NOT report an error for a sheet name that does not exist. It silently
-   serves the FIRST sheet in the workbook, which here is Invoices. Neither the HTTP
-   status nor the error-JSON test below fires, so `fetchTab("X").catch(()=>[])` never
-   catches anything and 1,100+ invoice rows arrive dressed as whatever was asked for.
-   Verified 3 Sep 2026: a request for a deliberately nonsense tab name returned the
-   entire Invoices tab, and StaffSupplierMap - which does not exist - was doing exactly
-   this in production.
-
-   The only reliable test is the header row, so each tab declares the columns its
-   reader actually needs and a response missing any of them is rejected. Add a tab
-   here whenever a new fetchTab call is added, or it gets no protection. */
-const TAB_COLUMNS = {
-  "Invoices":         ["invoice_number","invoice_date","total"],
-  "InvoiceLines":     ["invoice_number","description","line_total"],
-  "SupplierConfig":   ["supplier","merge_into"],
-  "Sales":            ["date","venue","sales"],
-  "ProductMerge":     ["supplier","match","into"],
-  "StaffInvoices":    ["date","venue","supplier","amount"],
-  "StaffSupplierMap": ["staff_name","pipeline_name"],
-  "ManualPurchases":  ["date","shop","venue","amount"]
-};
-
 async function fetchTab(name){
-  /* headers=1 stops gviz guessing how many leading rows are headers. Confirmed a no-op
-     on every tab in use today (identical output with and without), but a tab whose
-     leading rows are all text can otherwise have dozens folded into one mangled header
-     row, silently losing the data. sales-explorer.html has carried this for months. */
-  const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(name)}`;
+  const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
   const res=await fetch(url);
   const txt=await res.text();
   if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("tab '"+name+"' not found or not shared");
   const rows=parseCsv(txt);
   if(!rows.length) return [];
   const cols=rows[0].map(c=>String(c||"").toLowerCase().trim());
-  const need=TAB_COLUMNS[name]||[];
-  const missing=need.filter(c=>cols.indexOf(c)===-1);
-  if(missing.length){
-    /* Warn as well as throw: most callers are wrapped in .catch(()=>[]), which would
-       otherwise turn a missing tab back into the silence this check exists to end. */
-    console.warn("fetchTab: '"+name+"' answered with columns ["+cols.join(", ")+"] - "
-      +"missing ["+missing.join(", ")+"]. gviz serves the first sheet in the workbook "
-      +"when a tab is absent, so this is almost certainly a missing or misnamed tab.");
-    throw new Error("tab '"+name+"' did not answer with its own columns (missing: "+missing.join(", ")+")");
-  }
   return rows.slice(1).map(r=>{
     const o={};
     cols.forEach((c,i)=>{ o[c]= r[i]!==undefined ? r[i] : null; });
@@ -486,7 +419,7 @@ async function loadAll(){
   const app=document.getElementById("app");
   app.innerHTML='<div id="status">Loading data…</div>';
   try{
-    const [inv,lines,cfgRows,salesRows,pmRows,staffRows,staffMapRows,manualRows,feedDaily,shiftRows,weeklyRows]=await Promise.all([
+    const [inv,lines,cfgRows,salesRows,pmRows,staffRows,staffMapRows,manualRows,feedDaily,weeklyRows]=await Promise.all([
       fetchTab("Invoices"),
       fetchTab("InvoiceLines"),
       fetchTab("SupplierConfig").catch(()=>[]),
@@ -496,49 +429,26 @@ async function loadAll(){
       fetchTab("StaffSupplierMap").catch(()=>[]),
       fetchTab("ManualPurchases").catch(()=>[]),
       fetchSalesDaily().catch(()=>null),
-      fetchShifts().catch(()=>null),
       fetchWeekly().catch(()=>[])
     ]);
-    /* Deputy timesheets. Optional: a missing tab just leaves wages coming from the
-       weekly form sheets as before, so nothing breaks if processDeputy has not run. */
-    SHIFTS = Array.isArray(shiftRows) ? shiftRows : [];
-    SHIFTS_OK = SHIFTS.length > 0;
-    WAGE_RATE = SHIFTS_OK ? wageRates(SHIFTS, new Date()) : {};
     /* Sales tab first. If the POS feed answered, its sales replace the tab's from the
        cutover on — wages are kept from the tab either side, since payroll still lives
        there. If the feed failed or is empty the tab stands alone, so a broken feed
        degrades to the old numbers rather than showing zero sales. */
     const feedLive = Array.isArray(feedDaily) && feedDaily.length>0;
+    const weeklyLive = Array.isArray(weeklyRows) && weeklyRows.length>0;
     const cutover = (feedLive && SALES_CUTOVER) ? gvizDate(SALES_CUTOVER) : null;
-    /* The Sales tab and the weekly form sheets are the SAME figures reaching the page by
-       two paths — the tab is fed from the forms, dated on week ending. Verified live on
-       8 Sep 2026: 176 week-rows per venue, zero dollar differences on any of them.
-
-       Wages were already de-duplicated, but with a blanket "if the forms loaded at all,
-       drop every tab wage". Sales had no de-duplication whatsoever, so every pre-cutover
-       week was counted twice — the week of 27/07/2026 read $263,874.38 against a true
-       $131,937.19. From the cutover the tab's sales are zeroed anyway and the feed stands
-       alone, which is why August looked right and everything before it did not.
-
-       Both are now suppressed on a venue+day basis: the tab contributes only where the
-       form sheets do NOT cover that venue on that date. A blanket "forms win" would give
-       the same answer on today's data — the only three venue-weeks the forms do not cover
-       (Luma, weeks ending 31/08, 07/09 and 14/09 2025) are zero in the tab as well, so
-       nothing is currently at stake. It is written per-day anyway because that stops being
-       true the moment one form row is submitted with a venue left blank, and the failure
-       would be a silent under-count rather than an error. Degradation is unchanged: if the
-       form sheets are unreachable the coverage set is empty and the tab stands alone. */
-    const weeklyCover = {};
-    weeklyRows.forEach(w=>{ if(w.date) weeklyCover[(w.venue||"")+"|"+fmtISO(w.date)]=1; });
+    /* The Sales tab holds the SAME weekly wage figures as the form sheets, dated on
+       week ending. Counting both double-counted wages. When the form sheets load they
+       win outright — they're the source the forms write to — and the tab contributes
+       wages only as a fallback if those sheets are unreachable. */
     SALES=salesRows.map(r=>{
       const d=gvizDate(r.date);
-      const venue=r.venue||"";
-      const covered = !!(d && weeklyCover[venue+"|"+fmtISO(d)]);
-      const postCutover = !!(cutover && d && d>=cutover);
+      const useTabSales = !cutover || !d || d<cutover;
       return {
-        date:d, venue,
-        sales: (covered||postCutover) ? 0 : (+String(r.sales||"").replace(/[^0-9.\-]/g,"")||0),
-        wages: covered ? 0 : (+String(r.wages||"").replace(/[^0-9.\-]/g,"")||0)
+        date:d, venue:r.venue||"",
+        sales: useTabSales ? (+String(r.sales||"").replace(/[^0-9.\-]/g,"")||0) : 0,
+        wages: weeklyLive ? 0 : (+String(r.wages||"").replace(/[^0-9.\-]/g,"")||0)
       };
     }).filter(r=>r.date);
     /* Weekly form data: wages always, sales only before the cutover so the feed
@@ -561,12 +471,7 @@ async function loadAll(){
     })).filter(r=>r.date&&r.amount);
     INV=inv.map(r=>({
       venue:r.venue||"", supplier:r.supplier||"", number:String(r.invoice_number||""),
-      date:gvizDate(r.invoice_date)||gvizDate(r.scanned),
-      /* Kept, not merely used as a date fallback: the gap between invoice_date and scanned
-         is the capture lag, and the forecast needs it to tell "no delivery on Tuesday"
-         apart from "nobody has scanned Tuesday yet". */
-      scanned:gvizDate(r.scanned)||gvizDate(r.invoice_date),
-      subtotal:+r.subtotal||0, gst:+r.gst||0,
+      date:gvizDate(r.invoice_date)||gvizDate(r.scanned), subtotal:+r.subtotal||0, gst:+r.gst||0,
       freight:+r.freight||0, cdl:+r.cdl||0, total:+r.total||0, category:r.category||"", type:r.type||"invoice",
       status:r.status||"", pdf:r.pdf_url||"", src:r.source||""
     /* "superseded" = an order-confirmation row retired by the tax invoice that replaced
@@ -583,8 +488,7 @@ async function loadAll(){
       const amt=+String(r.amount||"").replace(/[^0-9.\-]/g,"")||0;
       return {
         venue:r.venue||"", supplier:(r.shop||"").trim(), number:"",
-        // Entered live from the shop, so no capture lag.
-        date:gvizDate(r.date), scanned:gvizDate(r.date), subtotal:amt, gst:0, freight:0, cdl:0, total:amt,
+        date:gvizDate(r.date), subtotal:amt, gst:0, freight:0, cdl:0, total:amt,
         // Category comes from the entry form's picker. Falls back to "Food" (the common
         // case for an ad-hoc shop run) rather than a literal "COGS" — a group NAMED COGS
         // used to collide with the KPI calc and collapse it to just these rows.
@@ -724,23 +628,8 @@ function renderFilters(){
     <input type="date" id="fFrom" value="${FILTER.from}" onchange="setRange()">
     <span style="color:var(--dim);font-size:12px">→</span>
     <input type="date" id="fTo" value="${FILTER.to}" onchange="setRange()">
-    <span style="color:var(--line)">|</span>
-    ${nonCogsChip()}
     ${(FILTER.from||FILTER.to||FILTER.venues.length||FILTER.presetKind)?`<span class="clear" onclick="clearFilter()">clear</span>`:""}
   `;
-}
-/* Chip for the non-COGS toggle. Shows the withheld amount while the bills are hidden.
-   Guarded on INV because renderFilters runs once before the first fetch resolves. */
-function nonCogsChip(){
-  const on = nonCogsShown();
-  let label = on ? "Non-COGS shown" : "Non-COGS hidden";
-  if(!on && typeof INV!=="undefined" && INV && INV.length){
-    const h = nonCogsHidden();
-    if(h.n) label = `Non-COGS hidden (${h.n} &middot; ${money(h.total)})`;
-  }
-  return `<span class="chip ${on?"on":""}" onclick="toggleNonCogs()" `
-    + `title="Rent, energy, waste, repairs, equipment and other bills that aren't cost of goods. `
-    + `Front page only - Reports always shows everything.">${label}</span>`;
 }
 function fmtISO(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function setPreset(kind){
@@ -837,14 +726,31 @@ function productsFor(supplier){
     const h=(hist[p.key]||p.buys).slice().sort((a,b)=>a.date-b.date)
       .filter(b=>b.date.getTime()<=anchor);
     const last=h.length?h[h.length-1]:p.buys[p.buys.length-1];
+    /* Compare like with like. A coded product keys on its SKU alone, so a carton line and
+       a sleeve line of the same item share one history — and a $141.75 carton against a
+       $7.09 sleeve read as +1900%. Price stats only use purchases in the SAME unit as the
+       most recent buy; other pack sizes stay in the purchase list but never drive the %. */
+    const lastUnit=unitNorm(last.unit||"");
+    const hu=h.filter(b=>unitNorm(b.unit||"")===lastUnit);
+    p.histAll=h; p.unit=last.unit;
     let prev=null, prevBuy=null;
-    for(let i=h.length-2;i>=0;i--){ if(h[i].price!==last.price){prev=h[i].price;prevBuy=h[i];break;} }
+    for(let i=hu.length-2;i>=0;i--){ if(hu[i].price!==last.price){prev=hu[i].price;prevBuy=hu[i];break;} }
+    /* Second guard, for when the unit label lies (both lines say CTN but one was priced
+       per sleeve): a price that moves by an almost exact whole multiple of 3x or more is a
+       pack-size difference, not a price rise. Real rises are never exactly 20.000x. */
+    let packRatio=null;
+    if(prev){
+      const r=Math.max(last.price,prev)/Math.min(last.price,prev);
+      const n=Math.round(r);
+      if(n>=3&&Math.abs(r-n)/n<0.015) packRatio=(last.price>prev?"x":"÷")+n;
+    }
     const d90=anchor-90*864e5;
-    const p90=h.filter(b=>b.date.getTime()>=d90).map(b=>b.price);
+    const p90=hu.filter(b=>b.date.getTime()>=d90).map(b=>b.price);
     const totalQty=p.buys.reduce((s,b)=>s+b.qty,0);
     p.lastPrice=last.price; p.lastDate=last.date; p.lastBuy=last; p.prevPrice=prev; p.prevBuy=prevBuy;
-    p.hist=h;
-    p.change=prev?(last.price-prev)/prev*100:null;
+    p.hist=hu; p.packRatio=packRatio;
+    p.otherUnits=[...new Set(h.filter(b=>unitNorm(b.unit||"")!==lastUnit).map(b=>b.unit).filter(Boolean))];
+    p.change=(prev&&!packRatio)?(last.price-prev)/prev*100:null;
     p.avg90=p90.length?p90.reduce((s,v)=>s+v,0)/p90.length:null;
     p.volatile=new Set(p90.map(v=>v.toFixed(2))).size>=4;
     const rd=rateDays(p.buys);
@@ -972,780 +878,6 @@ Give a sharp analysis in Australian English: what stands out, trends, anomalies,
   btn.textContent="✨ Analyse";
 }
 
-/* ================= FORECAST =================
-   Projecting where the selected range lands.
-
-   Method: learn the SHAPE of a normal week (what share of the week's total falls on each
-   weekday) from recent complete weeks, calibrate that shape against the days of the current
-   range that are already finished, then fill in the days that aren't.
-
-   Straight-lining (spend-so-far / days-so-far * 7) is wrong here, and wrong in a direction
-   that matters. Monday and Tuesday are short trading days (venues shut 4:15pm), so three
-   days into a week a flat projection understates sales badly. Deliveries cluster mid-week,
-   so the same flat method can swing spend either way depending on whose truck has been.
-*/
-const FC = {
-  HIST_WEEKS:   12,  // most complete weeks to learn the shape from
-  MIN_WEEKS:     2,  // fewer than this and the shape isn't worth trusting - go flat
-  MIN_BACKTEST:  5,  // fewer clean windows than this and no range is quoted
-  MAX_SETTLE:    3   // most days of invoice-capture lag we'll allow for
-};
-
-function fcDow(d){ return (d.getDay()+6)%7; }                       // 0 = Monday
-function fcAdd(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
-function fcMid(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
-
-/* One entry per calendar day. filterFn decides which rows count; absent day = 0. */
-function fcDailyMap(rows, dateOf, amtOf, filterFn){
-  const m={};
-  (rows||[]).forEach(r=>{
-    if(filterFn && !filterFn(r)) return;
-    const d=dateOf(r); if(!d) return;
-    const k=fmtISO(d);
-    m[k]=(m[k]||0)+(+amtOf(r)||0);
-  });
-  return m;
-}
-
-/* Spend per day, venue-scoped but NOT date-scoped - the shape of a week has to mean the
-   same thing whichever window you're looking through. cogsOnly drops the non-COGS groups
-   using the same exclusion list the KPI card uses, so the two agree. */
-function fcSpendMap(cogsOnly){
-  return fcDailyMap(INV, r=>r.date, r=>r.total, r=>
-    supActive(r.supplier) && venueOk(r.venue) &&
-    (!cogsOnly || !NON_COGS.has(String(rowGroup(r)||"").trim().toLowerCase()))
-  );
-}
-
-/* Sales per day - ONLY from the cutover onward. Before it, sales came from the weekly
-   form sheets spread evenly across seven days, so every historical weekday looks
-   identical. Learning a weekly shape from that would flatten Saturday into Monday and
-   quietly destroy the whole method. */
-function fcSalesMap(){
-  const cut = SALES_CUTOVER ? gvizDate(SALES_CUTOVER) : null;
-  return fcDailyMap(SALES, r=>r.date, r=>r.sales, r=>
-    venueOk(r.venue) && (!cut || (r.date && r.date>=cut))
-  );
-}
-
-/* Complete weeks before the current one, most recent first. A week with no data at all is
-   skipped rather than counted as a zero week - it means "we weren't capturing yet", not
-   "nothing was bought". Keeps looking past gaps up to a year. */
-function fcWeeks(map, today, minDate, maxWeeks){
-  const curMon = weekStart(today);
-  const out=[];
-  for(let i=1;i<=52 && out.length<(maxWeeks||FC.HIST_WEEKS);i++){
-    const mon=fcAdd(curMon,-7*i);
-    if(minDate && mon<fcMid(minDate)) break;
-    const days=[]; let tot=0;
-    for(let k=0;k<7;k++){ const v=map[fmtISO(fcAdd(mon,k))]||0; days.push(v); tot+=v; }
-    if(tot>0) out.push({mon:fmtISO(mon), days, total:tot});
-  }
-  return out;
-}
-
-/* Typical share of the period landing on each weekday.
-
-   MEDIAN, not mean. A handful of weekend market runs would otherwise buy Saturday and Sunday
-   a standing share of every future week, and the estimator would then expect money on days
-   the major suppliers are shut. The median says what a normal weekday looks like; a rare
-   event stays rare instead of being smeared across all of them. */
-function fcShape(weeks){
-  const flat={shares:new Array(7).fill(1/7), weeks:(weeks||[]).length, flat:true, weekAvg:0};
-  if(!weeks || weeks.length<FC.MIN_WEEKS) {
-    if(weeks && weeks.length) flat.weekAvg = weeks.reduce((s,w)=>s+w.total,0)/weeks.length;
-    return flat;
-  }
-  const med=a=>{ const x=a.slice().sort((p,q)=>p-q); const m=x.length>>1;
-                 return x.length%2?x[m]:(x[m-1]+x[m])/2; };
-  const per=[[],[],[],[],[],[],[]];
-  weeks.forEach(w=>{ for(let i=0;i<7;i++) per[i].push(w.days[i]/w.total); });
-  const shares=per.map(a=>med(a));
-  const sum=shares.reduce((a,b)=>a+b,0);
-  if(!(sum>0)) return flat;
-  return {
-    shares: shares.map(v=>v/sum),
-    weeks: weeks.length,
-    flat: false,
-    weekAvg: weeks.reduce((s,w)=>s+w.total,0)/weeks.length
-  };
-}
-
-/* Earliest day the map has any data for. Cached per map object, since the trailing base is
-   recomputed for every backtest window. */
-function fcMapStart(map){
-  if(map.__start!==undefined) return map.__start;
-  let min=null;
-  Object.keys(map).forEach(k=>{ if(k.charAt(0)==="2" && (!min||k<min)) min=k; });
-  Object.defineProperty(map,"__start",{value:min,enumerable:false});
-  return min;
-}
-
-/* Level of the last `days` covered days, in week units, so it drops straight into the same
-   T*share arithmetic.
-
-   Days BEFORE the map's first data are skipped entirely - not counted as zero, and crucially
-   not counted in the divisor either. Sales only exist from the POS cutover, so a 28-day
-   window ending soon after it covers three real weeks; dividing three weeks of takings by
-   four weeks of weekday share understated the level by a quarter and projected $95.3k
-   against weeks that had actually been running at $128k. Absent data is not a quiet week. */
-function fcTrailingBase(map, shape, settleFrom, days){
-  const first=fcMapStart(map);
-  let sum=0, w=0, covered=0;
-  for(let i=1;i<=days;i++){
-    const d=fcAdd(fcMid(settleFrom),-i), k=fmtISO(d);
-    if(first && k<first) continue;              // outside coverage - not a zero
-    sum+=map[k]||0;
-    w  +=shape.shares[fcDow(d)];
-    covered++;
-  }
-  if(covered<7) return 0;                       // too little to call a level; caller falls back
-  return (w>0&&sum>0) ? sum/w : 0;
-}
-
-/* Project a range.
-
-   TOTAL-FIRST. Estimate what the whole range comes to, then take the larger of that and
-   what has already been spent. The previous build instead kept the settled days and filled
-   the remaining ones from their weekday share - and that is biased HIGH by construction:
-   if trade ran ahead of schedule early in the range, the overshoot is banked AND a full
-   share is still added for every day left. Measured bias +1.5% to +5.2% in simulation, and
-   about +20% in production, where it read $50,085 against four weeks of $40-42k.
-
-   The bias is worst exactly where the weekday shape is weakest, and for purchasing the
-   shape is very weak: delivery days drift, so averaging twelve weeks of shares flattens
-   them towards 1/7 each. A flat shape means "days remaining" is nearly all that is left of
-   the fill, which is how four days ended up carrying 60% of the week.
-
-   Total-first is close to shape-independent over a whole week (the shares sum to 1 either
-   way), which is the right property for a series whose timing is unreliable but whose total
-   is not.
-
-     w - how far to trust the level implied by THIS range's settled days over the level of
-         the last four weeks. 0 = ignore this range, 1 = trust it completely. Fitted from
-         the data by fcFitW rather than chosen, because the answer differs per series and
-         per venue: stable weekly totals want a low w, genuinely trending trade wants high.
-     blindOpen - hide unsettled actuals; used by the backtest so it cannot see the answer. */
-function fcProject(map, shape, start, end, settleFrom, blindOpen, w){
-  w = (typeof w==="number" && isFinite(w)) ? Math.max(0,Math.min(1,w)) : 0;
-  const s=fcMid(start), e=fcMid(end), sf=fcMid(settleFrom);
-  let seen=0, firm=0, firmW=0, totW=0, nDays=0, nFirm=0;
-  const open=[];
-  for(let d=new Date(s); d<=e; d=fcAdd(d,1)){
-    nDays++;
-    const v=map[fmtISO(d)]||0, sh=shape.shares[fcDow(d)];
-    totW+=sh;
-    if(d<sf){ firm+=v; firmW+=sh; nFirm++; seen+=v; }
-    else { open.push({sh,v}); if(!blindOpen) seen+=v; }
-  }
-  /* The trailing window must end BEFORE the range. Ending it at the settle point lets days
-     of the very range being projected into the "prior" level, so a freak Monday still
-     inflates the forecast, just diluted. Settled days are not lost by this - they are what
-     the calibrated estimate is built from. */
-  const trail=fcTrailingBase(map, shape, (sf<s?sf:s), 28) || shape.weekAvg;
-  const cal=(firmW>0 && firm>0) ? firm/firmW : null;   // needs actual money, not just days
-
-  /* Two estimates of the period total, blended by w.
-
-       A = T * totW                      the level says the period lands here, wherever it
-                                         currently is. Over a whole week the shares sum to 1,
-                                         so A cannot see WHICH days are left - on a Saturday
-                                         it still expected $1,128 of weekend deliveries from
-                                         suppliers that are shut.
-
-       B = banked + what is still owed    per remaining day, whatever that day normally
-                                         carries, less anything already on it. Empty days ask
-                                         for nothing, so a finished trading week projects to
-                                         roughly what is already banked.
-
-     B replaces the old multiplicative scale-up (banked / settled share), which was wildly
-     noisy early in a period and was the source of the original overshoot. B also carries a
-     genuine trend for free: if trade is running hot, `banked` is high and so is B. */
-  let T, basis;
-  if(trail>0){ T=trail; basis="trailing"; }
-  else if(cal!=null){ T=cal; basis="calibrated"; }
-  else return {actual:seen, projected:seen, basis:"none", nDays, nFirm, nOpen:nDays-nFirm, base:0, w};
-
-  let owed=0;
-  open.forEach(o=>{ owed += Math.max(0, T*o.sh - (blindOpen?0:o.v)); });
-  const A=T*totW, B=seen+owed;
-  const est=w*B+(1-w)*A;
-  if(cal!=null&&trail>0) basis = w>=0.85?"progress":w<=0.15?"level":"blend";
-
-  return {actual:seen, projected:Math.max(seen, est), basis, nDays, nFirm,
-          nOpen:nDays-nFirm, base:T, w, A, B};
-}
-
-/* Step back in WHOLE WEEKS so the settled/open split stays on the same weekdays, but never
-   by less than the range itself - stepping a 31-day range back by 7 would compare it against
-   windows that mostly overlap it, and near-identical samples would make the method look far
-   more consistent than it is. */
-function fcStep(start,end){
-  const days=Math.round((fcMid(end)-fcMid(start))/864e5)+1;
-  return Math.max(7, Math.ceil(days/7)*7);
-}
-
-/* Candidate comparison windows: the same range shifted back in whole periods, keeping the
-   settled/open split on the same weekdays.
-
-   Windows whose data is obviously incomplete are DROPPED rather than scored. Invoice capture
-   ramped up over time, so early windows hold a fraction of a real week; scoring one of those
-   as a forecasting miss is what produced a range of $42,754 - $196,777 on screen. A window
-   that came in 75% below its projection was not a bad forecast, it was a week we had barely
-   captured. Anything under 40% of the median window is treated as a coverage gap. */
-function fcWindows(map, start, end, settleFrom, maxK){
-  const step=fcStep(start,end), all=[];
-  for(let k=1;k<=(maxK||FC.HIST_WEEKS);k++){
-    const s2=fcAdd(start,-step*k), e2=fcAdd(end,-step*k), sf2=fcAdd(settleFrom,-step*k);
-    let act=0;
-    for(let d=fcMid(s2); d<=fcMid(e2); d=fcAdd(d,1)) act+=map[fmtISO(d)]||0;
-    if(act>0) all.push({s:s2,e:e2,sf:sf2,act});
-  }
-  if(all.length<2) return all;
-  /* A window also needs a covered LOOKBACK, not just covered days of its own. Each window's
-     projection is built from the 28 days before it, so a window sitting just after the
-     ramp-up gets a tiny trailing level and projects far too low - which reads as a huge
-     forecasting error and widens the band for no real reason. Filtering only on the window's
-     own total left the band's upper multiplier at 1.27 against weekly totals that move 2.5%. */
-  all.forEach(w=>{
-    let look=0;
-    for(let i=1;i<=28;i++) look+=map[fmtISO(fcAdd(w.s,-i))]||0;
-    w.look=look;
-  });
-  const med=arr=>{ const x=arr.slice().sort((a,b)=>a-b); return x[Math.floor(x.length/2)]; };
-  const mAct=med(all.map(w=>w.act)), mLook=med(all.map(w=>w.look));
-  return all.filter(w=>w.act>=0.4*mAct && w.look>=0.4*mLook);
-}
-
-/* Choose w by measuring, not by argument. For each candidate weighting, run the blind
-   projection over every clean window and keep the one with the lowest median absolute
-   error. Ties break toward the LOWER w: when this range's own days add nothing measurable,
-   the safer default is to lean on four settled weeks rather than on two days. */
-function fcFitW(map, shape, start, end, settleFrom, maxK){
-  const wins=fcWindows(map,start,end,settleFrom,maxK);
-  if(wins.length<FC.MIN_BACKTEST) return {w:0, n:wins.length, fitted:false, err:null};
-  const grid=[0,0.15,0.3,0.5,0.75,1];
-  const scored=[];
-  grid.forEach(w=>{
-    const errs=[];
-    wins.forEach(win=>{
-      const p=fcProject(map,shape,win.s,win.e,win.sf,true,w);
-      if(p.basis==="none"||!(p.projected>0)) return;
-      errs.push(Math.abs(p.projected/win.act-1));
-    });
-    if(errs.length<FC.MIN_BACKTEST) return;
-    errs.sort((a,b)=>a-b);
-    scored.push({w, err:errs[Math.floor(errs.length/2)], n:errs.length});
-  });
-  if(!scored.length) return {w:0, n:wins.length, fitted:false, err:null};
-  /* Parsimony. A dozen windows is a thin sample, so the outright winner is often winning by
-     noise: production fitted w=0.15 over eleven weeks and pushed the projection above every
-     one of the last four actual weeks. Take the SMALLEST weighting that comes within 5% of
-     the best score - leaning on four settled weeks is the assumption-light option, and it
-     should have to be beaten properly, not narrowly. Where calibrating genuinely helps, as
-     it does for sales, it wins by far more than 5% and is still chosen. */
-  const bestErr=Math.min(...scored.map(x=>x.err));
-  const chosen=scored.filter(x=>x.err<=bestErr*1.05).sort((a,b)=>a.w-b.w)[0];
-  return {...chosen, fitted:true, bestErr, w0Err:(scored.find(x=>x.w===0)||{}).err};
-}
-
-/* How wrong was this method, at this point in the period, on real past periods?
-   Returns the RATIO actual/projected per window. Working in ratios rather than in errors
-   matters: the old code took percentiles of e = projected/actual - 1 and then divided by
-   (1+e) to get an outcome, which runs to infinity as e approaches -1. One bad window
-   therefore set the top of the range. A ratio is bounded by the data itself. */
-function fcBacktest(map, shape, start, end, settleFrom, maxK, w){
-  const out=[];
-  fcWindows(map,start,end,settleFrom,maxK).forEach(win=>{
-    const p=fcProject(map,shape,win.s,win.e,win.sf,true,w);
-    if(p.basis==="none"||!(p.projected>0)) return;
-    out.push(win.act/p.projected);
-  });
-  return out.sort((a,b)=>a-b);
-}
-
-function fcBacktestRatio(mapN, mapD, shapeN, shapeD, start, end, sfN, sfD, maxK, wN, wD){
-  const out=[], step=fcStep(start,end);
-  const wins=fcWindows(mapD,start,end,sfD,maxK);
-  wins.forEach(win=>{
-    let an=0, ad=0;
-    for(let d=fcMid(win.s); d<=fcMid(win.e); d=fcAdd(d,1)){ an+=mapN[fmtISO(d)]||0; ad+=mapD[fmtISO(d)]||0; }
-    if(!(an>0)||!(ad>0)) return;
-    const k=Math.round((fcMid(start)-fcMid(win.s))/864e5/step);
-    const pn=fcProject(mapN,shapeN,win.s,win.e,fcAdd(sfN,-step*k),true,wN);
-    const pd=fcProject(mapD,shapeD,win.s,win.e,fcAdd(sfD,-step*k),true,wD);
-    if(pn.basis==="none"||pd.basis==="none"||!(pd.projected>0)) return;
-    out.push((an/ad)/(pn.projected/pd.projected));
-  });
-  return out.sort((a,b)=>a-b);
-}
-
-/* WHY is the period running high or low?
-
-   Compares period-to-date against the same point in previous comparable periods, split by
-   whatever key you pass (supplier, venue, weekday). Deliberately to-date rather than
-   projected-per-key: projecting a single supplier's week is far too noisy to be worth
-   showing, but "by day three PFD has usually spent $1.9k and this week it is $4.5k" is a
-   fact, and it is the fact that explains the headline.
-
-   The absence case matters as much as the excess. A supplier that has delivered by this
-   point in every one of the last four weeks and has nothing this week is a forgotten order,
-   and that is invisible in any total. */
-function fcDrivers(rows, dateOf, keyOf, amtOf, filterFn, start, end, today, maxK){
-  const step=fcStep(start,end);
-  /* Clamp the to-date boundary to the end of the period. Without this, a range that has
-     already finished measures an elapsed window longer than the period itself, and the
-     comparison windows then run into the following period. The forecast card never hits
-     that because it hides once the period is over, but the supplier view is browsed on
-     past weeks all the time. */
-  const s=fcMid(start), endNext=fcAdd(fcMid(end),1);
-  const cut=fcMid(today)>endNext ? endNext : fcMid(today);
-  const elapsed=+cut - +s;
-  if(elapsed<=0) return {items:[], now:0, usual:0, elapsedDays:0};
-
-  const n=maxK||FC.HIST_WEEKS;
-  const now={}, prev={}, periodHasData=new Array(n).fill(false);
-  (rows||[]).forEach(r=>{
-    if(filterFn && !filterFn(r)) return;
-    const d=dateOf(r); if(!d) return;
-    const t=+fcMid(d), k=String(keyOf(r)||"").trim(), a=+amtOf(r)||0;
-    if(!k||!a) return;
-    if(t>=+s && t<+cut){ now[k]=(now[k]||0)+a; return; }
-    for(let i=1;i<=n;i++){
-      const ps=+fcAdd(s,-step*i);
-      if(t>=ps && t<ps+elapsed){
-        if(!prev[k]) prev[k]=new Array(n).fill(0);
-        prev[k][i-1]+=a; periodHasData[i-1]=true;
-        break;
-      }
-    }
-  });
-  /* Only score against periods we actually hold data for, so the ramp-up in invoice capture
-     doesn't read as "this supplier used to deliver more". */
-  const idx=[]; periodHasData.forEach((v,i)=>{ if(v) idx.push(i); });
-  if(idx.length<2) return {items:[], now:0, usual:0, elapsedDays:Math.round(elapsed/864e5)};
-
-  const med=a=>{ const x=a.slice().sort((p,q)=>p-q); const m=x.length>>1;
-                 return x.length%2?x[m]:(x[m-1]+x[m])/2; };
-  const keys=new Set([...Object.keys(now),...Object.keys(prev)]);
-  const items=[];
-  let totNow=0, totUsual=0;
-  keys.forEach(k=>{
-    const series=idx.map(i=>(prev[k]?prev[k][i]:0)||0);
-    const usual=med(series), cur=now[k]||0;
-    const seen=series.filter(v=>v>0).length;
-    /* Median absolute deviation, so "unusual" is judged against how much THIS key normally
-       swings rather than a flat percentage. A venue whose mid-week spend routinely halves
-       and doubles should not be flagged for doing it again. */
-    const mad=med(series.map(v=>Math.abs(v-usual)));
-    totNow+=cur; totUsual+=usual;
-    items.push({key:k, now:cur, usual, delta:cur-usual, seen, of:idx.length, series, mad, n:idx.length,
-                lo:Math.min(...series), hi:Math.max(...series),
-                missing: cur===0 && usual>0 && seen>=Math.max(3,Math.ceil(idx.length*0.6))});
-  });
-  items.sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
-  return {items, now:totNow, usual:totUsual, elapsedDays:Math.round(elapsed/864e5), periods:idx.length};
-}
-
-/* Is a mover worth an arrow? Judged against the key's own historical swing, not a flat
-   percentage, and floored in dollars so a $37 line at Luma cannot shout as loudly as a
-   $2,000 one at Cambridge.
-
-   Returns null for "nothing to see", which is the common case and should stay silent. */
-function fcMove(item, floorAbs){
-  if(!item || item.n<4) return null;                  // too few comparable periods to judge
-  const d=Math.abs(item.delta), floor=floorAbs||200;
-
-  /* Three gates, and a move has to pass all of them. Any one alone gives false positives:
-       dollars   - $75 on a venue that spends $1,275 is not news, however statistically odd.
-       relative  - keeps the dollar floor from shouting at big suppliers for small wobbles.
-       spread    - the same $400 swing is routine at a venue that always swings and genuinely
-                   unusual at one that never does, so it is judged against the key's own MAD.
-     An arrow on every row is the same as no arrows at all. */
-  if(d<floor) return null;
-  if(item.usual===0) return item.now>0 ? {dir:"up", z:Infinity} : null;
-  if(d < Math.abs(item.usual)*0.20) return null;
-  const sd=item.mad>0 ? 1.4826*item.mad : Math.abs(item.usual)*0.15;
-  if(!(sd>0)) return null;
-  const z=d/sd;
-  if(z<2) return null;
-  return {dir:item.delta>0?"up":"down", z};
-}
-
-/* Biggest single line on a driver's invoices this period - the "they bought a pallet of
-   cottonseed" detail. Returns null when the supplier has no line-level data, which is the
-   case for manual purchases. */
-function fcTopLine(supplier, start, today){
-  const s=fcMid(start), cut=fcMid(today);
-  let best=null;
-  (LINES||[]).forEach(l=>{
-    if(l.supplier!==supplier||!l.date||!venueOk(l.venue)) return;
-    const t=+fcMid(l.date);
-    if(t<+s||t>=+cut) return;
-    if(!best||l.total>best.total) best={desc:l.desc, total:l.total, qty:l.qty, unit:l.unit};
-  });
-  return best;
-}
-
-/* What the same range actually came to over the previous few comparable periods. A
-   projection that sits outside this spread is visibly wrong at a glance, which beats any
-   amount of caveat text underneath it. */
-function fcRecent(map, start, end, n){
-  const step=fcStep(start,end), out=[];
-  for(let k=1;k<=n;k++){
-    const s2=fcAdd(start,-step*k), e2=fcAdd(end,-step*k);
-    let t=0; for(let d=fcMid(s2); d<=fcMid(e2); d=fcAdd(d,1)) t+=map[fmtISO(d)]||0;
-    if(t>0) out.push({start:s2, end:e2, total:t});
-  }
-  return out;
-}
-
-/* Nearest-rank percentile. Returns null below MIN_BACKTEST rather than inventing a band
-   from two data points. */
-/* Band from the ratio distribution. 20th/80th rather than 10th/90th: with a dozen windows
-   the extreme percentiles ARE the extreme observations, so they track the worst single week
-   rather than the spread. Returns multipliers to apply to a projection. */
-function fcBand(ratios){
-  const n=ratios.length;
-  if(n<FC.MIN_BACKTEST) return null;
-  const at=q=>ratios[Math.max(0,Math.min(n-1,Math.ceil(q*n)-1))];
-  return {n, lo:at(0.20), mid:at(0.50), hi:at(0.80)};
-}
-
-/* Median invoice capture lag: invoice_date -> scanned. If deliveries are routinely scanned
-   two days late then the last two days of "actuals" are not actuals, and calibrating on
-   them drags the whole projection down. Measured, not assumed; 0 if not measurable. */
-function fcCaptureLag(today){
-  const lags=[], cut=+fcAdd(fcMid(today),-90);
-  (INV||[]).forEach(r=>{
-    if(!r.date||!r.scanned) return;
-    if(+r.date<cut) return;
-    const L=Math.round((+fcMid(r.scanned)-+fcMid(r.date))/864e5);
-    if(L>=0&&L<=30) lags.push(L);
-  });
-  if(lags.length<20) return {days:0, n:lags.length, known:false};
-  lags.sort((a,b)=>a-b);
-  const p75=lags[Math.max(0,Math.ceil(0.75*lags.length)-1)];
-  return {days:Math.max(0,Math.min(FC.MAX_SETTLE,p75)), n:lags.length, known:true, p75};
-}
-
-/* Everything the forecast card needs, in one pass.
-
-   Spend and sales are levelled differently on purpose - see fcProject. Sales calibrate off
-   the days already settled; spend does not, because a week's deliveries say almost nothing
-   about the week's total until most of them have landed. */
-function forecastModel(){
-  const f=fromDate(), t=toDate();
-  if(!f||!t) return null;                    // "All time" has no end to project to
-  const today=fcMid(new Date());
-  const start=fcMid(f), end=fcMid(t);
-  if(today>end) return null;                 // period already finished - nothing to project
-
-  const lag=fcCaptureLag(today);
-  const sfSpend=fcAdd(today,-lag.days);      // spend settles late; sales don't
-  const sfSales=today;
-  const cut=SALES_CUTOVER?gvizDate(SALES_CUTOVER):null;
-
-  const mAll=fcSpendMap(false), mCogs=fcSpendMap(true), mSales=fcSalesMap();
-  const shAll  =fcShape(fcWeeks(mAll  ,today,null,FC.HIST_WEEKS));
-  const shCogs =fcShape(fcWeeks(mCogs ,today,null,FC.HIST_WEEKS));
-  const shSales=fcShape(fcWeeks(mSales,today,cut ,FC.HIST_WEEKS));
-
-  /* How far to trust this range's own settled days is fitted per series from the venue's
-     own history, not hard-coded. Spend usually fits low (stable weekly totals, unreliable
-     timing); sales usually fits higher. */
-  const fAll  =fcFitW(mAll  ,shAll  ,start,end,sfSpend,FC.HIST_WEEKS);
-  const fCogs =fcFitW(mCogs ,shCogs ,start,end,sfSpend,FC.HIST_WEEKS);
-  const fSales=fcFitW(mSales,shSales,start,end,sfSales,FC.HIST_WEEKS);
-
-  const pAll  =fcProject(mAll  ,shAll  ,start,end,sfSpend,false,fAll.w);
-  const pCogs =fcProject(mCogs ,shCogs ,start,end,sfSpend,false,fCogs.w);
-  const pSales=fcProject(mSales,shSales,start,end,sfSales,false,fSales.w);
-  if(pAll.basis==="none"&&pSales.basis==="none") return null;
-
-  let done=0, total=0;
-  for(let d=new Date(start); d<=end; d=fcAdd(d,1)){ total++; if(d<today) done++; }
-
-  return {
-    start,end,today,lag,done,total,
-    spend:pAll, cogs:pCogs, sales:pSales,
-    shAll,shCogs,shSales, fAll,fCogs,fSales,
-    bSpend:fcBand(fcBacktest(mAll  ,shAll  ,start,end,sfSpend,FC.HIST_WEEKS,fAll.w)),
-    bCogs :fcBand(fcBacktest(mCogs ,shCogs ,start,end,sfSpend,FC.HIST_WEEKS,fCogs.w)),
-    bSales:fcBand(fcBacktest(mSales,shSales,start,end,sfSales,FC.HIST_WEEKS,fSales.w)),
-    bRatio:fcBand(fcBacktestRatio(mCogs,mSales,shCogs,shSales,start,end,sfSpend,sfSales,
-                                  FC.HIST_WEEKS,fCogs.w,fSales.w)),
-    rSpend:fcRecent(mAll ,start,end,4),
-    rSales:fcRecent(mSales,start,end,4),
-    dSpend:fcDrivers(INV, r=>r.date, r=>r.supplier, r=>r.total,
-             r=>supActive(r.supplier)&&venueOk(r.venue), start,end,today,FC.HIST_WEEKS),
-    dSales:fcDrivers(SALES, r=>r.date, r=>(FILTER.venues.length===1
-             ? r.date.toLocaleDateString("en-AU",{weekday:"long"}) : r.venue),
-             r=>r.sales, r=>venueOk(r.venue)&&(!cut||(r.date&&r.date>=cut)),
-             start,end,today,FC.HIST_WEEKS),
-    partial: today>=start && today<=end
-  };
-}
-
-/* Apply the measured band. It now holds RATIOS of actual to projected, so these are
-   multipliers - low ratio gives the low end, directly. The previous build stored errors and
-   divided by (1+e), which ran away to infinity as e approached -1 and let a single badly
-   covered week set the top of the range at 3.9x. The headline is nudged by the median ratio
-   to take out measured bias, and everything is floored at what has already happened. */
-function fcSettle(p,band){
-  if(!band) return {mid:p.projected, lo:null, hi:null, n:0};
-  const at=r=>Math.max(p.actual, p.projected*r);
-  return {mid:at(band.mid), lo:at(band.lo), hi:at(band.hi), n:band.n};
-}
-
-/* Hidden state persists per browser, like the AI key already does. Wrapped because Safari
-   in private mode throws on localStorage rather than returning null. */
-const FC_HIDE_KEY="fc_forecast_hidden";
-function fcHidden(){ try{ return localStorage.getItem(FC_HIDE_KEY)==="1"; }catch(e){ return false; } }
-function fcSetHidden(v){ try{ localStorage.setItem(FC_HIDE_KEY, v?"1":"0"); }catch(e){} route(); }
-
-/* One line explaining the gap: what is unusually high, what is unusually absent.
-   Only material movers are named - anything under $200 or under 8% of the gap is noise at
-   this level and would bury the one line that matters. */
-function fcWhy(d, label, moneyFn, withLines, start, today){
-  if(!d||!d.items.length||!d.periods) return "";
-  const gap=d.now-d.usual;
-  const floor=Math.max(200, Math.abs(gap)*0.08);
-  const movers=d.items.filter(i=>!i.missing&&Math.abs(i.delta)>=floor).slice(0,2);
-  const missing=d.items.filter(i=>i.missing&&i.usual>=floor).slice(0,2);
-  if(!movers.length&&!missing.length) return "";
-
-  const bits=movers.map(i=>{
-    let t=`<b>${esc(i.key)}</b> ${i.delta>0?"+":"−"}${moneyFn(Math.abs(i.delta))} on its usual ${moneyFn(i.usual)}`;
-    if(withLines&&i===movers[0]&&i.delta>0){
-      const L=fcTopLine(i.key,start,today);
-      if(L&&L.total>=Math.abs(i.delta)*0.3)
-        t+=` (biggest line: ${esc(String(L.desc).slice(0,42))}${L.qty?" ×"+L.qty:""} ${moneyFn(L.total)})`;
-    }
-    return t;
-  });
-  missing.forEach(i=>bits.push(`<b>${esc(i.key)}</b> nothing yet — usually ${moneyFn(i.usual)} by now, in ${i.seen} of the last ${i.of}`));
-
-  const dir=Math.abs(gap)<floor?"in line with":gap>0?`${moneyFn(gap)} ahead of`:`${moneyFn(-gap)} behind`;
-  return `<div style="font-size:11px;color:var(--dim);margin-top:2px">${label} ${dir} the usual ${moneyFn(d.usual)} by day ${d.elapsedDays} — ${bits.join("; ")}</div>`;
-}
-
-function forecastCard(){
-  if(fcHidden()) return `<div class="card" style="padding:8px 14px"><span style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">Forecast hidden</span> <a style="cursor:pointer;font-size:11px;color:var(--red);text-decoration:underline;margin-left:8px" onclick="fcSetHidden(false)">show</a></div>`;
-  const m=forecastModel();
-  if(!m) return "";
-  const money0=v=>"$"+Math.round(v).toLocaleString("en-AU");
-  const kish=v=>v>=1000?"$"+(v/1000).toFixed(1)+"k":"$"+Math.round(v);
-  const dim=t=>`<span style="color:var(--dim)">${t}</span>`;
-
-  const sSpend=fcSettle(m.spend,m.bSpend), sSales=fcSettle(m.sales,m.bSales);
-  /* COGS is a strict subset of spend. Correcting the two against separate bands can put
-     COGS above total spend on screen, which is impossible and reads as a bug. */
-  const sCogs=fcSettle(m.cogs,m.bCogs);
-  const cogsMidV=Math.max(m.cogs.actual, Math.min(sCogs.mid, sSpend.mid));
-
-  const haveSales=m.sales.basis!=="none"&&m.sales.projected>0;
-  let cogsMid=haveSales?cogsMidV/sSales.mid:null, cogsLo=null, cogsHi=null;
-  if(cogsMid!=null&&m.bRatio){
-    const raw=cogsMid;
-    cogsMid=raw/(1+m.bRatio.mid); cogsLo=raw/(1+m.bRatio.hi); cogsHi=raw/(1+m.bRatio.lo);
-  }
-  const pctS=v=>v==null?"—":(Math.round(v*1000)/10)+"%";
-
-  const row=(label,actual,proj,lo,hi,fmt)=>`
-    <tr>
-      <td><b>${label}</b></td>
-      <td class="num">${actual==null?dim("—"):fmt(actual)}</td>
-      <td class="num"><b>${proj==null?dim("—"):"~"+fmt(proj)}</b></td>
-      <td class="num hide-sm">${lo==null?dim("—"):fmt(lo)+" – "+fmt(hi)}</td>
-    </tr>`;
-
-  /* The plausibility anchor. If the projection sits outside what the last four comparable
-     periods actually came to, that is obvious here in a way no caveat paragraph achieves. */
-  const anchor=(label,recent)=> recent&&recent.length
-    ? `<div style="font-size:11px;color:var(--dim);margin-top:2px">${label} — last ${recent.length} actual: ${recent.map(r=>kish(r.total)).join(" · ")}</div>`
-    : "";
-
-  const notes=[];
-  const wTxt=v=>v===0?"entirely on the last four settled weeks":v===1?"entirely on the days of this range already finished":`${Math.round(v*100)}% on this range's finished days, ${Math.round((1-v)*100)}% on the last four settled weeks`;
-  notes.push(`Each line estimates the <b>total</b> for the whole range and then takes the larger of that and what has already happened — rather than keeping the finished days and adding a share for each day left, which is biased high whenever trade runs ahead of schedule early on.`);
-  notes.push(`How far to trust this range's own finished days is <b>fitted from your history</b>, not fixed: the lowest-error weighting on previous comparable periods wins, and ties inside 5% go to the lower weighting so a thin sample can't talk it into trusting three days over four weeks. Right now spend leans ${wTxt(m.fAll.w)}${m.fAll.fitted?` (chosen over ${m.fAll.n} comparable periods)`:` (too few clean periods to fit, so defaulting to the safer end)`}; sales leans ${wTxt(m.fSales.w)}.`);
-  notes.push(`Purchasing has no reliable weekday shape — delivery days drift, so averaging twelve weeks flattens them toward equal. Its weekly <em>total</em> is far steadier than its timing, which is why the estimate is built on the total.`);
-  if(m.sales.basis!=="none"&&m.shSales.weeks<FC.MIN_BACKTEST)
-    notes.push(`<b style="color:var(--red)">Only ${m.shSales.weeks} complete week(s) of daily sales.</b> The POS feed started ${fmtD(gvizDate(SALES_CUTOVER))}; everything before it was a weekly total spread evenly over seven days, which would flatten Saturday into Monday if used. ${m.shSales.flat?"Too few weeks to know the shape at all, so every day is currently weighted equally — this understates the weekend.":"Enough to shape a week, too few to quote an error range."} Improves by itself as weeks accumulate.`);
-  if(m.lag.known&&m.lag.days>0)
-    notes.push(`Invoices are typically scanned ${m.lag.days} day(s) late (over ${m.lag.n} recent invoices), so the last ${m.lag.days} day(s) of spend are treated as still arriving. Otherwise a quiet Tuesday reads as "no delivery" when it means "not scanned yet".`);
-  else if(!m.lag.known)
-    notes.push(`Capture lag not measurable (${m.lag.n} invoices carry both dates), so spend to yesterday is taken as final. If invoices are scanned late this will run low.`);
-  notes.push(`Ranges are the 20th–80th percentile of actual against projected on previous comparable periods, cut at the same point, with the unfinished days genuinely hidden. Periods whose own data or whose preceding four weeks look badly covered are dropped rather than scored — an under-captured week is not a forecasting error, and scoring one previously widened this range to nearly 4× the projection. <b>It still cannot allow for invoices uncaptured at the time</b>, so the real spread on spend is a little wider than shown.`);
-  notes.push(`Spend is purchases, not consumption. With no stock count one large delivery lands wholly in the period it arrives, so COGS % over a week is far noisier than over a month. Wages are not projected: they arrive the Monday after week end.`);
-
-  return `
-    <div class="card">
-      <div class="label" style="display:flex;align-items:baseline;gap:8px">
-        <span>Forecast — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""} · ${m.partial?`${m.done} of ${m.total} days done`:"not started"}</span>
-        <a style="margin-left:auto;cursor:pointer;text-transform:none;letter-spacing:0;font-size:11px;color:var(--dim);text-decoration:underline" onclick="fcSetHidden(true)">hide</a>
-      </div>
-      <table>
-        <thead><tr><th></th><th class="num">So far</th><th class="num">Projected</th><th class="num hide-sm">Likely range</th></tr></thead>
-        <tbody>
-          ${row("Spend",m.spend.actual,sSpend.mid,sSpend.lo,sSpend.hi,money0)}
-          ${row("COGS",m.cogs.actual,cogsMidV,null,null,money0)}
-          ${haveSales?row("Sales",m.sales.actual,sSales.mid,sSales.lo,sSales.hi,money0):""}
-          ${haveSales?row("COGS % of sales",null,cogsMid,cogsLo,cogsHi,pctS):""}
-        </tbody>
-      </table>
-      ${anchor("Spend",m.rSpend)}
-      ${fcWhy(m.dSpend,"Spend",money0,true,m.start,m.today)}
-      ${haveSales?anchor("Sales",m.rSales):`<div style="font-size:12px;color:var(--dim);margin-top:6px">No sales in this range yet, so COGS % can't be projected.</div>`}
-      ${haveSales?fcWhy(m.dSales,"Sales",money0,false,m.start,m.today):""}
-      <details style="margin-top:8px">
-        <summary style="font-size:11px;color:var(--dim);cursor:pointer">how these are worked out, and what they can't tell you</summary>
-        <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.5">${notes.join("<br><br>")}</div>
-      </details>
-    </div>`;
-}
-
-/* Up/down markers for the per-venue footer on the supplier view.
-
-   The period in view is usually PART finished, so the comparison is period-to-date against
-   the same elapsed window in previous comparable periods - never against whole past weeks,
-   which would mark every venue "down" on a Wednesday. Returns a lookup keyed by venue plus
-   one for the supplier overall, or null when there is nothing sensible to compare against. */
-function supplierVenueMoves(name){
-  const f=fromDate(), t=toDate();
-  if(!f||!t) return null;                       // "All time" has no comparable period
-  const today=fcMid(new Date());
-  const keep=r=>r.supplier===name && venueOk(r.venue) && supActive(r.supplier);
-  const byVenue=fcDrivers(INV, r=>r.date, r=>r.venue||"—", r=>r.total, keep,
-                          fcMid(f), fcMid(t), today, FC.HIST_WEEKS);
-  const overall=fcDrivers(INV, r=>r.date, ()=>"__all", r=>r.total, keep,
-                          fcMid(f), fcMid(t), today, FC.HIST_WEEKS);
-  if(!byVenue.periods) return null;
-  const map={};
-  byVenue.items.forEach(i=>{ map[i.key]=i; });
-  return {map, all:overall.items[0]||null, periods:byVenue.periods, days:byVenue.elapsedDays};
-}
-
-/* One marker. Silent unless the move is outside what this venue normally does at this point,
-   because an arrow on every row is the same as no arrows at all. */
-function moveTag(item){
-  if(!item) return "";
-  const mv=fcMove(item);   // default gates: $200, 20% of usual, 2x its own swing
-  if(!mv) return "";
-  const band=item.n?`${money(item.lo)}–${money(item.hi)} over ${item.n}`:"";
-  const title=item.usual===0
-    ? `${money(item.now)} so far; nothing at this point in the last ${item.n} comparable periods`
-    : `${money(item.now)} so far vs a usual ${money(item.usual)} at this point (range ${band})`;
-  const cls=mv.dir==="up"?"up":"down";
-  return ` <span class="${cls}" title="${esc(title)}">${mv.dir==="up"?"▲":"▼"}</span>`;
-}
-
-
-/* ================= LABOUR (Deputy) =================
-   Wage cost per venue per day, from the DeputyShifts tab in BG Sales Data - the same
-   spreadsheet the sales feed comes from.
-
-   Why this exists: wages otherwise arrive only from the weekly form sheets, which are
-   submitted AFTER week end and dated on Week Ending. A week still running therefore had no
-   wages at all, so Wages % and Prime cost % simply vanished from the KPI card and looked
-   broken rather than pending.
-
-   Column names are read from the header row rather than by position, matching how
-   sales-explorer.html reads the same tab - the tab has gained columns before (`rate`) and
-   position-based reads would silently take the wrong one. */
-const DEPUTY_TAB = "DeputyShifts";
-let SHIFTS = [], SHIFTS_OK = false, WAGE_RATE = {};
-
-async function fetchShifts(){
-  const url=`https://docs.google.com/spreadsheets/d/${SALES_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(DEPUTY_TAB)}`;
-  const res=await fetch(url);
-  const txt=await res.text();
-  if(!res.ok||/^\s*</.test(txt)||/"status"\s*:\s*"error"/.test(txt)) throw new Error("no DeputyShifts tab");
-  const rows=parseCsv(txt.trim());
-  if(rows.length<2) return [];
-  const head=(rows.shift()||[]).map(h=>String(h).trim().toLowerCase());
-  const ix=n=>head.indexOf(n);
-  const need=["date","venue","hours","cost"];
-  if(need.some(n=>ix(n)<0)) throw new Error("DeputyShifts is missing "+need.filter(n=>ix(n)<0).join(", "));
-  return rows.map(r=>({
-    date:gvizDate(r[ix("date")]),
-    venue:String(r[ix("venue")]||"").trim(),
-    /* shift | training | leave. Training is apprentice school time and leave is annual or
-       sick - both are money out the door against the same takings, so both count here.
-       Neither is on the floor, which matters to the Sales Explorer's hours-based figures
-       but not to a wage total. */
-    kind:String(ix("kind")>-1?r[ix("kind")]:"shift").trim().toLowerCase()||"shift",
-    who:String(ix("employee")>-1?r[ix("employee")]:"").trim(),
-    hours:+String(r[ix("hours")]||"").replace(/[^0-9.\-]/g,"")||0,
-    cost:+String(r[ix("cost")]||"").replace(/[^0-9.\-]/g,"")||0,
-    /* THREE states, not two: final (Deputy exported it to payroll), salary (allocated by
-       the script, because Deputy never costs a salaried shift), pending (hourly, awaiting
-       export). A pending row carries hours but a cost of ZERO - reading that as "cost
-       nothing" understates the current week badly, and understates it most on the most
-       recent days. Same shape of error as the invoice capture lag. */
-    basis:String(ix("costed")>-1?r[ix("costed")]:"").trim().toLowerCase(),
-    rate:ix("rate")>-1?(+String(r[ix("rate")]||"").replace(/[^0-9.\-]/g,"")||0):0
-  })).filter(r=>r.date&&r.venue);
-}
-
-const wageFinal = b => b==="final"||b==="salary";
-
-/* Effective hourly rate per venue, from shifts that Deputy HAS costed over the trailing
-   window. Used to value pending shifts, because their hours are known immediately and their
-   dollars land days later. An estimate that is labelled beats a zero that is not. */
-function wageRates(shifts, today){
-  const cut=+fcAdd(fcMid(today||new Date()),-56);
-  const acc={}, all={c:0,h:0};
-  shifts.forEach(s=>{
-    if(!wageFinal(s.basis)||!(s.hours>0)||!(s.cost>0)) return;
-    if(+s.date<cut) return;
-    const a=acc[s.venue]||(acc[s.venue]={c:0,h:0});
-    a.c+=s.cost; a.h+=s.hours; all.c+=s.cost; all.h+=s.hours;
-  });
-  const out={__all: all.h>0 ? all.c/all.h : 0};
-  Object.keys(acc).forEach(v=>{ if(acc[v].h>0) out[v]=acc[v].c/acc[v].h; });
-  return out;
-}
-
-/* Cost of one shift: what Deputy says where it knows, else hours x rate.
-   A salaried row carries its own contractual rate; an hourly one falls back to the venue's
-   recent effective rate, then to the group rate. */
-function shiftCost(s, rates){
-  if(wageFinal(s.basis) && s.cost>0) return {cost:s.cost, est:false};
-  if(s.cost>0) return {cost:s.cost, est:false};
-  const r=(s.rate>0?s.rate:0) || (rates&&rates[s.venue]) || (rates&&rates.__all) || 0;
-  return {cost:s.hours*r, est:r>0};
-}
-
-/* Wage cost per venue per day. Leave and training included - all of it is payroll. */
-function wagesByDay(shifts, rates){
-  const m={};
-  (shifts||[]).forEach(s=>{
-    const {cost,est}=shiftCost(s,rates);
-    if(!(cost>0)) return;
-    const k=fmtISO(s.date)+"|"+s.venue;
-    const e=m[k]||(m[k]={cost:0, est:0, hours:0});
-    e.cost+=cost; e.hours+=s.hours; if(est) e.est+=cost;
-  });
-  return m;
-}
-
-/* Totals for the current filter, so the KPI card can show a live wage figure. */
-function wagesInScope(){
-  if(!SHIFTS_OK) return null;
-  let cost=0, est=0, hours=0, leave=0, training=0;
-  SHIFTS.forEach(s=>{
-    if(!inScope(s.venue,s.date)) return;
-    const c=shiftCost(s,WAGE_RATE);
-    if(!(c.cost>0)) return;
-    cost+=c.cost; hours+=s.hours; if(c.est) est+=c.cost;
-    if(s.kind==="leave") leave+=c.cost;
-    else if(s.kind==="training") training+=c.cost;
-  });
-  return cost>0 ? {cost,est,hours,leave,training} : null;
-}
-
 /* ================= ROUTING ================= */
 function route(){
   const h=decodeURIComponent(location.hash.slice(1));
@@ -1773,7 +905,7 @@ function crumb(t){ document.getElementById("crumb").textContent=t||""; }
 /* ================= HOME ================= */
 function renderHome(){
   crumb("");
-  const inv=scopedInvHome();
+  const inv=scopedInv();
   const ranged=FILTER.from||FILTER.to;
   const window30=r=>ranged?true:r.date>=Date.now()-30*864e5;
   const bySupplier={};
@@ -1987,13 +1119,6 @@ function renderReports(){
   const salesScope=scopedSales();
   const salesTot=salesScope.reduce((s,r)=>s+r.sales,0);
   const wagesTot=salesScope.reduce((s,r)=>s+r.wages,0);
-  /* Deputy wins where it has data. The weekly form sheets are the payroll record but
-     arrive only after week end, so a week still running showed no wages at all and the
-     tiles vanished. Deputy is daily, includes leave and training, and can be estimated
-     for shifts not yet exported to payroll. Falls back to the forms when it has none. */
-  const dep=wagesInScope();
-  const wages=dep?dep.cost:wagesTot;
-  const wageSrc=dep?"deputy":(wagesTot>0?"forms":"none");
   const {cogs:cogsSpend,excluded:nonCogsSpend,unmapped}=cogsSplit(byGroup);
   const unmappedList=Object.entries(unmapped).sort((a,b)=>b[1]-a[1]);
   const kpiPct=(a,b)=>b?Math.round(a/b*1000)/10+"%":"—";
@@ -2003,12 +1128,11 @@ function renderReports(){
       <div class="statgrid">
         <div class="stat"><div class="v">${money(salesTot)}</div><div class="k">Sales</div></div>
         <div class="stat"><div class="v">${kpiPct(cogsSpend,salesTot)}</div><div class="k">COGS % of sales</div></div>
-        ${wages>0?`<div class="stat"><div class="v">${kpiPct(wages,salesTot)}</div><div class="k">Wages % of sales</div></div>
-        <div class="stat"><div class="v">${kpiPct(cogsSpend+wages,salesTot)}</div><div class="k">Prime cost %</div></div>`:`<div class="stat"><div class="v" style="color:var(--dim)">—</div><div class="k">Wages % — no labour data</div></div>`}
+        ${wagesTot>0?`<div class="stat"><div class="v">${kpiPct(wagesTot,salesTot)}</div><div class="k">Wages % of sales</div></div>
+        <div class="stat"><div class="v">${kpiPct(cogsSpend+wagesTot,salesTot)}</div><div class="k">Prime cost %</div></div>`:""}
       </div>
       <div style="font-size:11px;color:var(--dim);margin-top:6px">
         COGS = ${money(cogsSpend)} of ${money(tot.spend)} spend; ${money(nonCogsSpend)} excluded as non-COGS (cleaning, equipment, energy, overheads and similar).
-        ${wageSrc==="deputy"?`<br>Wages ${money(wages)} from Deputy timesheets${dep.leave||dep.training?` including ${money(dep.leave+dep.training)} of leave and training`:``}${dep.est>0?`, of which ${money(dep.est)} is estimated from hours at recent rates because Deputy has not yet exported those shifts to payroll`:``}.`:``}
         ${SALES_SOURCE?`<br>Sales from the ImPOS feed from ${fmtD(SALES_SOURCE)}; earlier sales and all wages from the weekly reporting sheets, spread evenly across each week. Wages arrive the Monday after week end, so the current week shows none.`:""}
         ${unmappedList.length?`<br><b style="color:var(--red)">Unmapped:</b> ${unmappedList.map(([g,v])=>esc(g)+" "+money(v)).join(", ")} — counted in COGS; assign a group in supplier settings if that's wrong.`:""}
       </div>
@@ -2031,7 +1155,6 @@ function renderReports(){
       </div>
       <div style="margin-top:10px"><a class="btn outline" onclick="window.print()" style="cursor:pointer">🖨 Print / save as PDF</a></div>
     </div>
-    ${forecastCard()}
     ${kpiCard}
     ${FILTER.venues.length===1?"":tbl(byVenue,"By venue")}
     ${tbl(byGroup,"By group")}
@@ -2118,8 +1241,6 @@ function renderSupplier(name){
   /* Share of the period's spend. Guarded against a zero total, which happens when credits
      exactly offset invoices — rare, but it would otherwise print NaN%. */
   const invVenuePct=t=>invVenueTotal?(t/invVenueTotal*100).toFixed(1)+"%":"—";
-  /* Like-for-like movement per venue for this supplier - see supplierVenueMoves. */
-  const vMoves=supplierVenueMoves(name);
   // Statement periods: month or week, per the toggle. Each period also carries a
   // per-venue split so the "By venue" view can show columns without a second pass.
   const pKey = STMT_PERIOD==="week" ? weekKey : monthKey;
@@ -2207,9 +1328,9 @@ function renderSupplier(name){
           <td class="num"><b>${money(p.lastPrice)}</b></td>
           <td class="num hide-sm">${p.prevPrice!=null?money(p.prevPrice):'<span style="color:var(--dim)">—</span>'}</td>
           <td class="num hide-sm">${p.avg90?money(p.avg90):""}</td>
-          <td class="num">${p.change!=null?`<span class="${p.change>0?'up':p.change<0?'down':''}">${pct(p.change)}</span>`:""}</td>
+          <td class="num">${p.change!=null?`<span class="${p.change>0?'up':p.change<0?'down':''}">${pct(p.change)}</span>`:p.packRatio?`<span class="pill" title="Price moved by an exact multiple — a different pack size, not a price change">pack ${esc(p.packRatio)}</span>`:""}</td>
         </tr>`).join("")}</tbody></table>
-      <div style="font-size:11px;color:var(--dim);margin-top:6px">Tick products to build one combined price-query email.</div>
+      <div style="font-size:11px;color:var(--dim);margin-top:6px">Tick products to build one combined price-query email. Price stats compare purchases in the same unit only; a "pack" tag means the last two prices differ by an exact multiple — a pack-size change, not a price change.</div>
     </div>
     <div id="selbar" style="display:none;position:sticky;bottom:8px;z-index:3" class="card"></div>
     <div class="card"><div class="label">Invoices (${inv.length})</div>
@@ -2220,9 +1341,9 @@ function renderSupplier(name){
           <td class="hide-sm">${esc(r.venue)}</td><td class="num">${money(r.total)}</td>
           <td>${r.type==="credit_note"?'<span class="pill credit">credit</span>':""}${r.status==="CHECK"?' <span class="pill check">check</span>':""}${r.dup?' <span class="pill check">dup</span>':""}</td>
         </tr>`).join("")}</tbody>
-      ${invVenueRows.length?`<tfoot>${invVenueRows.map(([v,t])=>`<tr><td colspan="2" style="color:var(--dim)">${esc(v)}</td><td class="hide-sm num" style="color:var(--dim)">${invVenuePct(t)}</td><td class="num"><b>${money(t)}</b></td><td>${vMoves?moveTag(vMoves.map[v]):""}</td></tr>`).join("")}
-        <tr><td colspan="2"><b>Total</b></td><td class="hide-sm num" style="color:var(--dim)">100.0%</td><td class="num"><b>${money(invVenueTotal)}</b></td><td>${vMoves?moveTag(vMoves.all):""}</td></tr></tfoot>`:""}
-      </table><div style="font-size:11px;color:var(--dim);margin-top:6px">${vMoves?`Arrows compare the first ${vMoves.days} day(s) of this period against the same opening stretch of the ${vMoves.periods} comparable periods before it, and appear only when a venue sits outside its own normal swing. Hover for the numbers.`:""}</div>
+      ${invVenueRows.length?`<tfoot>${invVenueRows.map(([v,t])=>`<tr><td colspan="2" style="color:var(--dim)">${esc(v)}</td><td class="hide-sm num" style="color:var(--dim)">${invVenuePct(t)}</td><td class="num"><b>${money(t)}</b></td><td></td></tr>`).join("")}
+        <tr><td colspan="2"><b>Total</b></td><td class="hide-sm num" style="color:var(--dim)">100.0%</td><td class="num"><b>${money(invVenueTotal)}</b></td><td></td></tr></tfoot>`:""}
+      </table>
     </div>`;
   wireRowSearch("prodSearch","prodTbody","prodCount","products");
   renderSelBar(name,email);
@@ -2369,8 +1490,12 @@ function renderProduct(supplier,id){
      not off the range-scoped p.buys. p.hist is already venue-scoped and anchored to the
      end of the selected range, so browsing a past month still gives that month's history. */
   const full=(p.hist&&p.hist.length?p.hist:p.buys).slice().sort((a,b)=>a.date-b.date);
-  const winEnd=full.length?full[full.length-1].date.getTime():Date.now();
-  const buys=PRICE_WIN?full.filter(b=>b.date.getTime()>=winEnd-PRICE_WIN*864e5):full;
+  const fullAll=(p.histAll&&p.histAll.length?p.histAll:full).slice().sort((a,b)=>a.date-b.date);
+  const winEnd=fullAll.length?fullAll[fullAll.length-1].date.getTime():Date.now();
+  const inWin=b=>!PRICE_WIN||b.date.getTime()>=winEnd-PRICE_WIN*864e5;
+  const buys=full.filter(inWin);          // same unit as the latest buy — drives the chart
+  const buysAll=fullAll.filter(inWin);    // every pack size — the purchase list
+  const unitNote=p.otherUnits&&p.otherUnits.length?` · also bought as ${p.otherUnits.map(esc).join(", ")} (not charted)`:"";
   const winLabel=PRICE_WIN?("last "+(PRICE_WIN===28?"4 weeks":PRICE_WIN+" days")):"all time";
   const winBtns=[[28,"4 weeks"],[90,"90 days"],[0,"All"]].map(([n,t])=>
     `<span class="tgl${PRICE_WIN===n?" on":""}" style="cursor:pointer" onclick="setPriceWin(${n})">${t}</span>`
@@ -2395,15 +1520,15 @@ function renderProduct(supplier,id){
       ${email?`<div style="margin-top:10px"><a class="btn" href="${venueEmailHref(email,p)}">✉ Query venue price difference</a></div>`:""}</div>
     </div>`:""}
     <div class="card"><div class="label" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <span>${esc(p.desc)} — unit price history · ${esc(winLabel)}</span><span>${winBtns}</span></div>${priceChart(buys)}
+        <span>${esc(p.desc)} — unit price history · ${esc(winLabel)} · per ${esc(p.unit||"unit")}${unitNote}</span><span>${winBtns}</span></div>${priceChart(buys)}
       ${riseBtn?`<div style="margin-top:12px">${riseBtn}</div>`:""}
     </div>
-    <div class="card"><div class="label">Purchases (${buys.length}) · ${esc(winLabel)}</div>
+    <div class="card"><div class="label">Purchases (${buysAll.length}) · ${esc(winLabel)}</div>
       <table><thead><tr><th>Date</th><th class="hide-sm">Invoice</th><th class="hide-sm">Venue</th><th class="num">Qty</th><th class="num">Unit $</th></tr></thead>
-      <tbody>${buys.slice().reverse().map(b=>`
+      <tbody>${buysAll.slice().reverse().map(b=>`
         <tr class="click" onclick="go('i::${encodeURIComponent(supplier)}::${encodeURIComponent(b.number)}')">
           <td>${fmtD(b.date)}</td><td class="hide-sm">${esc(b.number)}</td>
-          <td class="hide-sm">${esc(b.venue)}</td><td class="num">${b.qty} ${esc(b.unit)}</td>
+          <td class="hide-sm">${esc(b.venue)}</td><td class="num">${b.qty} ${esc(b.unit)}${unitNorm(b.unit||"")!==unitNorm(p.unit||"")?' <span class="pill" title="Different pack size — not used for price comparison">pack</span>':""}</td>
           <td class="num"><b>${money(b.price)}</b></td>
         </tr>`).join("")}</tbody></table>
     </div>`;
