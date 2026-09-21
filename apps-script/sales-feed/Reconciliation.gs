@@ -88,6 +88,9 @@ var RECON = {
   LOOKBACK_DAYS: 14,
   DATE_TOLERANCE_DAYS: 7,
 
+  // Script Property holding the list of venues already backfilled.
+  BACKFILL_PROP: 'reconBackfillDone',
+
   // A till flagged DECIMAL? when the larger figure is this many times the smaller.
   TYPO_RATIO: 50,
   TYPO_MIN_ABS: 150,
@@ -110,7 +113,10 @@ var RECON = {
     {
       venue: 'Red Square Cambridge',
       id: '1Xtqin9seucI9jO5IZ6ilJ1aRMapJs8E71aWBKa9lb2c',
-      submittedBy: 'Submitted by:',
+      // Candidates in preference order. 'Submitted by:' only exists from 28 Nov 2021;
+      // before that the form had a single 'Staff Name' field. First populated wins, so
+      // a backfill reaching into 2019 still gets a name on the row.
+      submittedBy: ['Submitted by:', 'Staff Name'],
       doshii: 'Doshii total sales',
       hasFloat: true,
       tills: [
@@ -123,7 +129,7 @@ var RECON = {
     {
       venue: 'Red Square Glenorchy',
       id: '13ZPE0A7EQuhiXfUvnRK77V9EvfQya0ZEgSIqm4yvvP0',
-      submittedBy: 'Submitted by:',
+      submittedBy: ['Submitted by:', 'POS 1 Staff name:'],
       doshii: null,
       hasFloat: true,
       tills: [
@@ -135,7 +141,7 @@ var RECON = {
     {
       venue: 'Luma Kitchen',
       id: '1v5vh8KvSS5beeTNW2tJ1deBl8T9hLGOJW3mqOkfSmug',
-      submittedBy: 'Staff Name',
+      submittedBy: ['Staff Name'],
       doshii: 'POS 1 Doshii total',
       hasFloat: false,
       tills: [
@@ -250,10 +256,30 @@ function recColMap_(header, rows, names) {
   return map;
 }
 
+/** submittedBy accepts a string or a list; always hand back a list. */
+function recSubmitCandidates_(src) {
+  if (!src.submittedBy) return [];
+  return (typeof src.submittedBy === 'string') ? [src.submittedBy] : src.submittedBy;
+}
+
+/** First populated candidate column for this row, or ''. */
+function recSubmitter_(row, map, src) {
+  var by = recSubmitCandidates_(src);
+  for (var i = 0; i < by.length; i++) {
+    var idx = map[by[i]];
+    if (idx >= 0) {
+      var v = String(row[idx] === undefined ? '' : row[idx]).trim();
+      if (v !== '') return v;
+    }
+  }
+  return '';
+}
+
 /** Every logical column name a source needs. */
 function recNamesFor_(src) {
   var names = ['Timestamp', 'Date'];
-  if (src.submittedBy) names.push(src.submittedBy);
+  var by = recSubmitCandidates_(src);
+  for (var b = 0; b < by.length; b++) names.push(by[b]);
   if (src.doshii) names.push(src.doshii);
   for (var i = 0; i < src.tills.length; i++) {
     names.push(src.tills[i].staff, src.tills[i].imp, src.tills[i].act, src.tills[i].eft);
@@ -300,7 +326,7 @@ function processReconciliation() {
   var today = Utilities.formatDate(new Date(), 'Australia/Hobart', 'yyyy-MM-dd');
   var from  = recAddDays_(today, -RECON.LOOKBACK_DAYS);
 
-  var dayRows = [], tillRows = [], report = [], problems = [];
+  var dayRows = [], tillRows = [], report = [], problems = [], ok = [];
 
   for (var s = 0; s < RECON.SOURCES.length; s++) {
     var src = RECON.SOURCES[s];
@@ -308,6 +334,7 @@ function processReconciliation() {
       var got = recReadSource_(src, from, today);
       dayRows = dayRows.concat(got.days);
       tillRows = tillRows.concat(got.tills);
+      ok.push(src.venue);
       report.push(src.venue + ': ' + got.days.length + ' days, ' + got.tills.length +
                   ' tills' + (got.badDates ? ', ' + got.badDates + ' BAD_DATE' : '') +
                   (got.typos ? ', ' + got.typos + ' DECIMAL?' : ''));
@@ -317,8 +344,8 @@ function processReconciliation() {
     }
   }
 
-  recReplaceWindow_(book, RECON.SHEET_DAY,  RECON.DAY_HEADER,  dayRows,  from, today);
-  recReplaceWindow_(book, RECON.SHEET_TILL, RECON.TILL_HEADER, tillRows, from, today);
+  recReplaceWindow_(book, RECON.SHEET_DAY,  RECON.DAY_HEADER,  dayRows,  from, today, ok);
+  recReplaceWindow_(book, RECON.SHEET_TILL, RECON.TILL_HEADER, tillRows, from, today, ok);
 
   var secs = ((new Date() - t0) / 1000).toFixed(1);
   Logger.log('Reconciliation ' + from + ' .. ' + today + ' in ' + secs + 's');
@@ -331,8 +358,13 @@ function processReconciliation() {
 }
 
 
-/** Read one venue's form responses for the window. */
-function recReadSource_(src, from, to) {
+/**
+ * Read one venue's form responses for the window.
+ * maxRows caps how far back up the sheet to look. The daily run only needs the tail;
+ * a backfill passes Infinity and reads the lot.
+ */
+function recReadSource_(src, from, to, maxRows) {
+  if (maxRows === undefined) maxRows = 400;
   var ss = SpreadsheetApp.openById(src.id);
   var sheet = recFindResponseSheet_(ss, src);
   if (!sheet) throw new Error('no tab matched the response header signature');
@@ -342,7 +374,7 @@ function recReadSource_(src, from, to) {
 
   // Only the tail can fall inside the window; reading the whole sheet costs nothing
   // useful and these go back to 2019. Take a generous tail and filter by date.
-  var take = Math.min(lastRow - 1, 400);
+  var take = Math.min(lastRow - 1, maxRows);
   if (take <= 0) return { days: [], tills: [], badDates: 0, typos: 0, notes: [] };
   var rows = sheet.getRange(lastRow - take + 1, 1, take, lastCol).getDisplayValues();
 
@@ -452,7 +484,7 @@ function recReadSource_(src, from, to) {
 
     days.push([
       date, src.venue,
-      map[src.submittedBy] >= 0 ? String(row[map[src.submittedBy]]).trim() : '',
+      recSubmitter_(row, map, src),
       nTills, recRound_(impCash), recRound_(actCash), recRound_(varSum),
       recRound_(eft),
       src.doshii && map[src.doshii] >= 0 ? recNum0_(row[map[src.doshii]]) : '',
@@ -486,10 +518,15 @@ function recRowHasData_(row) {
 
 
 /**
- * Replace every row inside [from, to] with the freshly-read set, leaving everything
- * outside the window alone. Idempotent: running twice produces the same tab.
+ * Replace rows inside [from, to] with the freshly-read set, leaving everything outside
+ * the window alone. Idempotent: running twice produces the same tab.
+ *
+ * `venues` is the list of venues whose rows may be replaced, and it matters. Without it
+ * a run where one workbook failed to open would clear that venue's rows for the whole
+ * window and write nothing back - a read failure would silently destroy good history.
+ * Only venues that actually returned data are cleared.
  */
-function recReplaceWindow_(book, name, header, rows, from, to) {
+function recReplaceWindow_(book, name, header, rows, from, to, venues) {
   var sheet = book.getSheetByName(name);
   if (!sheet) {
     sheet = book.insertSheet(name);
@@ -513,7 +550,9 @@ function recReplaceWindow_(book, name, header, rows, from, to) {
     for (var i = 0; i < existing.length; i++) {
       var key = String(existing[i][0]).trim();
       if (key === '') continue;
-      if (key >= from && key <= to) continue;   // inside the window - being replaced
+      var inWindow = (key >= from && key <= to);
+      var mine = !venues || venues.indexOf(String(existing[i][1])) >= 0;
+      if (inWindow && mine) continue;   // being replaced by this run
       kept.push(existing[i]);
     }
   }
@@ -527,6 +566,95 @@ function recReplaceWindow_(book, name, header, rows, from, to) {
   if (last > 1) sheet.getRange(2, 1, last - 1, header.length).clearContent();
   if (out.length) sheet.getRange(2, 1, out.length, header.length).setValues(out);
   sheet.getRange(1, 1, 1, header.length).setValues([header]);
+}
+
+
+/* ----------------------------------------------------------------- backfill */
+
+/**
+ * One-off: load the entire history of every venue into the two tabs.
+ *
+ * Cambridge goes back to 1 Aug 2019 and Glenorchy to 15 Jun 2022, so this is roughly
+ * 6,000 day rows and 16,000 till rows. That is a comfortable amount of data for Sheets
+ * but too much to read and write inside one six-minute execution with any margin, so
+ * this runs ONE VENUE PER INVOCATION and remembers which are done in Script Properties.
+ *
+ * Run it, wait for it to finish, run it again. It reports what is left each time and
+ * says DONE when there is nothing outstanding. Re-running after it says DONE does
+ * nothing until reconBackfillReset() is called.
+ *
+ * Safe to run against populated tabs, and safe to interrupt. Each venue is written with
+ * a venue-scoped window replace, so a venue already loaded is simply rewritten with the
+ * same values and no other venue is touched. It does not need the daily trigger paused.
+ *
+ * WHAT THE OLDER ROWS DO AND DO NOT CARRY - read before trusting a long-range average:
+ *   - Cash totals and the full denomination count run the whole way back at both cafes.
+ *     Float history is therefore genuinely seven years deep at Cambridge.
+ *   - Cambridge POS 3 does not exist before 12 Nov 2020. Its absence is not a zero
+ *     till - the day row's `tills` count reflects how many were actually running.
+ *   - PER-TILL STAFF NAMES ONLY EXIST FROM 28 NOV 2021 at Cambridge. Before that the
+ *     form captured one name for the whole day, which lands in `submitted_by` and
+ *     leaves `staff` blank on the till rows. Any per-person variance analysis has to
+ *     start at Nov 2021 or it will quietly attribute four tills to one person.
+ *   - Doshii starts 24 Mar 2023. Tyro totals stopped 15 Jul 2022 and are not ingested
+ *     at all - the EFT figure used here is the Impos one, which spans the full history.
+ */
+function reconBackfill() {
+  var props = PropertiesService.getScriptProperties();
+  var done = JSON.parse(props.getProperty(RECON.BACKFILL_PROP) || '[]');
+  var book = SpreadsheetApp.openById(RECON.SPREADSHEET_ID);
+  var today = Utilities.formatDate(new Date(), 'Australia/Hobart', 'yyyy-MM-dd');
+
+  var next = null;
+  for (var s = 0; s < RECON.SOURCES.length; s++) {
+    if (done.indexOf(RECON.SOURCES[s].venue) < 0) { next = RECON.SOURCES[s]; break; }
+  }
+  if (!next) {
+    Logger.log('Backfill DONE - all ' + RECON.SOURCES.length + ' venues loaded.');
+    Logger.log('Run reconBackfillReset() first if you need to load them again.');
+    return { done: true };
+  }
+
+  var t0 = new Date();
+  Logger.log('Backfilling ' + next.venue + ' ...');
+
+  var got = recReadSource_(next, '0000-01-01', today, Infinity);
+  if (!got.days.length) {
+    Logger.log('  no rows returned - NOT marking done. Run reconHealthCheck().');
+    return { done: false, venue: next.venue, rows: 0 };
+  }
+
+  var earliest = got.days[0][0];
+  recReplaceWindow_(book, RECON.SHEET_DAY,  RECON.DAY_HEADER,  got.days,
+                    earliest, today, [next.venue]);
+  recReplaceWindow_(book, RECON.SHEET_TILL, RECON.TILL_HEADER, got.tills,
+                    earliest, today, [next.venue]);
+
+  done.push(next.venue);
+  props.setProperty(RECON.BACKFILL_PROP, JSON.stringify(done));
+
+  var remaining = [];
+  for (var r = 0; r < RECON.SOURCES.length; r++) {
+    if (done.indexOf(RECON.SOURCES[r].venue) < 0) remaining.push(RECON.SOURCES[r].venue);
+  }
+
+  Logger.log('  ' + got.days.length + ' days, ' + got.tills.length + ' tills, ' +
+             earliest + ' .. ' + got.days[got.days.length - 1][0] +
+             ' in ' + ((new Date() - t0) / 1000).toFixed(1) + 's');
+  if (got.badDates) Logger.log('  ' + got.badDates + ' rows fell back to the timestamp date');
+  if (got.typos)    Logger.log('  ' + got.typos + ' tills flagged DECIMAL?');
+  for (var n = 0; n < got.notes.length; n++) Logger.log('  note: ' + got.notes[n]);
+  Logger.log(remaining.length ? 'NEXT: run reconBackfill() again for ' + remaining.join(', ')
+                              : 'Backfill COMPLETE.');
+
+  return { done: remaining.length === 0, venue: next.venue,
+           days: got.days.length, tills: got.tills.length, remaining: remaining };
+}
+
+/** Clear the backfill cursor so reconBackfill() will run the venues again. */
+function reconBackfillReset() {
+  PropertiesService.getScriptProperties().deleteProperty(RECON.BACKFILL_PROP);
+  Logger.log('Backfill cursor cleared.');
 }
 
 
