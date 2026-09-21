@@ -144,7 +144,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v10-0830"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v12-1232"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -457,10 +457,17 @@ const supActive=n=>{const c=CFG[norm(n)];return c?c.active:true;};
 const rowGroup=r=>{const g=supGroup(r.supplier);return g!=="Ungrouped"?g:(r.category||"Ungrouped");};
 const isCogs=r=>!NON_COGS.has(String(rowGroup(r)||"").trim().toLowerCase());
 
-/* Global settings. Per-site routing is gone: a setting means the same thing in every view. */
+/* Rep email, cc and note are shared facts about the supplier. ORDERING is this dashboard's
+   own (Adrian, 18 Sep): here (on the Order tab), portal (spend everywhere, no ordering here —
+   they insist on their own platform), off (spend everywhere, no ordering here). Spend is
+   visible in every state; the moment a supplier vanished from the front page the header
+   total would stop adding up to the table. visible and portal_only are derived so the
+   ordering code keeps reading the names it always did. */
 function sset(name){
   const s=SSET[norm(name)]||{};
-  return { rep_email:s.rep_email||"", visible:s.visible!==false, portal_only:!!s.portal_only,
+  const ordering=s.ordering||"here";
+  return { rep_email:s.rep_email||"", ordering, orderHere:ordering==="here",
+           visible:ordering!=="off", portal_only:ordering==="portal",
            cc:s.cc||"", note:s.note||"" };
 }
 
@@ -485,7 +492,7 @@ const TAB_COLUMNS={
      "nothing turned off". */
   "ItemVisibility":["item_key","scope","hidden"],
   /* Same story: created by Orders.gs on the first supplier turned off from this dashboard. */
-  "SupplierVisibility":["supplier","scope","visible"],
+  "SupplierVisibility":["supplier","scope","visible"],   // "ordering" arrived later and sits last; read when present
   "Sales":["date","venue","sales"]
 };
 async function fetchTab(name){
@@ -651,15 +658,16 @@ async function loadAll(){
        deliberately not read. This dashboard's list is the SupplierVisibility tab, scope
        glenorchy, a row per supplier turned off here (Adrian, 18 Sep 2026 — "the lists should
        be independent, it is overall cleaner"). */
+    /* SupplierSettings.visible and .portal_only are Cambridge Central's and are deliberately
+       not read. Ordering here comes only from SupplierVisibility, scope glenorchy. */
     SSET={};
     setRows.forEach(r=>{const k=norm(r.supplier);if(!k)return;
-      SSET[k]={rep_email:String(r.rep_email||"").trim(),
-               visible:true,
-               portal_only:String(r.portal_only||"").trim().toLowerCase()==="yes",
+      SSET[k]={rep_email:String(r.rep_email||"").trim(), ordering:"here",
                cc:String(r.cc||"").trim(), note:String(r.note||"").trim()};});
     supVisRows.forEach(r=>{
       const k=norm(r.supplier); if(!k||String(r.scope||"").trim().toLowerCase()!==VIS_SCOPE) return;
-      if(String(r.visible||"").trim().toLowerCase()==="no") SSET[k]=Object.assign({},SSET[k]||{},{visible:false});
+      const o=String(r.ordering||"").trim().toLowerCase()||(String(r.visible||"").trim().toLowerCase()==="no"?"off":"here");
+      if(o==="portal"||o==="off") SSET[k]=Object.assign({},SSET[k]||{},{ordering:o});
     });
 
     const favLines={};
@@ -1071,12 +1079,12 @@ function supplierList(now,opts){
     s.vsUsual=(s.usualToDate!=null&&s.usualToDate>0)?(s.week-s.usualToDate)/s.usualToDate*100:null;
     s.daysSince=Math.round((t-+s.last)/864e5);
     s.lines=LINES.some(l=>l.supplier===s.name&&(!venue||l.venue===venue));
-    s.visible=cfg.visible; s.portal=cfg.portal_only; s.rep=cfg.rep_email;
-    s.orderable=s.visible&&s.lines;
+    s.ordering=cfg.ordering; s.visible=cfg.visible; s.portal=cfg.portal_only; s.rep=cfg.rep_email;
+    s.orderable=cfg.orderHere&&s.lines;
     return s;
   }).sort((a,b)=>b.avgWk-a.avgWk);
 }
-const orderableSuppliers=()=>supplierList().filter(s=>s.orderable&&(!HIDE_PORTAL||!s.portal));
+const orderableSuppliers=()=>supplierList().filter(s=>s.orderable);
 function supplierEmail(name){
   const cfg=sset(name);
   if(cfg.rep_email) return cfg.rep_email;
@@ -1270,8 +1278,8 @@ function orderTabs(cur){
 }
 function renderOrderHome(){
   const m=weekModel(), all=supplierList();
-  const shown=all.filter(s=>s.orderable&&(!HIDE_PORTAL||!s.portal));
-  const portalCount=all.filter(s=>s.orderable&&s.portal).length;
+  const shown=all.filter(s=>s.orderable);
+  const portalCount=0;
   document.getElementById("app").innerHTML=`
     ${warnBar()}${summaryBar(m)}${orderTabs("order")}
     <div class="card">
@@ -1293,7 +1301,7 @@ function renderOrderHome(){
         return `<tr class="${n?"picked":""} ${openHere?"picked":""}">
           <td style="text-align:center;cursor:pointer;color:var(--dim)" onclick="toggleHomeInv('${esc(s.name)}')"
               title="Show invoices">${openHere?"▾":"▸"}</td>
-          <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.portal?' <span class="pill">portal</span>':""}${s.rep?"":' <span class="pill">no rep email</span>'}</td>
+          <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.rep?"":' <span class="pill">no rep email</span>'}</td>
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
             ${v!=null?`<br><span class="${s.week>=s.usualToDate?"up":"down"}" style="font-size:11px">${s.week>=s.usualToDate?"+":"−"}${money0(Math.abs(s.week-s.usualToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.usualToDate)} by ${esc(DAYSHORT)}</span>`:""}</td>
           <td class="num hide-sm">${s.usualWk?money(s.usualWk):'<span style="color:var(--dim)">—</span>'}</td>
@@ -1364,8 +1372,8 @@ function renderHome(){
         <td class="num"><b>${money(total)}</b></td><td class="num"></td><td class="hide-sm"></td></tr></tfoot>`:""}
       </table>
       ${sup.length?"":`<div class="note">No invoices dated in ${esc(range.label)}.</div>`}
-      <div class="note">Tap a column to sort, a supplier for its products and invoices. Portal-only suppliers are
-        included — hidden from ordering, never from spend. ${avgNoteFor(d,range)}</div>
+      <div class="note">Tap a column to sort, a supplier for its products and invoices. Every supplier counts here
+        whatever its ordering setting — portal and off are hidden from ordering, never from spend. ${avgNoteFor(d,range)}</div>
       <div style="margin-top:8px;font-size:12px"><a style="cursor:pointer;color:var(--dim);text-decoration:underline" onclick="go('admin')">⚙ supplier settings</a></div>
     </div>
     ${d.grp.length>1?`<div class="card"><div class="label">Spend by group — ${esc(range.label)}</div>
@@ -1873,6 +1881,7 @@ function renderReports(){
   const m=rangeModel(), range=reportRange(), prods=rangeProducts(range);
   document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
     <div class="grid2">${repBoughtCard(range,prods)}${repSoldCard(range)}</div>
+    ${repWasteCard(range)}
     ${repCreepCard(range,prods)}`;
 }
 /* ================= REPORTS: TOP 10s =================
@@ -1888,8 +1897,28 @@ let REP_SOLD_BY="sales", REP_CREEP_DIR="up";
 function setSoldBy(k){ REP_SOLD_BY=k; route(); }
 function setCreepDir(k){ REP_CREEP_DIR=k; route(); }
 
+/* "Usual" for a product over the range (Adrian, 21 Sep): its rate over the AVG_WEEKS complete
+   weeks before the range, scaled to the range's length — and PRO-RATED while the range is
+   still running, because a Tuesday measured against a whole usual week reads ▼ on everything.
+   Same window the supplier table's Usual/wk uses, so the two agree. */
+function rangeScale(range){
+  const days=Math.round((+mid(range.end)-+mid(range.start))/864e5)+1, t=mid(new Date());
+  const elapsed=+t<+mid(range.start)?0:+t>+mid(range.end)?days:Math.round((+t-+mid(range.start))/864e5)+1;
+  return {days,weeks:days/7,elapsed,live:elapsed<days,frac:days?elapsed/days:1};
+}
+/* more than usual = ▲. For spend that is the red one; for sales it is the green one. */
+function usualMark(actual,usual,kind){
+  if(!(usual>0)) return "";
+  const up=actual>usual*1.1, down=actual<usual*0.9;
+  if(!up&&!down) return ' <span style="color:var(--dim)">–</span>';
+  const good=kind==="sales"?up:down;
+  return ` <span class="${good?"down":"up"}" title="usual ${Math.round(usual*10)/10}">${up?"▲":"▼"}</span>`;
+}
+const usualNote=sc=>`<b>Usual</b> is the product's rate over the ${AVG_WEEKS} full weeks before the range, scaled to
+  ${sc.weeks===1?"a week":wksLabel(sc.weeks)}${sc.live?` and pro-rated to the ${sc.elapsed} of ${sc.days} days so far`:""};
+  ▲▼ marks more or less than 10% off it, blank where nothing was seen before.`;
 function rangeProducts(range){
-  const map={};
+  const map={}, sc=rangeScale(range), uFrom=addD(mid(range.start),-7*AVG_WEEKS);
   LINES.forEach(l=>{
     if(!l.date||!(l.price>0)||!(l.qty>0)||FEE.test(l.desc)||!supActive(l.supplier)) return;
     if(l.date>range.end) return;
@@ -1911,6 +1940,8 @@ function rangeProducts(range){
     p.change=p.base?(p.price-p.base)/p.base*100:null;
     /* Extra paid: every delivery in the range priced against the baseline. Negative = saved. */
     p.extra=p.inRange.reduce((s,b)=>s+b.qty*(b.price-p.base),0);
+    p.usualWk=p.before.filter(b=>b.date>=uFrom).reduce((s,b)=>s+b.qty,0)/AVG_WEEKS;
+    p.usualQty=p.usualWk*sc.weeks*(sc.live?sc.frac:1);
     return p;
   });
 }
@@ -1926,61 +1957,122 @@ function repBoughtCard(range,prods){
   const list=prods.slice().sort((a,b)=>b.spend-a.spend);
   const tot=list.reduce((s,p)=>s+p.spend,0);
   const top=list.slice(0,10);
+  const sc=rangeScale(range);
   return `<div class="card"><div class="label">Top 10 purchased — by spend in range</div>
     ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Supplier</th><th class="num">Qty</th>
-      <th class="num">Spend</th><th class="num hide-sm">%</th><th class="num">Price</th></tr></thead>
+      <th class="num">Usual</th><th class="num">Spend</th><th class="num hide-sm">%</th><th class="num">Price</th></tr></thead>
       <tbody>${top.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
         <td><b>${esc(p.desc)}</b></td>
         <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
         <td class="num">${qtyFmt(p.qty,p.unit)}</td>
+        <td class="num">${p.usualQty>0?Math.round(p.usualQty*10)/10:'<span style="color:var(--dim)">—</span>'}${usualMark(p.qty,p.usualQty,"spend")}</td>
         <td class="num"><b>${money(p.spend)}</b></td>
         <td class="num hide-sm" style="color:var(--dim)">${tot?pct1(p.spend/tot*100):""}</td>
         <td class="num">${money(p.price)} ${creepChip(p)}</td></tr>`).join("")}</tbody></table>
       <div class="note">${list.length} products · ${money(tot)} on product lines in ${esc(range.label)}. Line totals with
         delivery and fees stripped, so this will not match the supplier totals to the cent. Price is the latest paid
-        in the range; the arrow compares it with what you were paying before the range. Tap a row for the history.</div>`
+        in the range; the arrow compares it with what you were paying before the range. ${usualNote(sc)} Tap a row for the history.</div>`
       :`<div class="note">No product lines dated in ${esc(range.label)}.</div>`}</div>`;
 }
 
-function repSoldCard(range){
+/* The item feed for a range, shared by the sold and wastage cards. One status, one fetch:
+   loadSalesWeek is idempotent while busy, so both cards asking on the same render costs one
+   request. `prior` is the AVG_WEEKS complete weeks before the range, for "usual", fetched
+   second so the range itself always lands first. */
+function feedFor(range){
   const feedStart=gvizDate(SALES_CUTOVER);
   const days=Math.round((+mid(range.end)-+mid(range.start))/864e5)+1;
+  if(feedStart&&range.end<feedStart) return {status:"pre",feedStart};
+  if(days>SALES_MAX_DAYS) return {status:"wide",days};
+  const start=feedStart&&range.start<feedStart?feedStart:range.start;
+  const w={start,end:range.end}, k=sdKey(w);
+  if(!SD[k]){ loadSalesWeek(w); return {status:"loading",start}; }
+  if(SD_ERR&&!SD[k].length) return {status:"err"};
+  const out={status:"ok",rows:SD[k],start,w,k,prior:null};
+  let ps=addD(mid(range.start),-7*AVG_WEEKS); if(feedStart&&ps<feedStart) ps=feedStart;
+  const pe=endOfDay(addD(mid(range.start),-1));
+  if(+ps<+pe){
+    const pw={start:ps,end:pe}, pk=sdKey(pw);
+    if(!SD[pk]) loadSalesWeek(pw);
+    else out.prior={rows:sdSales(SD[pk]),days:Math.round((+mid(pe)-+mid(ps))/864e5)+1};
+    out.priorPending=!SD[pk];
+  }
+  return out;
+}
+function feedNote(f,head,range){
+  if(f.status==="pre") return `<div class="card">${head}<div class="note">Item-level sales only exist from ${fmtD(f.feedStart)} and this range
+      ends before that. Weekly totals are all the platform kept until then.</div></div>`;
+  if(f.status==="wide") return `<div class="card">${head}<div class="note">That range is ${f.days} days. The item feed is 108,000 rows, so anything
+      past ${SALES_MAX_DAYS} days is a download, not a report — Week, Month or Quarter shows the list.</div></div>`;
+  if(f.status==="loading") return `<div class="card">${head}<div class="note">Loading the item-level feed for ${esc(range.label)}…</div></div>`;
+  if(f.status==="err") return `<div class="card">${head}<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div></div>`;
+  return "";
+}
+
+function repSoldCard(range){
   const head=`<div class="label">Top 10 sold — in range
     <span style="float:right;display:flex;gap:5px">
       <span class="chip sm ${REP_SOLD_BY==="sales"?"on":""}" onclick="setSoldBy('sales')">by revenue</span>
       <span class="chip sm ${REP_SOLD_BY==="qty"?"on":""}" onclick="setSoldBy('qty')">by units</span></span></div>`;
-  if(feedStart&&range.end<feedStart)
-    return `<div class="card">${head}<div class="note">Item-level sales only exist from ${fmtD(feedStart)} and this range
-      ends before that. Weekly totals are all the platform kept until then.</div></div>`;
-  if(days>SALES_MAX_DAYS)
-    return `<div class="card">${head}<div class="note">That range is ${days} days. The item feed is 108,000 rows, so anything
-      past ${SALES_MAX_DAYS} days is a download, not a report — Week, Month or Quarter shows the list.</div></div>`;
-  const start=feedStart&&range.start<feedStart?feedStart:range.start;
-  const w={start,end:range.end}, k=sdKey(w);
-  if(!SD[k]){ loadSalesWeek(w);
-    return `<div class="card">${head}<div class="note">Loading the item-level feed for ${esc(range.label)}…</div></div>`; }
-  if(SD_ERR&&!SD[k].length)
-    return `<div class="card">${head}<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div></div>`;
+  const f=feedFor(range); if(f.status!=="ok") return feedNote(f,head,range);
+  const sc=rangeScale(range), byQty=REP_SOLD_BY==="qty";
   /* Paid units only. A $0 line is a loyalty coffee or a binned sandwich — counting it as sold
      would inflate anything these numbers go on to feed. Kitchen requests are not sales. */
-  const rows=sdSales(SD[k]).filter(r=>r.sales>0), m={};
-  rows.forEach(r=>{ const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",qty:0,sales:0});
+  const rows=sdSales(f.rows).filter(r=>r.sales>0), m={};
+  rows.forEach(r=>{ const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",qty:0,sales:0,uq:0,us:0});
     o.qty+=r.qty; o.sales+=r.sales; });
-  const list=Object.values(m).sort((a,b)=>REP_SOLD_BY==="qty"?b.qty-a.qty:b.sales-a.sales);
+  if(f.prior){
+    const pw=f.prior.days/7, mult=sc.weeks*(sc.live?sc.frac:1)/pw;
+    f.prior.rows.forEach(r=>{ if(!(r.sales>0)||!m[r.item]) return; m[r.item].uq+=r.qty*mult; m[r.item].us+=r.sales*mult; });
+  }
+  const list=Object.values(m).sort((a,b)=>byQty?b.qty-a.qty:b.sales-a.sales);
   const rev=list.reduce((s,o)=>s+o.sales,0), units=list.reduce((s,o)=>s+o.qty,0);
   const top=list.slice(0,10);
+  const usualCell=o=>{ if(f.priorPending) return '<span style="color:var(--dim)">…</span>';
+    const u=byQty?o.uq:o.us, a=byQty?o.qty:o.sales;
+    return (u>0?(byQty?Math.round(u*10)/10:money0(u)):'<span style="color:var(--dim)">—</span>')+usualMark(a,u,"sales"); };
   return `<div class="card">${head}
-    ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Category</th><th class="num">Units</th>
-      <th class="num">Revenue</th><th class="num">%</th></tr></thead>
+    ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Category</th><th class="num">${byQty?"Units":"Revenue"}</th>
+      <th class="num">Usual</th><th class="num hide-sm">${byQty?"Revenue":"Units"}</th><th class="num">%</th></tr></thead>
       <tbody>${top.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
         <td class="hide-sm">${o.group?`<span class="pill">${esc(o.group)}</span>`:""}</td>
-        <td class="num">${Math.round(o.qty*100)/100}</td>
-        <td class="num"><b>${money(o.sales)}</b></td>
-        <td class="num" style="color:var(--dim)">${REP_SOLD_BY==="qty"?(units?pct1(o.qty/units*100):""):(rev?pct1(o.sales/rev*100):"")}</td></tr>`).join("")}</tbody></table>
-      <div class="note">${list.length} products · ${money(rev)} paid sales${start>range.start?` from ${fmtD(start)} (the feed starts there)`:""}.
+        <td class="num"><b>${byQty?Math.round(o.qty*100)/100:money(o.sales)}</b></td>
+        <td class="num">${usualCell(o)}</td>
+        <td class="num hide-sm">${byQty?money(o.sales):Math.round(o.qty*100)/100}</td>
+        <td class="num" style="color:var(--dim)">${byQty?(units?pct1(o.qty/units*100):""):(rev?pct1(o.sales/rev*100):"")}</td></tr>`).join("")}</tbody></table>
+      <div class="note">${list.length} products · ${money(rev)} paid sales${f.start>range.start?` from ${fmtD(f.start)} (the feed starts there)`:""}.
         Paid units only — $0 lines (loyalty coffees, wastage) and kitchen requests are excluded.
-        % is share of ${REP_SOLD_BY==="qty"?"units":"revenue"} across every product in the range.</div>`
+        % is share of ${byQty?"units":"revenue"} across every product in the range. ${usualNote(sc)}</div>`
       :`<div class="note">No paid item sales in ${esc(range.label)}.</div>`}</div>`;
+}
+
+/* Wastage for the range, always by % wasted (Adrian, 21 Sep). Same definition as the Sales
+   tab's card — a $0 line in a perishable group, for an item that also sold for money. */
+function repWasteCard(range){
+  const head=`<div class="label">Wastage — in range, by % wasted</div>`;
+  const f=feedFor(range); if(f.status!=="ok") return feedNote(f,head,range);
+  const w=wasteRows(sdSales(f.rows));
+  if(!w.list.length) return `<div class="card">${head}<div class="note">Nothing binned in ${PERISHABLE.join(", ")} in
+      ${esc(range.label)} — or those items are not in a perishable group in the Overrides tab yet.</div></div>`;
+  const list=w.list.slice().sort((a,b)=>b.pct-a.pct||b.value-a.value), top=list.slice(0,15);
+  return `<div class="card">${head}
+    <div style="font-size:13px;margin-bottom:10px"><b>${Math.round(w.units)}</b> items binned, worth <b>${money(w.value)}</b>
+      at what they were selling for — ${pct1(w.pctAll)} of everything made in these groups.</div>
+    <table><thead><tr><th>Product</th><th class="hide-sm">Group</th><th class="num">Binned</th>
+      <th class="num hide-sm">Sold</th><th class="num">% wasted</th><th class="num">Value</th></tr></thead>
+    <tbody>${top.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
+      <td class="hide-sm"><span class="pill">${esc(o.group)}</span></td>
+      <td class="num">${Math.round(o.free*100)/100}</td>
+      <td class="num hide-sm">${Math.round(o.sold*100)/100}</td>
+      <td class="num ${o.pct>=25?"up":""}"><b>${pct1(o.pct)}</b></td>
+      <td class="num">${money(o.value)}</td></tr>`).join("")}
+      <tr style="border-top:2px solid var(--line)"><td><b>Total</b></td><td class="hide-sm"></td>
+        <td class="num"><b>${Math.round(w.units*100)/100}</b></td>
+        <td class="num hide-sm">${Math.round(w.soldAll*100)/100}</td>
+        <td class="num"><b>${pct1(w.pctAll)}</b></td>
+        <td class="num"><b>${money(w.value)}</b></td></tr></tbody></table>
+    <div class="note">${list.length>top.length?`Worst ${top.length} of ${list.length}. `:""}Perishable groups only:
+      ${PERISHABLE.join(", ")}. Valued at that item's own average selling price in the range. Red at 25% or more.</div></div>`;
 }
 
 function repCreepCard(range,prods){
@@ -2084,7 +2176,8 @@ function renderSupplierProducts(name){
   const spend=rows.reduce((a,p)=>a+p.spend,0);
   document.getElementById("app").innerHTML=`${summaryBar(m)}
     <a class="back" onclick="go('')">All suppliers</a>
-    <div style="margin-bottom:10px"><a class="btn outline" onclick="go('s::${encodeURIComponent(name)}')">🛒 Build order</a></div>
+    ${sset(name).orderHere?`<div style="margin-bottom:10px"><a class="btn outline" onclick="go('s::${encodeURIComponent(name)}')">🛒 Build order</a></div>`
+      :sset(name).portal_only?`<div class="note" style="margin:0 0 10px">Orders go through this supplier's own portal — no ordering here. Change that in Admin.</div>`:""}
     ${statementCard(name,range)}
     <div class="card">
       <div class="label">Products (${rows.length}) — ${esc(range.label)}
@@ -2598,10 +2691,7 @@ function setWasteSort(c){
   else WASTE_SORT={col:c,dir:(c==="name"||c==="group")?1:-1};
   route();
 }
-function sdWasteCard(rows){
-  /* Same store scope as the products list. */
-  const wv=salesProdVenue();
-  if(wv!=="both") rows=rows.filter(r=>r.venue===wv);
+function wasteRows(rows){
   const paid={};
   rows.forEach(r=>{ if(r.sales>0) paid[r.item.toLowerCase()]=1; });
   const m={};
@@ -2610,9 +2700,17 @@ function sdWasteCard(rows){
     const o=m[r.item]||(m[r.item]={name:r.item,group:r.group,sold:0,free:0,rev:0});
     if(r.sales>0){ o.sold+=r.qty; o.rev+=r.sales; } else o.free+=r.qty;
   });
-  let list=Object.values(m).filter(o=>o.free>0&&o.sold>0&&paid[o.name.toLowerCase()]);
-  list.forEach(o=>{ o.price=o.rev/o.sold; o.value=o.free*o.price;
-                    o.pct=o.free/(o.sold+o.free)*100; });
+  const list=Object.values(m).filter(o=>o.free>0&&o.sold>0&&paid[o.name.toLowerCase()]);
+  list.forEach(o=>{ o.price=o.rev/o.sold; o.value=o.free*o.price; o.pct=o.free/(o.sold+o.free)*100; });
+  const units=list.reduce((t,o)=>t+o.free,0), value=list.reduce((t,o)=>t+o.value,0);
+  const soldAll=list.reduce((t,o)=>t+o.sold,0);
+  return {list,units,value,soldAll,pctAll:(soldAll+units)?units/(soldAll+units)*100:0};
+}
+function sdWasteCard(rows){
+  /* Same store scope as the products list. */
+  const wv=salesProdVenue();
+  if(wv!=="both") rows=rows.filter(r=>r.venue===wv);
+  const list=wasteRows(rows).list;
   const wd=WASTE_SORT.dir;
   const wby={ name:(a,b)=>a.name.localeCompare(b.name), group:(a,b)=>a.group.localeCompare(b.group)||a.name.localeCompare(b.name),
               free:(a,b)=>a.free-b.free, sold:(a,b)=>a.sold-b.sold, pct:(a,b)=>a.pct-b.pct, value:(a,b)=>a.value-b.value };
@@ -2896,21 +2994,22 @@ function renderAdmin(){
   document.getElementById("app").innerHTML=`
     <a class="back" onclick="go('')">All suppliers</a>
     <div class="card"><div class="label">Supplier settings</div>
-      <table><thead><tr><th>Supplier</th><th>Sales rep email</th><th class="num">Visible</th><th class="num">Portal only</th></tr></thead>
-      <tbody>${list.map(s=>{const c=sset(s.name);return `<tr>
+      <table><thead><tr><th>Supplier</th><th>Sales rep email</th><th class="num">Ordering — Glenorchy HQ</th></tr></thead>
+      <tbody>${list.map(s=>{const c=sset(s.name);
+        const chip=(v,l)=>`<span class="chip sm ${c.ordering===v?"on":""}" onclick="saveOrdering('${esc(s.name)}','${v}')">${l}</span>`;
+        return `<tr>
         <td><b>${esc(s.name)}</b>${s.lines?"":' <span class="pill">no line items</span>'}</td>
         <td><input type="email" value="${esc(c.rep_email)}" placeholder="${esc(supplierEmail(s.name)||"none known")}"
              style="width:100%;font-size:12px;padding:6px 8px" onchange="saveSupplier('${esc(s.name)}','rep_email',this.value)"></td>
-        <td class="num"><input type="checkbox" ${c.visible?"checked":""} onchange="saveSupplier('${esc(s.name)}','visible',this.checked?'yes':'no')"></td>
-        <td class="num"><input type="checkbox" ${c.portal_only?"checked":""} onchange="saveSupplier('${esc(s.name)}','portal_only',this.checked?'yes':'no')"></td>
+        <td class="num"><span style="display:inline-flex;gap:4px">${chip("here","Order here")}${chip("portal","Portal")}${chip("off","Off")}</span></td>
       </tr>`;}).join("")}</tbody></table>
       <div class="note">
         <b>Sales rep email</b> is who you order from, deliberately separate from the address invoices arrive from —
-        the greyed placeholder is what the invoices suggest, and it's usually a no-reply robot.<br>
-        <b>Portal only</b> keeps a supplier off the ordering list while their invoices still count toward spend and
-        COGS. Rep email and portal-only are shared with Cambridge Central — they are facts about the supplier.
-        <b>Visible</b> is <b>this dashboard's list only</b>: unticking hides the supplier from Glenorchy HQ's
-        Order tab and nowhere else. Never from spend, reports or the statement.
+        the greyed placeholder is what the invoices suggest, and it's usually a no-reply robot. Shared with
+        Cambridge Central: it is a fact about the supplier.<br>
+        <b>Ordering</b> is <b>this dashboard's setting only</b>. <b>Order here</b>: on the Order tab with a Build order
+        button. <b>Portal</b>: they insist on their own ordering platform — off the Order tab, the supplier page says so.
+        <b>Off</b>: off the Order tab, nothing said. Spend, reports and the statement show every supplier in every state.
       </div>
     </div>
     <div class="card"><div class="label">Category overrides — ${overrides.length} set by hand</div>
@@ -2923,12 +3022,16 @@ function renderAdmin(){
     </div>`;
 }
 async function saveSupplier(name,field,value){
-  const cur=sset(name);
-  SSET[norm(name)]=Object.assign({},cur,{[field]: field==="visible"?value!=="no":field==="portal_only"?value==="yes":value});
-  try{
-    if(field==="visible"){ await post({action:"supplier_visibility",supplier:name,scope:VIS_SCOPE,visible:value}); toast("Saved — Glenorchy HQ only."); }
-    else { await post({action:"supplier_setting",supplier:name,field,value}); toast("Saved for everyone."); }
-  }
+  SSET[norm(name)]=Object.assign({},SSET[norm(name)]||{},{[field]:value});
+  try{ await post({action:"supplier_setting",supplier:name,field,value}); toast("Saved for everyone."); }
+  catch(e){ if(e.message==="no-webapp") toast("Not saved — WEBAPP_URL isn't set."); else alert(e.message); }
+}
+async function saveOrdering(name,value){
+  if(["here","portal","off"].indexOf(value)<0) return;
+  SSET[norm(name)]=Object.assign({},SSET[norm(name)]||{},{ordering:value});
+  GCAT=null;   // the every-supplier catalogue excludes "off" suppliers, so it must rebuild
+  route();
+  try{ await post({action:"supplier_visibility",supplier:name,scope:VIS_SCOPE,ordering:value}); toast("Saved — Glenorchy HQ only."); }
   catch(e){ if(e.message==="no-webapp") toast("Not saved — WEBAPP_URL isn't set."); else alert(e.message); }
 }
 
