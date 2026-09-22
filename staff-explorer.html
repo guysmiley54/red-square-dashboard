@@ -171,9 +171,19 @@ const DENOM_SPEC = [
   {k:"r2",label:"$2 roll",mult:50},{k:"r1",label:"$1 roll",mult:20},{k:"r50",label:"50c roll",mult:10},
   {k:"r20",label:"20c roll",mult:4},{k:"r10",label:"10c roll",mult:4},{k:"r5",label:"5c roll",mult:2}
 ];
-// Optional hand-set par per denomination, per venue, e.g. {"RS Cambridge":{n50:6,r1:4}}.
-// Anything not set here is judged against that venue's own 90-day median count.
-const DENOM_PAR = {};
+// Par per denomination, per venue. Rolls have a real par - Adrian orders change to hold
+// 10 rolls of each - so the roll tiles are judged against that. Notes and loose coins
+// have no set par and are judged against the venue's own 90-day median count.
+const CHANGE_PAR_ROLLS = 10;
+const ROLL_KEYS = ["r2","r1","r50","r20","r10","r5"];
+const rollPar = () => { const o={}; ROLL_KEYS.forEach(k=>o[k]=CHANGE_PAR_ROLLS); return o; };
+const DENOM_PAR = { "RS Cambridge": rollPar(), "RS Glenorchy": rollPar() };
+// Which denominations the bank supplies as rolls, with the label used in the order email.
+const CHANGE_DENOMS = [
+  {k:"r2",label:"$2",mult:50},{k:"r1",label:"$1",mult:20},{k:"r50",label:"50c",mult:10},
+  {k:"r20",label:"20c",mult:4},{k:"r10",label:"10c",mult:4},{k:"r5",label:"5c",mult:2}
+];
+const NOTES = [50,20,10,5];
 // The par-level view needs SALES as well as wastage, so it reads the sales feed too, and
 // ItemMap so the two sides agree on what a product is called.
 let FEED = [], ITEM_MAP = {}, FEED_OK = false;
@@ -466,6 +476,21 @@ function setView(v){
   // across the boundary would point at a different span. Reset it; keep it otherwise.
   if(isReconView(F.view)!==isReconView(v)) F.week=0;
   F.view=v; F.day=""; F.check=null; F.person=null; F.cashPerson=null; F.discType=""; renderFilters(); render(); }
+function setOrderVenue(v){ F.orderVenue=v; F.orderAdj={}; render(); }
+function adjOrder(k,d){ const o=computeOrder(F.orderVenue||orderVenueDefault()); if(!o) return;
+  F.orderAdj=F.orderAdj||{}; const cur=o.rolls[k]||0; F.orderAdj[k]=Math.max(0,cur+d);
+  // once any line is hand-set, every line is frozen at its current value so auto-rounding
+  // cannot move the others underneath the edit
+  CHANGE_DENOMS.forEach(s=>{ if(F.orderAdj[s.k]===undefined) F.orderAdj[s.k]=o.rolls[s.k]||0; });
+  render(); }
+function resetOrder(){ F.orderAdj={}; render(); }
+async function copyOrder(){
+  const t=document.getElementById("orderText"); if(!t) return;
+  const btn=document.getElementById("copyBtn");
+  try{ await navigator.clipboard.writeText(t.value); }
+  catch(e){ t.focus(); t.select(); try{ document.execCommand("copy"); }catch(e2){} }
+  if(btn){ const was=btn.textContent; btn.textContent="Copied \u2713"; setTimeout(()=>{ btn.textContent=was; },1500); }
+}
 function setCashPerson(v,e){ F.cashPerson=(F.cashPerson&&F.cashPerson.employee===e&&F.cashPerson.venue===v)?null:{venue:v,employee:e}; render(); }
 function setPerson(v,e){ F.person=(F.person&&F.person.employee===e&&F.person.venue===v)?null:{venue:v,employee:e}; render(); }
 function setDiscType(t){ F.discType=(F.discType===t?"":t); render(); }
@@ -1186,6 +1211,87 @@ function floatSummary(r){
   return {text:med!==null?"90-day median "+money0(med):"no target set", colour:""};
 }
 
+/* ---------- change order ---------- */
+/**
+ * The Friday change order to the bank, worked out from the latest count.
+ *
+ * Rule, from Adrian: hold CHANGE_PAR_ROLLS rolls of each denomination. The order for a
+ * denomination is (par - rolls on hand) whole rolls, expressed in dollars the way the
+ * bank reads it - "$2 - $250" is five $2 rolls. The order is paid for out of the float
+ * in $50 notes, so its total is rounded UP to a multiple of $50 by adding rolls to
+ * whichever denominations are furthest below par (every roll value is even, so this
+ * always lands). Each line can be nudged by hand; a hand-set order is no longer
+ * auto-rounded, and the tender is then made up in $50s, then $20s, $10s and $5s.
+ */
+function orderVenueDefault(){
+  const l=latestCounts();
+  return VENUES.filter(v=>l[v])[0]||"";
+}
+function computeOrder(venue){
+  const r=latestCounts()[venue]; if(!r) return null;
+  const par=denomPar(venue), adj=F.orderAdj||{}, manual=Object.keys(adj).length>0;
+  const rolls={}, rounded=[];
+  CHANGE_DENOMS.forEach(s=>{
+    const have=r.denoms[s.k]||0, p=par[s.k]&&par[s.k].v!==null?par[s.k].v:CHANGE_PAR_ROLLS;
+    rolls[s.k]=manual?(adj[s.k]||0):Math.max(0,Math.ceil(p-have));
+  });
+  const total=()=>CHANGE_DENOMS.reduce((a,s)=>a+rolls[s.k]*s.mult,0);
+  if(!manual){
+    let rem=(50-total()%50)%50, guard=0;
+    while(rem>0&&guard++<40){
+      // furthest below par, among rolls that fit inside the remainder
+      const cands=CHANGE_DENOMS.filter(s=>s.mult<=rem).sort((a,b)=>{
+        const ra=((r.denoms[a.k]||0)+rolls[a.k])/CHANGE_PAR_ROLLS, rb=((r.denoms[b.k]||0)+rolls[b.k])/CHANGE_PAR_ROLLS;
+        return ra-rb || b.mult-a.mult; });
+      if(!cands.length) break;
+      rolls[cands[0].k]++; rem-=cands[0].mult; rounded.push(cands[0].label);
+    }
+  }
+  const tot=total(), tender=[]; let left=tot;
+  NOTES.forEach(n=>{ const q=Math.floor(left/n); if(q>0){ tender.push({note:n,qty:q}); left-=q*n; } });
+  return {venue:venue,date:r.date,have:r.denoms,par:par,rolls:rolls,total:tot,tender:tender,
+          unpayable:left,rounded:rounded,manual:manual};
+}
+function orderEmail(o){
+  const lines=["Good morning,","","Can I please arrange the following change for collection this morning?","","Tendered:"];
+  o.tender.forEach(t=>lines.push("$"+t.note+" - $"+(t.note*t.qty)));
+  lines.push("Total: $"+o.total,"","Required:");
+  CHANGE_DENOMS.forEach(s=>{ if(o.rolls[s.k]>0) lines.push(s.label+" - $"+(o.rolls[s.k]*s.mult)); });
+  lines.push("Total: $"+o.total,"","Kind regards,","Adrian Beckitt","Managing Director, B & G Fitness Pty Ltd","Red Square Cafe | Luma Kitchen");
+  return lines.join("\n");
+}
+function changeOrderCard(){
+  const venue=F.orderVenue||orderVenueDefault(); if(!venue) return "";
+  const o=computeOrder(venue); if(!o) return "";
+  const cafes=VENUES.filter(v=>latestCounts()[v]);
+  const chips=cafes.map(v=>'<span class="chip '+(v===venue?"on":"")+'" style="padding:4px 10px" onclick="setOrderVenue(\''+v+'\')">'+esc(v)+'</span>').join(" ");
+  const rows=CHANGE_DENOMS.map(s=>{
+    const have=o.have[s.k]||0, need=o.rolls[s.k], p=o.par[s.k]&&o.par[s.k].v!==null?o.par[s.k].v:CHANGE_PAR_ROLLS;
+    return '<tr><td>'+esc(s.label)+' rolls</td><td class="num">'+have+'</td><td class="num muted">'+p+'</td>'+
+      '<td class="num"><span class="chip nav" style="padding:1px 8px" onclick="adjOrder(\''+s.k+'\',-1)">−</span> '+
+      '<b>'+need+'</b> <span class="chip nav" style="padding:1px 8px" onclick="adjOrder(\''+s.k+'\',1)">+</span></td>'+
+      '<td class="num">'+(need?money0(need*s.mult):"–")+'</td></tr>';
+  }).join("");
+  const nothing=o.total===0;
+  const tenderTxt=o.tender.map(t=>t.qty+' × $'+t.note).join(", ")||"–";
+  return '<div class="card"><div class="label">Change order · from the '+fmtDay(o.date)+' count'+
+    '<span class="legend">'+chips+'</span></div>'+
+    '<div class="sites"><div>'+
+    '<table><thead><tr><th>Denomination</th><th class="num">Have</th><th class="num">Par</th><th class="num">Order</th><th class="num">$</th></tr></thead><tbody>'+rows+
+    '<tr class="total"><td>Total</td><td></td><td></td><td></td><td class="num">'+money0(o.total)+'</td></tr></tbody></table>'+
+    '<div class="note">Tender from the float: <b>'+esc(tenderTxt)+'</b>.'+
+    (o.rounded.length?' Rounded up to a multiple of $50 by adding a roll of '+esc(o.rounded.join(", "))+'.':'')+
+    (o.manual?' Hand-adjusted – <span class="chip" style="padding:2px 8px" onclick="resetOrder()">back to par</span>':'')+
+    (o.unpayable?' <b style="color:var(--red)">$'+o.unpayable+' cannot be tendered in notes – adjust a line.</b>':'')+
+    '</div></div><div>'+
+    (nothing?'<div class="note">Everything is at par. Nothing to order.</div>':
+    '<textarea id="orderText" readonly style="width:100%;min-height:290px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical">'+
+    esc(orderEmail(o))+'</textarea>'+
+    '<div style="margin-top:8px"><span class="chip on" id="copyBtn" onclick="copyOrder()">Copy email</span> '+
+    '<span class="muted" style="margin-left:8px">paste into Gmail</span></div>')+
+    '</div></div></div>';
+}
+
 /* ---------- Cash view ---------- */
 /**
  * The float and the per-till over/short.
@@ -1223,7 +1329,7 @@ function viewCash(){
     '</div>';
 
   const days=reconWeek(), tills=tillWeek();
-  if(!days.length) return latestCard+'<div class="card"><b>Nothing reconciled in this week.</b></div>';
+  if(!days.length) return latestCard+changeOrderCard()+'<div class="card"><b>Nothing reconciled in this week.</b></div>';
 
   // float by day, the two cafes side by side
   const w=window_(); const dates=[];
@@ -1298,7 +1404,7 @@ function viewCash(){
         '</tbody></table></div>';
     }
   }
-  return latestCard+floatCard+metrics+drill+peopleCard;
+  return latestCard+changeOrderCard()+floatCard+metrics+drill+peopleCard;
 }
 
 /* ---------- Daily view ---------- */
