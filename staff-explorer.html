@@ -63,6 +63,24 @@
   tr.selrow{background:#faf9f7}
   tr.selrow td{font-weight:700}
   tr.click:hover td{background:#faf9f7}
+  /* denomination grid on the Cash view */
+  .denoms{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px;margin-top:10px}
+  .denom{border:1px solid var(--line);border-left-width:4px;border-radius:8px;padding:6px 9px;background:#fff}
+  .denom .dk{display:block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--dim)}
+  .denom .dv{font-size:18px;font-weight:700}
+  .denom .ds{font-size:11px;color:var(--dim);margin-left:5px}
+  .d-ok{border-left-color:var(--teal)}
+  .d-low{border-left-color:var(--amber);background:#fdf6ec}
+  .d-out{border-left-color:var(--red);background:#fbeeef}
+  .d-none{border-left-color:var(--line);color:var(--dim)}
+  .sites{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+  .site h3{margin:0 0 2px;font-size:15px}
+  .site .big{font-size:28px;font-weight:700;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .site .sub{font-size:12px;color:var(--dim);margin-top:2px}
+  .rep{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:10px}
+  .rep h4{margin:0 0 6px;font-size:13px}
+  .rep table{margin-top:4px}
+  tr.total td{font-weight:700;border-top:2px solid var(--ink)}
   @media(max-width:700px){ .hide-sm{display:none} .wrap{padding:12px} }
   @media print{
     header,#filters,.chip{display:none !important}
@@ -144,6 +162,18 @@ let D = {item:[],check:[],voids:[],txn:[]}, MISSING = [];
 // End-of-day reconciliation. RECON is one row per venue-day, RTILL one row per till.
 // Both are written by processReconciliation in the Sales Feed Apps Script project.
 let RECON = [], RTILL = [], RECON_OK = false;
+const isReconView = v => v==="cash" || v==="daily";
+
+// Denominations as the closing form captures them, in float-value order.
+const DENOM_SPEC = [
+  {k:"n50",label:"$50",mult:50},{k:"n20",label:"$20",mult:20},{k:"n10",label:"$10",mult:10},
+  {k:"n5",label:"$5",mult:5},{k:"c2",label:"$2",mult:2},{k:"c1",label:"$1",mult:1},
+  {k:"r2",label:"$2 roll",mult:50},{k:"r1",label:"$1 roll",mult:20},{k:"r50",label:"50c roll",mult:10},
+  {k:"r20",label:"20c roll",mult:4},{k:"r10",label:"10c roll",mult:4},{k:"r5",label:"5c roll",mult:2}
+];
+// Optional hand-set par per denomination, per venue, e.g. {"RS Cambridge":{n50:6,r1:4}}.
+// Anything not set here is judged against that venue's own 90-day median count.
+const DENOM_PAR = {};
 // The par-level view needs SALES as well as wastage, so it reads the sales feed too, and
 // ItemMap so the two sides agree on what a product is called.
 let FEED = [], ITEM_MAP = {}, FEED_OK = false;
@@ -202,7 +232,9 @@ const TAB_COLUMNS = {
   "SalesFeed":           ["timestamp","date","venue","category","item","qty","sales"],
   "Reconciliation":      ["date","venue","submitted_by","tills","impos_cash","actual_cash",
                           "cash_var","float_total","flags"],
-  "ReconTills":          ["date","venue","pos","staff","impos_cash","actual_cash","variance"]
+  "ReconTills":          ["date","venue","pos","staff","impos_cash","actual_cash","variance"],
+  "DeputyShifts":        ["date","venue","kind","employee","hours"],
+  "StaffMap":            ["name_from","maps_to"]
 };
 
 async function fetchTab(name){
@@ -290,20 +322,24 @@ async function load(){
     const rg=parseCsv(recTxt.trim());
     const rh=(rg.shift()||[]).map(h=>String(h).trim().toLowerCase());
     const rx=n=>rh.indexOf(n);
+    const cell=(r,n)=>rx(n)>-1?String(r[rx(n)]==null?"":r[rx(n)]).trim():"";
     rg.forEach(r=>{
       const d=dkey(r[rx("date")]); if(!d) return;
+      const hasFloat=cell(r,"float_total")!=="";
+      const den={};
+      DENOM_SPEC.forEach(s=>{ den[s.k]=hasFloat?num(cell(r,s.k)):null; });
       recOut.push({
-        date:d, venue:vShort(String(r[rx("venue")]||"").trim()),
-        by:String(r[rx("submitted_by")]||"").trim(),
-        tills:num(r[rx("tills")]),
-        impos:num(r[rx("impos_cash")]), actual:num(r[rx("actual_cash")]),
-        cash_var:num(r[rx("cash_var")]),
-        eft:num(r[rx("impos_eft")]),
-        floatTotal:rx("float_total")>-1&&String(r[rx("float_total")]).trim()!==""
-                   ?num(r[rx("float_total")]):null,
-        floatVar:rx("float_var")>-1&&String(r[rx("float_var")]).trim()!==""
-                 ?num(r[rx("float_var")]):null,
-        flags:String(r[rx("flags")]||"").trim()
+        date:d, venue:vShort(cell(r,"venue")),
+        by:cell(r,"submitted_by"),
+        tills:num(cell(r,"tills")),
+        impos:num(cell(r,"impos_cash")), actual:num(cell(r,"actual_cash")),
+        cash_var:num(cell(r,"cash_var")),
+        eft:num(cell(r,"impos_eft")),
+        doshii:cell(r,"doshii")!==""?num(cell(r,"doshii")):null,
+        floatTotal:hasFloat?num(cell(r,"float_total")):null,
+        floatVar:cell(r,"float_var")!==""?num(cell(r,"float_var")):null,
+        denoms:den,
+        flags:cell(r,"flags")
       });
     });
   }
@@ -326,6 +362,39 @@ async function load(){
   }
   RECON=recOut; RTILL=tillOut; RECON_OK=recOk;
 
+  // ---- Deputy names, for folding typed names onto real ones ----
+  const dep={all:[],byVenue:{},byDay:{},days:{}};
+  const depTxt=await fetchTab("DeputyShifts");
+  if(depTxt){
+    const dg=parseCsv(depTxt.trim());
+    const dh=(dg.shift()||[]).map(h=>String(h).trim().toLowerCase());
+    const dx=n=>dh.indexOf(n);
+    const seenAll={}, seenV={}, seenD={};
+    dg.forEach(r=>{
+      const who=String(r[dx("employee")]||"").trim(); if(!who) return;
+      const v=vShort(String(r[dx("venue")]||"").trim());
+      const d=dkey(r[dx("date")]);
+      const kind=String(r[dx("kind")]||"").trim().toLowerCase();
+      if(!seenAll[who]){ seenAll[who]=1; dep.all.push(who); }
+      const vk=v+"|"+who; if(!seenV[vk]){ seenV[vk]=1; (dep.byVenue[v]=dep.byVenue[v]||[]).push(who); }
+      if(kind==="shift"&&d){ const dk=v+"|"+d+"|"+who;
+        if(!seenD[dk]){ seenD[dk]=1; (dep.byDay[v+"|"+d]=dep.byDay[v+"|"+d]||[]).push(who);
+          dep.days[who]=(dep.days[who]||0)+1; } }
+    });
+  }
+  DEP=dep;
+  const smap={};
+  const smTxt=await fetchTab("StaffMap");
+  if(smTxt){
+    const sg=parseCsv(smTxt.trim());
+    const sh=(sg.shift()||[]).map(h=>String(h).trim().toLowerCase());
+    let fi=sh.indexOf("name_from"); if(fi<0) fi=0;
+    let ti=sh.indexOf("maps_to");   if(ti<0) ti=1;
+    sg.forEach(r=>{ const a=nameKey(r[fi]), b=String(r[ti]||"").trim(); if(a&&b) smap[a]=b; });
+  }
+  STAFF_MAP=smap;
+  applyNames();
+
   const n=Object.keys(D).reduce((a,k)=>a+D[k].length,0);
   document.getElementById("bld").textContent=n.toLocaleString()+" rows";
   renderFilters(); render();
@@ -347,14 +416,28 @@ const shift=(k,n)=>{const d=new Date(k+"T00:00:00"); d.setDate(d.getDate()+n); r
  * ISO weeks: the first import ran Sunday and covered Sun-to-Sun. Bucketing by calendar
  * week split that one report across two windows and halved every total.
  */
+/**
+ * Which dates a week is counted back from depends on the view. The staff reports
+ * broadcast on Sunday night and cover the week before; reconciliation lands every day.
+ * Anchoring the recon views on the staff reports made "this week" a week stale on the
+ * Cash tab, so those two views anchor on the reconciliation dates instead. The other
+ * views are untouched - re-anchoring them would shift every historical week boundary.
+ */
+function anchorDates(){
+  if(isReconView(F.view)){
+    const s=new Set(); RECON.forEach(r=>s.add(r.date));
+    if(s.size) return Array.from(s).sort();
+  }
+  return allDates();
+}
 function weekCount(){
-  const all=allDates();
+  const all=anchorDates();
   if(!all.length) return 0;
   const first=new Date(all[0]+"T00:00:00"), last=new Date(all[all.length-1]+"T00:00:00");
   return Math.max(1, Math.ceil(((last-first)/86400000+1)/7));
 }
 function window_(){
-  const all=allDates();
+  const all=anchorDates();
   if(!all.length) return null;
   const i=Math.min(Math.max(F.week,0),weekCount()-1);
   const to=shift(all[all.length-1], -7*i);
@@ -378,7 +461,12 @@ function setVenue(v){
 }
 // renderFilters() matters here: without it the view pills keep their old highlight and
 // the page looks unresponsive even though the content changed.
-function setView(v){ F.view=v; F.day=""; F.check=null; F.person=null; F.discType=""; renderFilters(); render(); }
+function setView(v){
+  // The two view families count weeks from different dates, so a week index carried
+  // across the boundary would point at a different span. Reset it; keep it otherwise.
+  if(isReconView(F.view)!==isReconView(v)) F.week=0;
+  F.view=v; F.day=""; F.check=null; F.person=null; F.cashPerson=null; F.discType=""; renderFilters(); render(); }
+function setCashPerson(v,e){ F.cashPerson=(F.cashPerson&&F.cashPerson.employee===e&&F.cashPerson.venue===v)?null:{venue:v,employee:e}; render(); }
 function setPerson(v,e){ F.person=(F.person&&F.person.employee===e&&F.person.venue===v)?null:{venue:v,employee:e}; render(); }
 function setDiscType(t){ F.discType=(F.discType===t?"":t); render(); }
 function setDay(d){ F.day=(F.day===d?"":d); F.check=null; render(); }
@@ -403,7 +491,7 @@ function renderFilters(){
     '<span class="chip '+(F.venues.length===0?"on":"")+'" onclick="setVenue(\'\')">All venues</span>'+
     VENUES.map(v=>'<span class="chip '+(venueOn(v)?"on":"")+'" onclick="setVenue(\''+v+'\')">'+esc(v)+'</span>').join("")+
     '<span class="sep"></span>'+
-    ["overview","wastage","par","discounts","voids","people","cash"].map(v=>
+    ["overview","wastage","par","discounts","voids","people","cash","daily"].map(v=>
       '<span class="chip '+(F.view===v?"on":"")+'" onclick="setView(\''+v+'\')">'+
       (v==="par"?"Par levels":v.charAt(0).toUpperCase()+v.slice(1))+'</span>').join("");
 }
@@ -930,100 +1018,226 @@ function personCard(){
 
 /* ---------- render ---------- */
 
-/* ---------- cash reconciliation ---------- */
+/* ---------- staff name resolution ---------- */
 /**
- * The float and the per-till over/short, from the end-of-day form.
+ * Staff type their own name into the closing form, so one person arrives as "fessa",
+ * "FESSA", "Fessa and Chloe" or "razina chivers00". ImPOS staff reports carry whatever
+ * was keyed into the POS. Deputy holds the real names. Everything is folded to the
+ * Deputy name at load time, so one person is one row on People and Cash alike, and the
+ * drill-downs keep working because they see the folded name too.
  *
- * Two things worth knowing before reading anything off this screen:
+ * Resolution order, first hit wins:
+ *   1. StaffMap tab in BG Sales Data (name_from | maps_to). Hand-maintained and beats
+ *      everything - the same idea as ItemMap and Overrides: a human correcting the
+ *      source. Keys are matched case- and punctuation-insensitively.
+ *   2. Someone rostered at THAT venue on THAT day in DeputyShifts whose name matches.
+ *      The strongest signal there is: "D" on POS 1 at Glenorchy on the 17th can only
+ *      be one of the three people on that day. DeputyShifts is a rolling window, so
+ *      this reaches back a few weeks and no further.
+ *   3. Anyone who has ever worked at that venue, then anyone in Deputy at all.
+ *   4. Nothing. The typed name is kept (tidied) and counted in UNMAPPED, which the Cash
+ *      view lists so StaffMap rows can be added for them.
  *
- * 1. The week navigator is shared with every other view and is anchored on the latest
- *    STAFF REPORT date. Those broadcast weekly on Sunday night, while reconciliation
- *    arrives daily - so the newest recon days can sit outside the selected week. That
- *    is why the "latest count" strip below ignores the window entirely: it is the
- *    answer to "is the float right now", which is the daily question. The tables below
- *    it follow the selected week like the rest of the dashboard.
- *
- * 2. A till flagged DECIMAL? is a data-entry slip, not money. Its variance is already
- *    excluded from cash_var by the ingestion, and it is excluded from every total here
- *    too - but it is still SHOWN, because it is a thing to go and fix.
+ * Matching is deliberately conservative: exact full name, exact first name, or a UNIQUE
+ * first-name prefix of two or more letters. A single letter is tried only against the
+ * day roster. Where two people fit, the clearly more established one wins (see
+ * established()) and otherwise it is no match at all - a wrong name on a till-shortage
+ * table is worse than a raw one.
  */
-function reconSites(){ return RECON.filter(r=>VENUES.indexOf(r.venue)>-1); }
-
-function latestCounts(){
-  const out={};
-  reconSites().forEach(r=>{
-    if(r.floatTotal===null) return;
-    if(!out[r.venue] || r.date>out[r.venue].date) out[r.venue]=r;
+let DEP={all:[],byVenue:{},byDay:{},days:{}}, STAFF_MAP={}, NAME_CACHE={}, UNMAPPED={};
+const nameKey=s=>String(s||"").toLowerCase().replace(/[0-9_]/g,"").replace(/[^a-z&\s]/g," ").replace(/\s+/g," ").trim();
+const firstName=full=>nameKey(full).split(" ")[0]||"";
+const capName=s=>s.replace(/(^|\s)([a-z])/g,(m,a,b)=>a+b.toUpperCase());
+function splitNames(s){
+  return nameKey(s).replace(/\band\b/g,"&").split(/\s*[&,\/+]\s*/).map(x=>x.trim()).filter(Boolean);
+}
+/**
+ * When a typed name fits more than one person, prefer the established one.
+ *
+ * Adrian, 22 Sep 2026: new staff very rarely count tills - almost never. So the person
+ * behind an ambiguous name is overwhelmingly the one with the longer record. Tenure is
+ * read off DeputyShifts as distinct shift days in its window: the candidate has to have
+ * at least ESTABLISHED_DAYS of them AND at least ESTABLISHED_RATIO times the runner-up's,
+ * or it is still no match. Two comparably established people sharing a prefix is a
+ * StaffMap row, not a guess.
+ */
+const ESTABLISHED_DAYS=8, ESTABLISHED_RATIO=3;
+function established(hits){
+  if(hits.length<2) return hits[0]||null;
+  const s=hits.slice().sort((a,b)=>(DEP.days[b]||0)-(DEP.days[a]||0));
+  const top=DEP.days[s[0]]||0, next=DEP.days[s[1]]||0;
+  return (top>=ESTABLISHED_DAYS && top>=next*ESTABLISHED_RATIO) ? s[0] : null;
+}
+function matchIn(part,cands){
+  if(!cands||!cands.length) return null;
+  let hit=cands.filter(c=>nameKey(c)===part); if(hit.length) return hit.length===1?hit[0]:established(hit);
+  hit=cands.filter(c=>firstName(c)===part); if(hit.length) return hit.length===1?hit[0]:established(hit);
+  if(part.length>=2){ hit=cands.filter(c=>firstName(c).indexOf(part)===0); if(hit.length) return hit.length===1?hit[0]:established(hit); }
+  return null;
+}
+function resolveOne(part,venue,date){
+  if(STAFF_MAP[part]) return STAFF_MAP[part];
+  const day=DEP.byDay[venue+"|"+date];
+  if(day&&day.length){
+    const m=matchIn(part,day); if(m) return m;
+    if(part.length===1){ const h=day.filter(c=>firstName(c).charAt(0)===part); if(h.length) return h.length===1?h[0]:established(h); }
+  }
+  const m2=matchIn(part,DEP.byVenue[venue]); if(m2) return m2;
+  return matchIn(part,DEP.all);
+}
+function realName(typed,venue,date){
+  const raw=String(typed||"").trim(); if(!raw) return "";
+  const whole=nameKey(raw);
+  if(!whole) return raw;
+  if(STAFF_MAP[whole]) return STAFF_MAP[whole];
+  const k=venue+"|"+date+"|"+whole;
+  if(NAME_CACHE[k]!==undefined) return NAME_CACHE[k];
+  const out=splitNames(raw).map(p=>{
+    const r=resolveOne(p,venue,date); if(r) return r;
+    UNMAPPED[p]=(UNMAPPED[p]||0)+1; return capName(p);
   });
-  return out;
+  const res=out.join(" & ")||raw;
+  NAME_CACHE[k]=res; return res;
+}
+/** One pass over everything that carries a person's name. Raw values are kept. */
+function applyNames(){
+  NAME_CACHE={}; UNMAPPED={};
+  Object.keys(D).forEach(k=>D[k].forEach(r=>{
+    if(!("employee" in r)) return;
+    if(r.employee_raw===undefined) r.employee_raw=r.employee;
+    r.employee=realName(r.employee_raw,r.venue,r.date)||r.employee_raw;
+  }));
+  RTILL.forEach(t=>{ if(t.staff_raw===undefined) t.staff_raw=t.staff; t.staff=realName(t.staff_raw,t.venue,t.date); });
+  RECON.forEach(r=>{ if(r.by_raw===undefined) r.by_raw=r.by; r.by=realName(r.by_raw,r.venue,r.date); });
+}
+function unmappedNote(){
+  const list=Object.keys(UNMAPPED).sort((a,b)=>UNMAPPED[b]-UNMAPPED[a]);
+  if(!list.length) return "";
+  const shown=list.slice(0,12).map(n=>'<b>'+esc(capName(n))+'</b> ('+UNMAPPED[n]+')').join(", ");
+  return '<div class="note">Names not matched to Deputy: '+shown+(list.length>12?' and '+(list.length-12)+' more':'')+
+    '. Add rows to a <b>StaffMap</b> tab in BG Sales Data (<code>name_from | maps_to</code>) and they fold '+
+    'onto the right person here and on People.'+(DEP.all.length?'':' <b>DeputyShifts was not found</b>, so only StaffMap can match anything.')+'</div>';
 }
 
-/** Median float over the trailing n days - what a sensible target looks like. */
-function floatMedian(venue,n){
-  const v=reconSites().filter(r=>r.venue===venue&&r.floatTotal!==null)
-          .sort((a,b)=>a.date<b.date?-1:1).slice(-(n||90)).map(r=>r.floatTotal);
-  if(!v.length) return null;
-  const s=v.slice().sort((a,b)=>a-b), h=s.length>>1;
-  return s.length%2?s[h]:(s[h-1]+s[h])/2;
-}
-
+/* ---------- reconciliation: shared ---------- */
+function reconSites(){ return RECON.filter(r=>VENUES.indexOf(r.venue)>-1); }
 function reconWeek(){
   const w=window_(); if(!w) return [];
-  return reconSites().filter(r=>r.date>=w.from&&r.date<=w.to&&
-    (!F.venues.length||venueOn(r.venue))&&(!F.day||r.date===F.day));
+  return reconSites().filter(r=>r.date>=w.from&&r.date<=w.to&&(!F.venues.length||venueOn(r.venue)));
 }
 function tillWeek(){
   const w=window_(); if(!w) return [];
   return RTILL.filter(r=>r.date>=w.from&&r.date<=w.to&&VENUES.indexOf(r.venue)>-1&&
-    (!F.venues.length||venueOn(r.venue))&&(!F.day||r.date===F.day));
+    (!F.venues.length||venueOn(r.venue)));
+}
+function varColour(v){ return Math.abs(v)<0.005?"":(v<0?"var(--red)":"var(--teal)"); }
+function signed(v){ return v<0?"-"+money(-v):(v>0?"+":"")+money(v); }
+function noReconCard(){
+  return '<div class="card"><b>No reconciliation data yet.</b><div class="note">'+
+    'The <b>Reconciliation</b> and <b>ReconTills</b> tabs are written by '+
+    '<b>processReconciliation</b> in the Sales Feed Apps Script project, on a 5pm daily '+
+    'trigger. Run <b>reconBackfill()</b> once per venue to load the history.</div></div>';
+}
+function latestCounts(){
+  const out={};
+  reconSites().forEach(r=>{ if(r.floatTotal===null) return;
+    if(!out[r.venue]||r.date>out[r.venue].date) out[r.venue]=r; });
+  return out;
+}
+const median=a=>{ if(!a.length) return null; const s=a.slice().sort((x,y)=>x-y), h=s.length>>1;
+  return s.length%2?s[h]:(s[h-1]+s[h])/2; };
+function floatMedian(venue,n){
+  const v=reconSites().filter(r=>r.venue===venue&&r.floatTotal!==null)
+    .sort((a,b)=>a.date<b.date?-1:1).slice(-(n||90)).map(r=>r.floatTotal);
+  return median(v);
+}
+/** Normal stock of each denomination at a venue: the hand-set par, else the 90-day median. */
+function denomPar(venue){
+  const recent=reconSites().filter(r=>r.venue===venue&&r.floatTotal!==null)
+    .sort((a,b)=>a.date<b.date?-1:1).slice(-90);
+  const par={}, hand=DENOM_PAR[venue]||{};
+  DENOM_SPEC.forEach(s=>{
+    if(hand[s.k]!==undefined) par[s.k]={v:hand[s.k],src:"par"};
+    else par[s.k]={v:median(recent.map(r=>r.denoms[s.k]||0)),src:"median"};
+  });
+  return par;
+}
+function denomState(count,par){
+  if(par===null||par===undefined) return "d-none";
+  if(par<=0) return count>0?"d-ok":"d-none";
+  const ratio=count/par;
+  return ratio>=0.75?"d-ok":ratio>=0.4?"d-low":"d-out";
+}
+function denomGrid(r,par){
+  return '<div class="denoms">'+DENOM_SPEC.map(s=>{
+    const c=r.denoms[s.k]||0, p=par?par[s.k]:null;
+    const st=denomState(c,p?p.v:null);
+    const tip=p&&p.v!==null?(p.src==="par"?"par ":"usual ")+Math.round(p.v):"";
+    return '<div class="denom '+st+'" title="'+esc(tip)+'"><span class="dk">'+esc(s.label)+'</span>'+
+      '<span class="dv">'+c+'</span><span class="ds">'+money0(c*s.mult)+'</span></div>';
+  }).join("")+'</div>';
+}
+function floatSummary(r){
+  const med=floatMedian(r.venue,90);
+  if(r.floatVar!==null){
+    const off=Math.abs(r.floatVar)>50;
+    return {text:r.floatVar===0?"on target":signed(r.floatVar)+" vs target", colour:off?"var(--red)":"var(--teal)"};
+  }
+  return {text:med!==null?"90-day median "+money0(med):"no target set", colour:""};
 }
 
-function varColour(v){ return Math.abs(v)<0.005?"":(v<0?"#c8102e":"#2d6a6f"); }
-function signed(v){ return (v>0?"+":"")+money(v); }
-
+/* ---------- Cash view ---------- */
+/**
+ * The float and the per-till over/short.
+ *
+ * "Latest count" is the most recent day on file for each site, whatever week is selected -
+ * it answers "is the float right now", which is the daily question. Everything below it
+ * follows the selected week, which on this view is counted back from the reconciliation
+ * dates (see anchorDates).
+ *
+ * A till flagged DECIMAL? is a keying slip, not money. The ingestion already leaves its
+ * variance out of the day's cash_var and it is left out of every total here too - but it
+ * is still shown, because it is a thing to go and fix.
+ */
 function viewCash(){
-  if(!RECON_OK){
-    return '<div class="card"><b>No reconciliation data yet.</b><div class="note">'+
-      'The <b>Reconciliation</b> and <b>ReconTills</b> tabs are written by '+
-      '<b>processReconciliation</b> in the Sales Feed Apps Script project, on a 5pm daily '+
-      'trigger. Run <b>reconBackfill()</b> once per venue to load the history.</div></div>';
-  }
+  if(!RECON_OK) return noReconCard();
 
-  /* ---- latest count strip: deliberately ignores the week window ---- */
   const latest=latestCounts();
-  const strip=VENUES.filter(v=>latest[v]).map(v=>{
-    const r=latest[v];
-    const med=floatMedian(v,90);
-    let sub, colour="";
-    if(r.floatVar!==null){
-      sub=(r.floatVar===0?"on target":signed(r.floatVar)+" vs target");
-      colour=Math.abs(r.floatVar)>50?"#c8102e":"";
-    } else {
-      sub=med!==null?("90-day median "+money0(med)):"no target set";
-    }
-    return metric(v+" float",money0(r.floatTotal),
-      fmtDay(r.date)+" · "+sub+(r.flags?' · <b>'+esc(r.flags)+'</b>':''),colour);
+  const sites=VENUES.filter(v=>latest[v]).map(v=>{
+    const r=latest[v], fs=floatSummary(r), par=denomPar(v);
+    return '<div class="site"><h3>'+esc(v)+'</h3>'+
+      '<div class="big">'+money0(r.floatTotal)+'</div>'+
+      '<div class="sub">'+fmtDay(r.date)+' '+dayName(r.date)+' \u00b7 <span style="color:'+fs.colour+'">'+esc(fs.text)+'</span>'+
+      (r.flags?' \u00b7 <b style="color:var(--amber)">'+esc(r.flags)+'</b>':'')+
+      ' \u00b7 counted by '+esc(r.by||"?")+'</div>'+
+      denomGrid(r,par)+'</div>';
   }).join("");
-
   const noTarget=VENUES.filter(v=>latest[v]&&latest[v].floatVar===null);
-  const targetNote=noTarget.length
-    ? '<div class="note">No float target set for '+noTarget.map(esc).join(" or ")+
-      '. Set <code>RECON.TARGETS</code> in Reconciliation.gs and the ingestion starts '+
-      'flagging <b>FLOAT_OFF</b>. The 90-day medians above are a reasonable starting point.</div>'
-    : '';
+  const latestCard='<div class="card"><div class="label">Latest count'+
+    '<span class="legend"><i style="background:var(--teal)"></i>normal <i style="background:var(--amber)"></i>running low '+
+    '<i style="background:var(--red)"></i>nearly out \u00b7 against each site’s usual stock of that coin</span></div>'+
+    (sites?'<div class="sites">'+sites+'</div>':'<div class="note">No float counts yet.</div>')+
+    (noTarget.length?'<div class="note">No float target set for '+noTarget.map(esc).join(" or ")+
+      '. Set <code>RECON.TARGETS</code> in Reconciliation.gs and days off target are flagged <b>FLOAT_OFF</b>; '+
+      'set <code>DENOM_PAR</code> here to judge each coin against a par instead of its median.</div>':'')+
+    '</div>';
 
-  const latestCard='<div class="card"><div class="label">Latest count · '+
-    'most recent day on file, whatever week is selected</div>'+
-    (strip?'<div class="metrics">'+strip+'</div>':'<div class="note">No float counts yet.</div>')+
-    targetNote+'</div>';
-
-  /* ---- the selected week ---- */
   const days=reconWeek(), tills=tillWeek();
-  if(!days.length){
-    return latestCard+'<div class="card"><b>Nothing reconciled in this week.</b>'+
-      '<div class="note">Reconciliation is daily; the week navigator follows the staff '+
-      'reports, which are weekly. Step back a week, or read the latest count above.</div></div>';
-  }
+  if(!days.length) return latestCard+'<div class="card"><b>Nothing reconciled in this week.</b></div>';
+
+  // float by day, the two cafes side by side
+  const w=window_(); const dates=[];
+  for(let d=w.from; d<=w.to; d=shift(d,1)) dates.push(d);
+  const cafes=VENUES.filter(v=>reconSites().some(r=>r.venue===v&&r.floatTotal!==null)&&(!F.venues.length||venueOn(v)));
+  const fl={}; days.forEach(r=>{ if(r.floatTotal!==null) fl[r.venue+"|"+r.date]=r; });
+  const floatCard=cafes.length?'<div class="card"><div class="label">Float this week</div><table><thead><tr><th>Date</th>'+
+    cafes.map(v=>'<th class="num">'+esc(v)+'</th>').join("")+'</tr></thead><tbody>'+
+    dates.map(d=>'<tr><td>'+fmtDay(d)+' '+dayName(d)+'</td>'+cafes.map(v=>{
+      const r=fl[v+"|"+d]; if(!r) return '<td class="num">–</td>';
+      const fs=floatSummary(r);
+      return '<td class="num" style="color:'+(r.floatVar!==null?fs.colour:"")+'">'+money0(r.floatTotal)+
+        (r.flags.indexOf("FLOAT_OFF")>-1?' <b style="color:var(--red)">!</b>':'')+'</td>';
+    }).join("")+'</tr>').join("")+'</tbody></table></div>':'';
 
   const real=tills.filter(t=>t.flag!=="DECIMAL?");
   const net=real.reduce((a,t)=>a+t.variance,0);
@@ -1031,113 +1245,135 @@ function viewCash(){
   const exact=real.filter(t=>Math.abs(t.variance)<0.005).length;
   const typos=tills.length-real.length;
   const flagged=days.filter(d=>d.flags).length;
-
   const metrics='<div class="metrics">'+
-    metric("Net over / short",real.length?signed(net):"–",
-           real.length+" tills counted",varColour(net))+
-    metric("Counted exactly",real.length?Math.round(exact/real.length*100)+"%":"–",
-           exact+" of "+real.length)+
-    metric("Average miss",real.length?money(absSum/real.length):"–",
-           "per till, either way")+
-    metric("Days flagged",String(flagged),
-           typos?typos+" decimal slip"+(typos>1?"s":""):"of "+days.length+" days",
-           flagged?"#c97a1a":"")+
+    metric("Net over / short",real.length?signed(net):"–",real.length+" tills counted",varColour(net))+
+    metric("Counted exactly",real.length?Math.round(exact/real.length*100)+"%":"–",exact+" of "+real.length)+
+    metric("Average miss",real.length?money(absSum/real.length):"–","per till, either way")+
+    metric("Days flagged",String(flagged),typos?typos+" decimal slip"+(typos>1?"s":""):"of "+days.length+" days",flagged?"var(--amber)":"")+
     '</div>';
 
-  /* ---- by person ---- */
   const p={};
   real.forEach(t=>{
-    const who=t.staff||"(not recorded)";
-    const k=t.venue+"|"+who;
+    const who=t.staff||"(not recorded)", k=t.venue+"|"+who;
     const o=p[k]=p[k]||{venue:t.venue,employee:who,tills:0,net:0,abs:0,worst:0,exact:0};
     o.tills++; o.net+=t.variance; o.abs+=Math.abs(t.variance);
     if(Math.abs(t.variance)<0.005) o.exact++;
     if(Math.abs(t.variance)>Math.abs(o.worst)) o.worst=t.variance;
   });
-  const people=Object.keys(p).map(k=>{
-    const o=p[k]; o.avg=o.tills?o.abs/o.tills:0;
-    o.acc=o.tills?Math.round(o.exact/o.tills*100):0; return o;
-  });
-
+  const people=Object.keys(p).map(k=>{ const o=p[k]; o.avg=o.tills?o.abs/o.tills:0;
+    o.acc=o.tills?Math.round(o.exact/o.tills*100):0; return o; });
   let peopleCard="";
   if(people.length){
     const sorted=sortRows(people,"avg");
-    peopleCard='<div class="card"><div class="label">By person · click to see their tills</div>'+
-      '<table><thead><tr>'+
-      th("employee","Person")+th("venue","Venue","hide-sm")+
-      th("tills","Tills","num")+th("acc","Exact","num")+
-      th("net","Net","num")+th("avg","Avg miss","num")+th("worst","Worst","num")+
+    peopleCard='<div class="card"><div class="label">By person \u00b7 click for their tills</div>'+
+      '<table><thead><tr>'+th("employee","Person")+th("venue","Venue","hide-sm")+
+      th("tills","Tills","num")+th("acc","Exact","num")+th("net","Net","num")+th("avg","Avg miss","num")+th("worst","Worst","num")+
       '</tr></thead><tbody>'+
-      sorted.map(r=>'<tr class="click" onclick="setPerson('+
-        JSON.stringify(r.venue).replace(/"/g,"&quot;")+','+
-        JSON.stringify(r.employee).replace(/"/g,"&quot;")+')">'+
+      sorted.map(r=>'<tr class="click'+(F.cashPerson&&F.cashPerson.employee===r.employee&&F.cashPerson.venue===r.venue?' sorted':'')+
+        '" onclick="setCashPerson('+JSON.stringify(r.venue).replace(/"/g,"&quot;")+','+JSON.stringify(r.employee).replace(/"/g,"&quot;")+')">'+
         '<td>'+esc(r.employee)+'</td><td class="hide-sm">'+esc(r.venue)+'</td>'+
-        '<td class="num">'+r.tills+'</td>'+
-        '<td class="num">'+r.acc+'%</td>'+
+        '<td class="num">'+r.tills+'</td><td class="num">'+r.acc+'%</td>'+
         '<td class="num" style="color:'+varColour(r.net)+'">'+signed(r.net)+'</td>'+
         '<td class="num">'+money(r.avg)+'</td>'+
-        '<td class="num" style="color:'+varColour(r.worst)+'">'+
-          (r.worst?signed(r.worst):"–")+'</td></tr>').join("")+
-      '</tbody></table>'+
-      '<div class="note">A person who is always a few cents out is counting honestly. '+
-      'Watch the ones who are exact every day but occasionally a long way down - and '+
-      'remember a till is only attributed from 28 Nov 2021 onward.</div></div>';
+        '<td class="num" style="color:'+varColour(r.worst)+'">'+(r.worst?signed(r.worst):"–")+'</td></tr>').join("")+
+      '</tbody></table>'+unmappedNote()+
+      '<div class="note">Someone always a few cents out is counting honestly. Watch for exact every day, then a long way down. '+
+      'Tills are only attributed to a person from 28 Nov 2021.</div></div>';
   }
 
-  /* ---- drill: one person's tills ---- */
   let drill="";
-  if(F.person){
-    const mine=tills.filter(t=>t.venue===F.person.venue&&
-      (t.staff||"(not recorded)")===F.person.employee)
-      .sort((a,b)=>a.date<b.date?-1:1);
+  if(F.cashPerson){
+    const mine=tills.filter(t=>t.venue===F.cashPerson.venue&&(t.staff||"(not recorded)")===F.cashPerson.employee)
+      .sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.pos<b.pos?-1:1);
     if(mine.length){
-      drill='<div class="card" id="detail"><div class="label">'+esc(F.person.employee)+
-        ' · '+esc(F.person.venue)+
-        '<span class="chip" style="padding:4px 10px;margin-left:auto" '+
-        'onclick="setPerson('+JSON.stringify(F.person.venue).replace(/"/g,"&quot;")+','+
-        JSON.stringify(F.person.employee).replace(/"/g,"&quot;")+')">close</span></div>'+
-        '<table><thead><tr><th>Date</th><th>POS</th>'+
-        '<th class="num">Impos</th><th class="num">Counted</th>'+
-        '<th class="num">Variance</th><th></th></tr></thead><tbody>'+
-        mine.map(t=>'<tr><td>'+fmtDay(t.date)+' '+dayName(t.date)+'</td>'+
-          '<td>POS '+esc(t.pos)+'</td>'+
-          '<td class="num">'+money(t.impos)+'</td>'+
-          '<td class="num">'+money(t.actual)+'</td>'+
-          '<td class="num" style="color:'+(t.flag==="DECIMAL?"?"":varColour(t.variance))+'">'+
-            (t.flag==="DECIMAL?"?"–":signed(t.variance))+'</td>'+
+      drill='<div class="card" id="detail"><div class="label">'+esc(F.cashPerson.employee)+' \u00b7 '+esc(F.cashPerson.venue)+
+        '<span class="chip" style="padding:4px 10px;margin-left:auto" onclick="setCashPerson('+
+        JSON.stringify(F.cashPerson.venue).replace(/"/g,"&quot;")+','+JSON.stringify(F.cashPerson.employee).replace(/"/g,"&quot;")+')">close</span></div>'+
+        '<table><thead><tr><th>Date</th><th>POS</th><th class="hide-sm">As typed</th><th class="num">Impos</th><th class="num">Counted</th><th class="num">Variance</th><th></th></tr></thead><tbody>'+
+        mine.map(t=>'<tr><td>'+fmtDay(t.date)+' '+dayName(t.date)+'</td><td>POS '+esc(t.pos)+'</td>'+
+          '<td class="hide-sm muted">'+esc(t.staff_raw||"")+'</td>'+
+          '<td class="num">'+money(t.impos)+'</td><td class="num">'+money(t.actual)+'</td>'+
+          '<td class="num" style="color:'+(t.flag==="DECIMAL?"?"":varColour(t.variance))+'">'+(t.flag==="DECIMAL?"?"–":signed(t.variance))+'</td>'+
           '<td>'+(t.flag?'<b>'+esc(t.flag)+'</b>':'')+'</td></tr>').join("")+
         '</tbody></table></div>';
     }
   }
+  return latestCard+floatCard+metrics+drill+peopleCard;
+}
 
-  /* ---- day by day ---- */
-  const byDay=days.slice().sort((a,b)=>a.date<b.date?-1:(a.date>b.date?1:
-    (a.venue<b.venue?-1:1)));
-  const dayCard='<div class="card"><div class="label">Day by day</div>'+
-    '<table><thead><tr><th>Date</th><th>Venue</th>'+
-    '<th class="hide-sm">Submitted by</th><th class="num">Tills</th>'+
-    '<th class="num">Impos</th><th class="num">Counted</th><th class="num">Variance</th>'+
-    '<th class="num">Float</th><th></th></tr></thead><tbody>'+
-    byDay.map(r=>'<tr'+(F.day===r.date?' class="sorted"':'')+'>'+
-      '<td class="click" onclick="setDay(\''+r.date+'\')">'+fmtDay(r.date)+' '+dayName(r.date)+'</td>'+
-      '<td>'+esc(r.venue)+'</td>'+
-      '<td class="hide-sm">'+esc(r.by)+'</td>'+
-      '<td class="num">'+(r.tills||"–")+'</td>'+
-      '<td class="num">'+money(r.impos)+'</td>'+
-      '<td class="num">'+money(r.actual)+'</td>'+
-      '<td class="num" style="color:'+varColour(r.cash_var)+'">'+
-        (r.cash_var?signed(r.cash_var):"–")+'</td>'+
-      '<td class="num">'+(r.floatTotal===null?"–":money0(r.floatTotal))+'</td>'+
-      '<td>'+(r.flags?'<b style="color:#c97a1a">'+esc(r.flags)+'</b>':'')+'</td>'+
-      '</tr>').join("")+
+/* ---------- Daily view ---------- */
+/**
+ * One row per trading day across every venue: counted cash and variance per site, the
+ * day's total to bank, and its total variance. Click a day for the full report - every
+ * till with who counted it, EFT and Doshii, the float and its denominations - which is
+ * the closing form's PDF rebuilt from the data.
+ *
+ * "To bank" is the counted till cash summed across the venues. The safe float is counted
+ * separately and stays on site, so it is not in that figure.
+ */
+function viewDaily(){
+  if(!RECON_OK) return noReconCard();
+  const days=reconWeek();
+  if(!days.length) return '<div class="card"><b>Nothing reconciled in this week.</b></div>';
+  const vs=activeVenues().filter(v=>days.some(r=>r.venue===v));
+  const by={}; days.forEach(r=>{ by[r.date]=by[r.date]||{date:r.date,venues:{},bank:0,vari:0,flags:[]};
+    const d=by[r.date]; d.venues[r.venue]=r; d.bank+=r.actual; d.vari+=r.cash_var; if(r.flags) d.flags.push(r.venue.replace("RS ","")+": "+r.flags); });
+  const list=Object.keys(by).map(k=>by[k]);
+  const sorted=(F.sort.k==="date"||F.sort.k==="bank"||F.sort.k==="vari")?sortRows(list,"date"):list.sort((a,b)=>a.date<b.date?-1:1);
+  const T=k=>list.reduce((a,r)=>a+r[k],0);
+
+  let report="";
+  if(F.day&&by[F.day]){
+    const d=by[F.day];
+    report='<div class="card" id="detail"><div class="label">'+fmtDay(d.date)+' '+dayName(d.date)+' \u00b7 full report'+
+      '<span class="chip" style="padding:4px 10px;margin-left:auto" onclick="setDay(\''+d.date+'\')">close</span></div>'+
+      '<div class="metrics">'+metric("To bank",money(d.bank),vs.length+" venue"+(vs.length>1?"s":""))+
+        metric("Variance",signed(d.vari),"",varColour(d.vari))+
+        metric("EFT",money(vs.reduce((a,v)=>a+(d.venues[v]?d.venues[v].eft:0),0)),"Impos, all venues")+'</div>'+
+      vs.filter(v=>d.venues[v]).map(v=>{
+        const r=d.venues[v];
+        const tl=RTILL.filter(t=>t.venue===v&&t.date===d.date).sort((a,b)=>a.pos<b.pos?-1:1);
+        return '<div class="rep"><h4>'+esc(v)+' <span class="legend">counted by '+esc(r.by||"?")+
+            (r.by_raw&&r.by_raw!==r.by?' (typed “'+esc(r.by_raw)+'”)':'')+
+            (r.flags?' \u00b7 <b style="color:var(--amber)">'+esc(r.flags)+'</b>':'')+'</span></h4>'+
+          '<table><thead><tr><th>Till</th><th>Staff</th><th class="num">Impos cash</th><th class="num">Counted</th><th class="num">Variance</th><th></th></tr></thead><tbody>'+
+          tl.map(t=>'<tr><td>POS '+esc(t.pos)+'</td><td>'+esc(t.staff||"–")+'</td><td class="num">'+money(t.impos)+'</td>'+
+            '<td class="num">'+money(t.actual)+'</td><td class="num" style="color:'+(t.flag==="DECIMAL?"?"":varColour(t.variance))+'">'+
+            (t.flag==="DECIMAL?"?"–":signed(t.variance))+'</td><td>'+(t.flag?'<b>'+esc(t.flag)+'</b>':'')+'</td></tr>').join("")+
+          '<tr class="total"><td>Total</td><td></td><td class="num">'+money(r.impos)+'</td><td class="num">'+money(r.actual)+'</td>'+
+            '<td class="num" style="color:'+varColour(r.cash_var)+'">'+signed(r.cash_var)+'</td><td></td></tr>'+
+          '</tbody></table>'+
+          '<div class="metrics" style="margin-top:10px">'+metric("EFT",money(r.eft),"Impos")+
+            (r.doshii!==null?metric("Doshii",money(r.doshii),"online"):'')+
+            (r.floatTotal!==null?metric("Float",money0(r.floatTotal),floatSummary(r).text,r.floatVar!==null?floatSummary(r).colour:""):'')+'</div>'+
+          (r.floatTotal!==null?denomGrid(r,denomPar(v)):'')+
+          '</div>';
+      }).join("")+'</div>';
+  }
+
+  const table='<div class="card"><div class="label">Day by day \u00b7 click a day for the full report</div>'+
+    '<table><thead><tr>'+th("date","Date")+
+    vs.map(v=>'<th class="num">'+esc(v.replace("RS ",""))+'</th><th class="num hide-sm">var</th>').join("")+
+    th("bank","To bank","num")+th("vari","Variance","num")+'<th></th></tr></thead><tbody>'+
+    sorted.map(d=>'<tr class="click'+(F.day===d.date?' sorted':'')+'" onclick="setDay(\''+d.date+'\')">'+
+      '<td>'+fmtDay(d.date)+' '+dayName(d.date)+'</td>'+
+      vs.map(v=>{ const r=d.venues[v]; if(!r) return '<td class="num">–</td><td class="num hide-sm"></td>';
+        return '<td class="num">'+money(r.actual)+'</td><td class="num hide-sm" style="color:'+varColour(r.cash_var)+'">'+(r.cash_var?signed(r.cash_var):"")+'</td>'; }).join("")+
+      '<td class="num"><b>'+money(d.bank)+'</b></td>'+
+      '<td class="num" style="color:'+varColour(d.vari)+'">'+(d.vari?signed(d.vari):"–")+'</td>'+
+      '<td>'+(d.flags.length?'<b style="color:var(--amber)">'+esc(d.flags.join("; "))+'</b>':'')+'</td></tr>').join("")+
+    '<tr class="total"><td>Week</td>'+vs.map(v=>{ const s=list.reduce((a,d)=>a+(d.venues[v]?d.venues[v].actual:0),0);
+      const x=list.reduce((a,d)=>a+(d.venues[v]?d.venues[v].cash_var:0),0);
+      return '<td class="num">'+money(s)+'</td><td class="num hide-sm" style="color:'+varColour(x)+'">'+(x?signed(x):"")+'</td>'; }).join("")+
+    '<td class="num">'+money(T("bank"))+'</td><td class="num" style="color:'+varColour(T("vari"))+'">'+signed(T("vari"))+'</td><td></td></tr>'+
     '</tbody></table></div>';
-
-  return latestCard+metrics+drill+peopleCard+dayCard;
+  return report+table;
 }
 
 function render(){
   const app=document.getElementById("app");
   const w=window_();
+  if(!w && isReconView(F.view)){ app.className=""; app.innerHTML=noReconCard(); return; }
   if(!w){
     app.innerHTML='<div class="card"><b>No staff report data yet.</b>'+
       '<div class="note">The reports broadcast at 9pm each Sunday and are imported by '+
@@ -1151,16 +1387,20 @@ function render(){
              : F.view==="voids" ? viewVoids()
              : F.view==="people" ? viewPeople()
              : F.view==="cash" ? viewCash()
+             : F.view==="daily" ? viewDaily()
              : viewOverview();
   // With a person or a check open, printing should produce THAT report - not the whole
   // list with the detail buried at the top.
   app.className = (F.person||F.check) ? "focused" : "";
+  // The header card describes the ImPOS staff reports. On the reconciliation views it is
+  // wrong and in the way - the week already shows in the filter bar.
   app.innerHTML =
     checkCard()+ personCard()+
+    (isReconView(F.view) ? '' :
     '<div class="card"><div class="label">'+esc(w.label)+
       (F.venues.length?' \u00b7 '+esc(F.venues.join(" + ")):'')+
       '<span class="legend">week '+(w.index+1)+' of '+w.count+'</span></div>'+
-      '<div class="muted">Discount, void and transaction reports from ImPOS, imported weekly.</div></div>'+
+      '<div class="muted">Discount, void and transaction reports from ImPOS, imported weekly.</div></div>')+
     body +
     (MISSING.length?'<div class="card"><b>Some tabs are missing:</b> '+MISSING.map(esc).join(", ")+
       '<div class="note">They are created the first time processStaffReports runs with data.</div></div>':'');
@@ -1194,6 +1434,17 @@ function exportCsv(){
     head=["date","time","venue","employee","item","reason","check_no","qty","value","notes"];
     rows("voids").forEach(r=>body.push([r.date,r.void_time,r.venue,r.employee,r.item,
       r.void_reason,r.check_no,r.qty,r.price_inc.toFixed(2),r.notes]));
+  } else if(F.view==="cash"){
+    name="cash-tills";
+    head=["date","venue","pos","staff","staff_as_typed","impos_cash","counted_cash","variance","flag"];
+    tillWeek().forEach(t=>body.push([t.date,t.venue,t.pos,t.staff,t.staff_raw||"",t.impos.toFixed(2),
+      t.actual.toFixed(2),t.variance.toFixed(2),t.flag]));
+  } else if(F.view==="daily"){
+    name="daily-reconciliation";
+    head=["date","venue","submitted_by","tills","impos_cash","counted_cash","variance","impos_eft","doshii","float","flags"];
+    reconWeek().forEach(r=>body.push([r.date,r.venue,r.by,r.tills,r.impos.toFixed(2),r.actual.toFixed(2),
+      r.cash_var.toFixed(2),r.eft.toFixed(2),r.doshii===null?"":r.doshii.toFixed(2),
+      r.floatTotal===null?"":r.floatTotal,r.flags]));
   } else if(F.view==="people"){
     name="people";
     head=["venue","employee","discounts","discount_count","voids","void_count","wastage","wastage_count"];
