@@ -150,7 +150,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v14-1256"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v16-1300"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1948,8 +1948,16 @@ function rangeProducts(range){
     p.change=p.base?(p.price-p.base)/p.base*100:null;
     /* Extra paid: every delivery in the range priced against the baseline. Negative = saved. */
     p.extra=p.inRange.reduce((s,b)=>s+b.qty*(b.price-p.base),0);
-    p.usualWk=p.before.filter(b=>b.date>=uFrom).reduce((s,b)=>s+b.qty,0)/AVG_WEEKS;
+    const uB=p.before.filter(b=>b.date>=uFrom);
+    p.usualWk=uB.reduce((s,b)=>s+b.qty,0)/AVG_WEEKS;
     p.usualQty=p.usualWk*sc.weeks*(sc.live?sc.frac:1);
+    /* Usual SPEND by the same rule, so a supplier reading ▲ on the front page can be traced to
+       the products behind it (Adrian, 24 Sep 2026). delta is dollars above (or below) the run
+       rate; a product never bought before the range is all delta and is marked new. */
+    p.usualSpendWk=uB.reduce((s,b)=>s+b.total,0)/AVG_WEEKS;
+    p.usualSpend=p.usualSpendWk*sc.weeks*(sc.live?sc.frac:1);
+    p.delta=p.spend-p.usualSpend;
+    p.isNew=!p.before.length;
     return p;
   });
 }
@@ -2025,15 +2033,16 @@ function repSoldCard(range){
   const sc=rangeScale(range), byQty=REP_SOLD_BY==="qty";
   /* Paid units only. A $0 line is a loyalty coffee or a binned sandwich — counting it as sold
      would inflate anything these numbers go on to feed. Kitchen requests are not sales. */
-  const rows=sdSales(f.rows).filter(r=>r.sales>0), m={}, tradingDays={};
+  /* Refunds (negative lines) come off; $0 lines never count. (29 Sep 2026) */
+  const rows=sdSales(f.rows).filter(r=>r.sales!==0), m={}, tradingDays={};
   rows.forEach(r=>{ const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",qty:0,sales:0,uq:0,us:0});
-    o.qty+=r.qty; o.sales+=r.sales; tradingDays[fmtISO(r.ts)]=1; });
+    o.qty+=r.qty; o.sales+=r.sales; if(r.sales>0) tradingDays[fmtISO(r.ts)]=1; });
   /* Units/day over the days that actually traded in the range, so a Monday-morning week is
      not divided by seven. */
   const nDays=Math.max(1,Object.keys(tradingDays).length);
   if(f.prior){
     const pw=f.prior.days/7, mult=sc.weeks*(sc.live?sc.frac:1)/pw;
-    f.prior.rows.forEach(r=>{ if(!(r.sales>0)||!m[r.item]) return; m[r.item].uq+=r.qty*mult; m[r.item].us+=r.sales*mult; });
+    f.prior.rows.forEach(r=>{ if(r.sales===0||!m[r.item]) return; m[r.item].uq+=r.qty*mult; m[r.item].us+=r.sales*mult; });
   }
   const list=Object.values(m).sort((a,b)=>byQty?b.qty-a.qty:b.sales-a.sales);
   const rev=list.reduce((s,o)=>s+o.sales,0), units=list.reduce((s,o)=>s+o.qty,0);
@@ -2141,7 +2150,7 @@ function renderGroupDrill(group){
    that week, a Month range under the Week toggle shows the four or five weeks it touches,
    and nothing from outside the range appears. Reconcile these against the supplier's own
    statement; a difference is a missing invoice or a billing error. */
-let STMT_PERIOD="week", SUPP_PROD_SORT={key:"change",dir:-1};
+let STMT_PERIOD="week", SUPP_PROD_SORT={key:"delta",dir:-1};
 function setStmt(v){ STMT_PERIOD=v; route(); }
 function sortSuppProds(k){ if(SUPP_PROD_SORT.key===k) SUPP_PROD_SORT.dir*=-1; else SUPP_PROD_SORT={key:k,dir:k==="name"||k==="cat"?1:-1}; route(); }
 function statementCard(name,range){
@@ -2174,16 +2183,51 @@ function statementCard(name,range){
     <div class="note">Reconcile these totals against the supplier's own statement — differences mean a missing invoice or a
       billing error. Whole ${wk?"weeks":"months"} covering ${esc(range.label)}, not the range itself.</div></div>`;
 }
+/* The supplier's usual on PRODUCT LINES — fees stripped, the AVG_WEEKS complete weeks before
+   the range, scaled and pro-rated like every other usual. Computed over every line, not just
+   the products bought in the range, so a product dropped altogether still lowers the usual. */
+function usualLineSpend(name,range){
+  const sc=rangeScale(range), uFrom=addD(mid(range.start),-7*AVG_WEEKS), uTo=mid(range.start);
+  let t=0, seen=false;
+  LINES.forEach(l=>{ if(l.supplier!==name||!l.date||l.date>=uTo||!(l.price>0)||!(l.qty>0)||FEE.test(l.desc)) return;
+    seen=true; if(l.date>=uFrom) t+=l.total; });
+  const wk=t/AVG_WEEKS;
+  return {wk,scaled:wk*sc.weeks*(sc.live?sc.frac:1),seen,sc};
+}
+/* WHAT IS DRIVING IT. The front page says a supplier is ▲; this says which products. One
+   sentence: how far over (or under) usual, and the three products that account for most of
+   it. Nothing where the supplier has no history before the range. */
+function driversNote(name,prods,range){
+  const u=usualLineSpend(name,range); if(!u.seen) return "";
+  const spend=prods.reduce((a,p)=>a+p.spend,0), d=spend-u.scaled, sc=u.sc;
+  const over=spend>u.scaled*1.1, under=spend<u.scaled*0.9;
+  const usualTxt=`usual ${money0(u.scaled)}${sc.live?` for the ${sc.elapsed} of ${sc.days} days so far`:""}`;
+  if(!over&&!under) return `<div class="note" style="margin:0 0 10px"><b>About usual</b> — ${money0(spend)} against ${usualTxt}.</div>`;
+  const pool=over?prods.filter(p=>p.delta>0).sort((a,b)=>b.delta-a.delta):prods.filter(p=>p.delta<0).sort((a,b)=>a.delta-b.delta);
+  const top=pool.slice(0,3), rest=pool.length-top.length;
+  const list=top.map(p=>`<b>${esc(p.desc)}</b> ${over?"+":"−"}${money0(Math.abs(p.delta))}${p.isNew?" (new)":""}`).join(", ");
+  return `<div id="drivers" style="font-size:13px;margin:0 0 10px;line-height:1.5">
+    <b class="${over?"up":"down"}">${money0(Math.abs(d))} ${over?"over":"under"} usual</b> — ${money0(spend)} against ${usualTxt}.
+    ${top.length?`${over?"Driving it":"Biggest drops"}: ${list}${rest?` and ${rest} more`:""}.`:""}
+    ${under?`<span style="color:var(--dim)">Products not bought at all in the range are not listed.</span>`:""}</div>`;
+}
+const deltaChip=p=>{
+  if(p.isNew) return `<span class="up">+${money(p.spend)}</span> <span class="pill" title="never bought before this range">new</span>`;
+  if(Math.abs(p.delta)<0.5) return `<span style="color:var(--dim)">–</span>`;
+  return `<span class="${p.delta>0?"up":"down"}" title="usual ${money(p.usualSpend)}">${p.delta>0?"+":"−"}${money(Math.abs(p.delta))}</span>`;
+};
 function renderSupplierProducts(name){
   const m=rangeModel(), range=reportRange();
   const all=rangeProducts(range).filter(p=>p.supplier===name).map(p=>{p.hidden=!!HIDDEN[p.key];return p;});
   const rows=all.filter(p=>SHOW_HIDDEN||!p.hidden), hiddenN=all.length-rows.length;
   const K={name:p=>p.desc.toLowerCase(),cat:p=>p.cat.toLowerCase(),qty:p=>p.qty,spend:p=>p.spend,price:p=>p.price,
-           was:p=>p.base,change:p=>p.change==null?-Infinity:p.change};
-  const fn=K[SUPP_PROD_SORT.key]||K.change;
+           was:p=>p.base,change:p=>p.change==null?-Infinity:p.change,delta:p=>p.delta};
+  const fn=K[SUPP_PROD_SORT.key]||K.delta;
   rows.sort((a,b)=>{const x=fn(a),y=fn(b);return (x<y?-1:x>y?1:0)*SUPP_PROD_SORT.dir||a.desc.localeCompare(b.desc);});
   const head=(k,l,cls)=>`<th class="s ${cls||""} ${SUPP_PROD_SORT.key===k?"act":""}" onclick="sortSuppProds('${k}')">${l}${SUPP_PROD_SORT.key===k?(SUPP_PROD_SORT.dir<0?" ▼":" ▲"):""}</th>`;
-  const spend=rows.reduce((a,p)=>a+p.spend,0);
+  /* Money over every product, turned-off ones included — they leave the ordering screens,
+     never the spend. */
+  const spend=all.reduce((a,p)=>a+p.spend,0);
   document.getElementById("app").innerHTML=`${summaryBar(m)}
     <a class="back" onclick="go('')">All suppliers</a>
     ${sset(name).orderHere?`<div style="margin-bottom:10px"><a class="btn outline" onclick="go('s::${encodeURIComponent(name)}')">🛒 Build order</a></div>`
@@ -2192,20 +2236,25 @@ function renderSupplierProducts(name){
     <div class="card">
       <div class="label">Products (${rows.length}) — ${esc(range.label)}
         ${hiddenN?`<span class="chip sm ${SHOW_HIDDEN?"on":""}" onclick="toggleHidden()" style="margin-left:8px">${SHOW_HIDDEN?"hiding":"show"} ${hiddenN} turned-off</span>`:""}</div>
-      ${rows.length?`<div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(spend)}</div>
+      ${rows.length?`<div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:6px">${money(spend)}</div>
+      ${driversNote(name,all,range)}
       <table><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}${head("qty","Qty","num")}
-        ${head("spend","Spend","num")}${head("price","Price","num")}${head("was","Was","num hide-sm")}${head("change","Change","num")}</tr></thead>
+        ${head("spend","Spend","num")}${head("delta","vs usual","num")}${head("price","Price","num")}${head("was","Was","num hide-sm")}${head("change","Change","num")}</tr></thead>
       <tbody>${rows.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
         <td><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}${p.hidden?' <span class="pill">off</span>':""}</td>
         <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
-        <td class="num">${Math.round(p.qty*100)/100}</td>
+        <td class="num">${Math.round(p.qty*100)/100}${usualMark(p.qty,p.usualQty,"spend")}</td>
         <td class="num">${money(p.spend)}</td>
+        <td class="num">${deltaChip(p)}</td>
         <td class="num"><b>${money(p.price)}</b></td>
         <td class="num hide-sm" title="${p.baseFromBefore?"last paid before the range, "+fmtD(p.baseDate):"first price inside the range"}">${p.baseFromBefore?money(p.base):'<span style="color:var(--dim)">—</span>'}</td>
         <td class="num">${creepChip(p)}</td></tr>`).join("")}</tbody></table>
       <div class="note">Line totals with delivery and fees stripped, so this will not match the statement to the cent.
-        <b>Was</b> is the last price paid before the range; Change compares the latest price in the range with it, and
-        is blank when nothing was bought before. Tap a product for its price history.</div>`
+        <b>vs usual</b> is the dollars above or below what this product usually costs over ${wksLabel(rangeScale(range).weeks)} —
+        its rate over the ${AVG_WEEKS} full weeks before the range${rangeScale(range).live?", pro-rated to the days so far":""} — so the
+        list opens with what is driving the total. The arrow after Qty says whether it was more of it (hover for the usual);
+        Change says whether it was the price. <b>Was</b> is the last price paid before the range; Change compares the latest
+        price in the range with it, and is blank when nothing was bought before. Tap a product for its price history.</div>`
       :`<div class="note">No product lines from ${esc(name)} in ${esc(range.label)}.</div>`}
     </div>
     ${invoicePanel(name,null,60,range)}`;
@@ -2648,12 +2697,16 @@ function sdProdCard(rows,w){
   /* Built before the group filter, so choosing one doesn't make the others disappear. */
   const groups=[...new Set(rowsForGroups.map(r=>r.group).filter(Boolean))].sort();
   const cols=pv==="both"?LEDGER_VENUES:[pv];
+  /* Sold is paid lines less refunds. A $0 line is binned or given away and counts nowhere here
+     (the wastage card has it). Adding every line's qty put 62 Assorted Sandwiches against
+     $348.50 for 21-27 Sep — the 18 binned ones read as sold at $5.62 each. (29 Sep 2026) */
   rows.forEach(r=>{
+    if(r.sales===0) return;
     const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",sales:0,qty:0});
     o.sales+=r.sales; o.qty+=r.qty;
     o[r.venue]=(o[r.venue]||0)+r.sales;
   });
-  let list=Object.values(m);
+  let list=Object.values(m).filter(o=>o.sales>0||o.qty>0);
   const q=SALES_Q.trim().toLowerCase();
   if(q) list=list.filter(o=>o.name.toLowerCase().includes(q)||o.group.toLowerCase().includes(q));
   const d=SALES_SORT.dir;
@@ -2708,7 +2761,8 @@ function wasteRows(rows){
   rows.forEach(r=>{
     if(PERISHABLE.indexOf(r.group)===-1) return;
     const o=m[r.item]||(m[r.item]={name:r.item,group:r.group,sold:0,free:0,rev:0});
-    if(r.sales>0){ o.sold+=r.qty; o.rev+=r.sales; } else o.free+=r.qty;
+    /* A refund is a sale taken back, not food in the bin. */
+    if(r.sales!==0){ o.sold+=r.qty; o.rev+=r.sales; } else o.free+=r.qty;
   });
   const list=Object.values(m).filter(o=>o.free>0&&o.sold>0&&paid[o.name.toLowerCase()]);
   list.forEach(o=>{ o.price=o.rev/o.sold; o.value=o.free*o.price; o.pct=o.free/(o.sold+o.free)*100; });
@@ -3069,6 +3123,10 @@ function renderHelp(){
     <p>Tap any supplier on the front page. A weekly or monthly statement to reconcile against theirs, every product we
       bought from them in the range with its price and any change, and the invoices themselves — tap one to see its
       lines. All for the range in the bar.</p>
+    <p><b>When a supplier is ▲ on the front page</b>, this page says why. The line above the products is how far over
+      usual the spend is and the three products doing most of it; the list opens sorted by <b>vs usual</b>, the dollars
+      each product is above or below its normal run. The arrow after Qty tells you it was <i>more of it</i>; a change on
+      the price tells you it was <i>dearer</i>; <b>new</b> is something we had not bought from them before.</p>
 
     <h2>Questions</h2>
     <p>Anything confusing, or anything you want that is not here — tell Adrian. The page changes every week or so and

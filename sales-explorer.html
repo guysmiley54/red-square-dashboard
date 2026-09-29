@@ -140,7 +140,7 @@
 /* Build marker. supplier-explorer.html has carried one for a while and sales-explorer has
    not, which made "is the deployed file the one we edited?" a diff rather than a glance.
    Logged on load and hung off window so it can be read from the console. */
-const BUILD = "build-041140";
+const BUILD = "build-291300";
 console.log("sales-explorer " + BUILD);
 const SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
 // Display order is deliberate: Cambridge, Luma, Glenorchy.
@@ -1106,7 +1106,7 @@ function render(){
   }).join("");
 
   const sel=drill.reduce(function(s,r){return s+r.sales;},0);
-  const units=drill.reduce(function(s,r){return s+(r.sales>0?r.qty:0);},0);
+  const units=drill.reduce(function(s,r){return s+(r.sales!==0?r.qty:0);},0);
 
   // ---- trend: time-of-day on a single day, day-by-day across a week or month.
   // With comparison on, each time slot gets one bar per venue in the fixed venue order,
@@ -1244,7 +1244,7 @@ function render(){
     if(!isPerishable(r.group)) return;
     const k=r.venue+"|"+itemOf(r);
     const o=wmap[k]||(wmap[k]={item:itemOf(r),venue:r.venue,group:r.group,sold:0,free:0,rev:0});
-    if(r.sales>0){ o.sold+=r.qty; o.rev+=r.sales; } else { o.free+=r.qty; }
+    if(r.sales!==0){ o.sold+=r.qty; o.rev+=r.sales; } else { o.free+=r.qty; }
   });
   let wlist=Object.keys(wmap).map(function(k){
     const o=wmap[k];
@@ -1270,13 +1270,13 @@ function render(){
   });
   let loyU=0, loyV=0, loyModi=0;
   drill.forEach(function(r){
-    if(r.group!==LOYALTY_GROUP||r.sales>0||r.lane!=="sales") return;
+    if(r.group!==LOYALTY_GROUP||r.sales!==0||r.lane!=="sales") return;
     if(paidCoffee[itemOf(r).toLowerCase()]) loyU+=r.qty;
     else loyModi+=r.qty;      // milk, sugar, strength - not a give-away
   });
   const coffeePrice=(function(){
     let q=0,v=0;
-    drill.forEach(function(r){ if(r.group===LOYALTY_GROUP&&r.sales>0){ q+=r.qty; v+=r.sales; } });
+    drill.forEach(function(r){ if(r.group===LOYALTY_GROUP&&r.sales!==0){ q+=r.qty; v+=r.sales; } });
     return q?v/q:0;
   })();
   loyV=loyU*coffeePrice;
@@ -1355,7 +1355,7 @@ function render(){
   let slotBar="";
   if(F.slot){
     const st=drill.reduce(function(s,r){return s+r.sales;},0);
-    const su=drill.reduce(function(s,r){return s+(r.sales>0?r.qty:0);},0);
+    const su=drill.reduce(function(s,r){return s+(r.sales!==0?r.qty:0);},0);
     const byV=VENUES.map(function(v){
       const t=drill.reduce(function(s,r){return s+(r.venue===v?r.sales:0);},0);
       return t?'<span class="vs"><b style="color:'+VCOLOUR[v]+'">\u25a0</b> '+esc(vShort(v))+' '+money0(t)+'</span>':"";
@@ -1435,6 +1435,10 @@ function render(){
   }
 
   // ---- products, with the same per-venue comparison columns
+  /* A refund or void arrives as a NEGATIVE line (29 Sep 2026). It is a sale taken back, so it
+     comes off units and revenue. Only a line at exactly $0 is binned or given away. Testing
+     "> 0" for a sale dropped refunds on the floor: Glenorchy's Assorted Sandwiches for 21-27 Sep
+     read 47 / $374.00 when the till says 44 / $348.50. */
   const itemMap={};
   drill.forEach(function(r){
     if(!r.sales&&!r.qty)return;
@@ -1445,7 +1449,7 @@ function render(){
     // towards units sold or the average price: these numbers are headed for a par-level
     // generator, and inflating sold counts with wastage would raise par levels and cause
     // more wastage. Tracked separately so it stays visible.
-    if(r.sales>0){ o.qty+=r.qty; o.sales+=r.sales; o.v[r.venue]=(o.v[r.venue]||0)+r.sales; }
+    if(r.sales!==0){ o.qty+=r.qty; o.sales+=r.sales; o.v[r.venue]=(o.v[r.venue]||0)+r.sales; }
     else { o.free+=r.qty; }
   });
   let items=Object.keys(itemMap).map(function(k){return itemMap[k];})
@@ -1590,10 +1594,10 @@ function render(){
   let itemCard="";
   if(F.item){
     const ir=rows.filter(function(r){return itemOf(r)===F.item;});
-    const paid=ir.filter(function(r){return r.sales>0;});
+    const paid=ir.filter(function(r){return r.sales!==0;});   // sales net of refunds
     const sold=paid.reduce(function(a,r){return a+r.qty;},0);
     const revd=paid.reduce(function(a,r){return a+r.sales;},0);
-    const freed=ir.reduce(function(a,r){return a+(r.sales>0?0:r.qty);},0);
+    const freed=ir.reduce(function(a,r){return a+(r.sales===0?r.qty:0);},0);
 
     // Units per day, not dollars - this is the number that will drive par levels.
     const byDay={};
