@@ -153,7 +153,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v23-1345"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v24-1545"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -187,7 +187,7 @@ const FILL_MIN = 0;
 
 /* ================= STATE ================= */
 let INV=[],LINES=[],CFG={},PMERGE={},ORDERS=[],SSET={},FAVS=[],COVER={},HIDDEN={},SALES=[],LOAD_WARN=[];
-let SALES_OK=false;
+let SALES_OK=false, LINE_FIXES=[];
 let TAG=TAGS[0], WEEK_OFF=0, SUPPLIER="", CATFILT="", SEARCH="", HIDE_PORTAL=true;
 let SHOW_HIDDEN=false, PICKED={};      // PICKED: item_key -> true, for bulk category edits
 /* Typing re-renders the page, which destroys the search box and rebuilds it — so focus and
@@ -656,6 +656,20 @@ async function loadAll(){
     const keptInv={};
     INV.forEach(r=>keptInv[norm(r.supplier)+"|"+norm(r.number)]=true);
     LINES=LINES.filter(l=>keptInv[norm(l.supplier)+"|"+norm(l.number)]);
+
+    /* A line total wildly above qty × price is an extraction misread, not a purchase: PFD
+       LW331974 (25 Sep 2026) recorded 1 × $34.80 butter portions as $63,717. The invoice's own
+       total was right, so spend and COGS never saw it — but every product view did. Where the
+       line is more than 100× qty × price AND 100× the unit price, and over by $100+, qty × price
+       is used instead, and the line is counted in LINE_FIXES (logged). 100× because genuine lines
+       disagree with qty × price all the time, by a smaller factor: Nichols prices breast fillets
+       per kg but counts 6 kg boxes (6×), PFD prices pork collar per kg but counts pieces (18×),
+       ALM counts a bottle as 0.1 of a carton (~10×). The butter misread was 1,830×. Checked
+       against every InvoiceLines row on 29 Sep 2026: only LW331974 trips it. */
+    LINE_FIXES=[];
+    LINES.forEach(l=>{ const calc=l.qty*l.price;
+      if(calc>0&&l.total>calc*100&&l.total>l.price*100&&l.total-calc>100){ LINE_FIXES.push({supplier:l.supplier,number:l.number,desc:l.desc,was:l.total,now:calc}); l.total=calc; } });
+    if(LINE_FIXES.length) console.log("Line totals corrected (misread):",LINE_FIXES);
 
     applyFuzzyFold();
     LINES.forEach(l=>{ l.key=prodKey(l.supplier,l.code,l.desc,l.unit);
@@ -1353,7 +1367,8 @@ function sortSuppliers(k){ if(SUPP_SORT.key===k) SUPP_SORT.dir*=-1; else SUPP_SO
 function avgNoteFor(d,range){
   return d.short
     ?`<b>Usual/wk</b> is the average over the ${AVG_WEEKS} full weeks before ${fmtD(range.start)}, not this range —
-       a week divided by itself is just the week. ▲▼ marks a range more than 10% off its usual.`
+       a week divided by itself is just the week. ▲▼ marks spend more than 10% off usual <i>so far</i> — against the same
+       days of those weeks, so a Monday delivery is measured against earlier Mondays.`
     :`<b>Avg/wk</b> is spend ÷ ${wksLabel(d.weeks)}.`;
 }
 const wksLabel=w=>{const n=Math.round(w*10)/10;return n+(n===1?" week":" weeks");};
@@ -1840,10 +1855,17 @@ function spendRows(range){
      against it. Four weeks or more, the range's own average is a fair number and stands. */
   const short=weeks<AVG_WEEKS;
   const uS=short?usualWeek(range.start,r=>r.supplier):{}, uG=short?usualWeek(range.start,rowGroup):{};
-  const fin=u=>o=>{ o.perWk=o.spend/weeks; o.avgWk=short?(u[o.name]||0):o.perWk;
-    o.trend=short&&o.avgWk>0?(o.perWk-o.avgWk)/o.avgWk:null; return o; };
-  return {sup:Object.values(bySup).map(fin(uS)).sort((a,b)=>b.spend-a.spend),
-          grp:Object.values(byGrp).map(fin(uG)).sort((a,b)=>b.spend-a.spend), weeks, short};
+  /* The arrow compares spend so far with the same usual the supplier page uses (usualPlan): the
+     same days of recent weeks. The Usual/wk column still shows a whole usual week — the number
+     Sunday should land near. */
+  const U=usualPlan(range), tdS={}, tdG={};
+  if(short) INV.forEach(r=>{ if(!r.date||!supActive(r.supplier)||!U.inWin(r.date,AVG_WEEKS)) return;
+    tdS[r.supplier]=(tdS[r.supplier]||0)+r.total; const g=rowGroup(r); tdG[g]=(tdG[g]||0)+r.total; });
+  const fin=(u,td)=>o=>{ o.perWk=o.spend/weeks; o.avgWk=short?(u[o.name]||0):o.perWk;
+    o.usualToDate=short?(td[o.name]||0)*U.factor(AVG_WEEKS):null;
+    o.trend=short&&o.usualToDate>0?(o.spend-o.usualToDate)/o.usualToDate:null; return o; };
+  return {sup:Object.values(bySup).map(fin(uS,tdS)).sort((a,b)=>b.spend-a.spend),
+          grp:Object.values(byGrp).map(fin(uG,tdG)).sort((a,b)=>b.spend-a.spend), weeks, short};
 }
 /* Lives in the sticky #filters strip on every reading route, so the range is one control
    and every card under it agrees. */
@@ -1916,6 +1938,37 @@ function rangeScale(range){
   const elapsed=+t<+mid(range.start)?0:+t>+mid(range.end)?days:Math.round((+t-+mid(range.start))/864e5)+1;
   return {days,weeks:days/7,elapsed,live:elapsed<days,frac:days?elapsed/days:1};
 }
+/* USUAL, LIKE FOR LIKE (Adrian, 29 Sep 2026). What a range is measured against.
+
+   A week or shorter: the SAME DAYS in each of the last n weeks — Monday-to-Tuesday against
+   Monday-to-Tuesday. The old rule took a usual week and pro-rated it by days gone, which assumes
+   spend trickles in a seventh a day. Deliveries don't: a supplier that drops $800 every Monday
+   read "+$570 over usual" every Tuesday, when it was bang on. The Order tab has always done it
+   this way ("vs $X by Tue"); the reading routes now agree with it.
+
+   Longer ranges keep the weekly rate scaled to the days so far — over a month the lumps even out.
+
+   inWin(date, n) says whether a date before the range falls in its usual window over n weeks;
+   factor(n) turns the sum of those into the usual for this range. A finished week gives exactly
+   the old answer (the whole of each earlier week, divided by n). */
+const USUAL_LONG_WEEKS=12, DELTA_MIN=20;
+function usualPlan(range){
+  const sc=rangeScale(range), s0=+mid(range.start), day=864e5;
+  const back=d=>Math.round((s0-+mid(d))/day);                   // whole days before the range
+  if(sc.days>7) return {sc, short:false,
+    inWin:(d,n)=>{const b=back(d); return b>=1&&b<=7*n;},
+    factor:n=>sc.weeks*(sc.live?sc.frac:1)/n};
+  const e=sc.elapsed;
+  return {sc, short:true,
+    inWin:(d,n)=>{const b=back(d); if(b<1) return false; const k=Math.ceil(b/7); return k<=n&&(7*k-b)<e;},
+    factor:n=>1/n};
+}
+/* How the usual was measured, for the notes and hovers. */
+function usualWords(U){
+  if(U.short&&U.sc.live) return `by ${DAYSHORT}, the same days of the last ${AVG_WEEKS} weeks`;
+  if(U.short) return `the same days of the last ${AVG_WEEKS} weeks`;
+  return `the ${AVG_WEEKS} full weeks before the range, scaled${U.sc.live?` to the ${U.sc.elapsed} of ${U.sc.days} days so far`:""}`;
+}
 /* more than usual = ▲. For spend that is the red one; for sales it is the green one. */
 function usualMark(actual,usual,kind){
   if(!(usual>0)) return "";
@@ -1925,11 +1978,12 @@ function usualMark(actual,usual,kind){
   const fmt=kind==="money"?money0(usual):String(Math.round(usual*10)/10);
   return ` <span class="${good?"down":"up"}" title="usual ${fmt}">${up?"▲":"▼"}</span>`;
 }
-const usualNote=sc=>`▲▼ compares with the product's <b>usual</b> — its rate over the ${AVG_WEEKS} full weeks before the range,
-  scaled to ${sc.weeks===1?"a week":wksLabel(sc.weeks)}${sc.live?` and pro-rated to the ${sc.elapsed} of ${sc.days} days so far`:""};
+const usualNote=sc=>`▲▼ compares with the product's <b>usual</b> — ${sc.days<=7
+  ?`what it came to over the same days of the last ${AVG_WEEKS} weeks${sc.live?` (Monday to ${DAYSHORT})`:""}`
+  :`its rate over the ${AVG_WEEKS} full weeks before the range, scaled to ${wksLabel(sc.weeks)}${sc.live?` and to the ${sc.elapsed} of ${sc.days} days so far`:""}`};
   more or less than 10% off it earns an arrow, hover for the figure, nothing where the product was not seen before.`;
 function rangeProducts(range){
-  const map={}, sc=rangeScale(range), uFrom=addD(mid(range.start),-7*AVG_WEEKS);
+  const map={}, sc=rangeScale(range), uFrom=addD(mid(range.start),-7*AVG_WEEKS), U=usualPlan(range);
   LINES.forEach(l=>{
     if(!l.date||!(l.price>0)||!(l.qty>0)||FEE.test(l.desc)||!supActive(l.supplier)) return;
     if(l.date>range.end) return;
@@ -1953,12 +2007,25 @@ function rangeProducts(range){
     p.extra=p.inRange.reduce((s,b)=>s+b.qty*(b.price-p.base),0);
     const uB=p.before.filter(b=>b.date>=uFrom);
     p.usualWk=uB.reduce((s,b)=>s+b.qty,0)/AVG_WEEKS;
-    p.usualQty=p.usualWk*sc.weeks*(sc.live?sc.frac:1);
-    /* Usual SPEND by the same rule, so a supplier reading ▲ on the front page can be traced to
-       the products behind it (Adrian, 24 Sep 2026). delta is dollars above (or below) the run
-       rate; a product never bought before the range is all delta and is marked new. */
     p.usualSpendWk=uB.reduce((s,b)=>s+b.total,0)/AVG_WEEKS;
-    p.usualSpend=p.usualSpendWk*sc.weeks*(sc.live?sc.frac:1);
+    /* Usual qty and SPEND, like for like (see usualPlan), so a supplier reading ▲ on the front
+       page can be traced to the products behind it (Adrian, 24 Sep 2026). delta is dollars above
+       (or below) usual; a product never bought before the range is all delta and marked new.
+       A product with nothing in the usual window but bought in the last 12 weeks is occasional:
+       it is measured against its 12-week weekly average, scaled to the days so far, rather than
+       against nothing. */
+    const w4=p.before.filter(b=>U.inWin(b.date,AVG_WEEKS));
+    if(w4.length){
+      p.usualQty=w4.reduce((s,b)=>s+b.qty,0)*U.factor(AVG_WEEKS);
+      p.usualSpend=w4.reduce((s,b)=>s+b.total,0)*U.factor(AVG_WEEKS);
+      p.usualHow="like";
+    } else {
+      const lFrom=addD(mid(range.start),-7*USUAL_LONG_WEEKS), wL=p.before.filter(b=>b.date>=lFrom);
+      const k=sc.weeks*(sc.live?sc.frac:1)/USUAL_LONG_WEEKS;
+      p.usualQty=wL.reduce((s,b)=>s+b.qty,0)*k;
+      p.usualSpend=wL.reduce((s,b)=>s+b.total,0)*k;
+      p.usualHow=wL.length?"occasional":"none";
+    }
     p.delta=p.spend-p.usualSpend;
     p.isNew=!p.before.length;
     return p;
@@ -2190,12 +2257,11 @@ function statementCard(name,range){
    the range, scaled and pro-rated like every other usual. Computed over every line, not just
    the products bought in the range, so a product dropped altogether still lowers the usual. */
 function usualLineSpend(name,range){
-  const sc=rangeScale(range), uFrom=addD(mid(range.start),-7*AVG_WEEKS), uTo=mid(range.start);
-  let t=0, seen=false;
+  const U=usualPlan(range), sc=U.sc, uFrom=addD(mid(range.start),-7*AVG_WEEKS), uTo=mid(range.start);
+  let t=0, w=0, seen=false;
   LINES.forEach(l=>{ if(l.supplier!==name||!l.date||l.date>=uTo||!(l.price>0)||!(l.qty>0)||FEE.test(l.desc)) return;
-    seen=true; if(l.date>=uFrom) t+=l.total; });
-  const wk=t/AVG_WEEKS;
-  return {wk,scaled:wk*sc.weeks*(sc.live?sc.frac:1),seen,sc};
+    seen=true; if(l.date>=uFrom) t+=l.total; if(U.inWin(l.date,AVG_WEEKS)) w+=l.total; });
+  return {wk:t/AVG_WEEKS,scaled:w*U.factor(AVG_WEEKS),seen,sc,U};
 }
 /* WHAT IS DRIVING IT. The front page says a supplier is ▲; this says which products. One
    sentence: how far over (or under) usual, and the three products that account for most of
@@ -2204,9 +2270,9 @@ function driversNote(name,prods,range){
   const u=usualLineSpend(name,range); if(!u.seen) return "";
   const spend=prods.reduce((a,p)=>a+p.spend,0), d=spend-u.scaled, sc=u.sc;
   const over=spend>u.scaled*1.1, under=spend<u.scaled*0.9;
-  const usualTxt=`usual ${money0(u.scaled)}${sc.live?` for the ${sc.elapsed} of ${sc.days} days so far`:""}`;
+  const usualTxt=`usual ${money0(u.scaled)} (${usualWords(u.U)})`;
   if(!over&&!under) return `<div class="note" style="margin:0 0 10px"><b>About usual</b> — ${money0(spend)} against ${usualTxt}.</div>`;
-  const pool=over?prods.filter(p=>p.delta>0).sort((a,b)=>b.delta-a.delta):prods.filter(p=>p.delta<0).sort((a,b)=>a.delta-b.delta);
+  const pool=over?prods.filter(p=>p.delta>=DELTA_MIN).sort((a,b)=>b.delta-a.delta):prods.filter(p=>p.delta<=-DELTA_MIN).sort((a,b)=>a.delta-b.delta);
   const top=pool.slice(0,3), rest=pool.length-top.length;
   const list=top.map(p=>`<b>${esc(p.desc)}</b> ${over?"+":"−"}${money0(Math.abs(p.delta))}${p.isNew?" (new)":""}`).join(", ");
   return `<div id="drivers" style="font-size:13px;margin:0 0 10px;line-height:1.5">
@@ -2216,8 +2282,10 @@ function driversNote(name,prods,range){
 }
 const deltaChip=p=>{
   if(p.isNew) return `<span class="up">+${money(p.spend)}</span> <span class="pill" title="never bought before this range">new</span>`;
-  if(Math.abs(p.delta)<0.5) return `<span style="color:var(--dim)">–</span>`;
-  return `<span class="${p.delta>0?"up":"down"}" title="usual ${money(p.usualSpend)}">${p.delta>0?"+":"−"}${money(Math.abs(p.delta))}</span>`;
+  const how=p.usualHow==="occasional"?" — bought now and then, so its 12-week average":"";
+  /* Under DELTA_MIN either way is noise, not a finding: shown dim, never red or green. */
+  if(Math.abs(p.delta)<DELTA_MIN) return `<span style="color:var(--dim)" title="usual ${money(p.usualSpend)}${how}">${Math.abs(p.delta)<0.5?"–":(p.delta>0?"+":"−")+money0(Math.abs(p.delta))}</span>`;
+  return `<span class="${p.delta>0?"up":"down"}" title="usual ${money(p.usualSpend)}${how}">${p.delta>0?"+":"−"}${money(Math.abs(p.delta))}</span>`;
 };
 function renderSupplierProducts(name){
   const m=rangeModel(), range=reportRange();
@@ -2253,9 +2321,9 @@ function renderSupplierProducts(name){
         <td class="num hide-sm" title="${p.baseFromBefore?"last paid before the range, "+fmtD(p.baseDate):"first price inside the range"}">${p.baseFromBefore?money(p.base):'<span style="color:var(--dim)">—</span>'}</td>
         <td class="num">${creepChip(p)}</td></tr>`).join("")}</tbody></table>
       <div class="note">Line totals with delivery and fees stripped, so this will not match the statement to the cent.
-        <b>vs usual</b> is the dollars above or below what this product usually costs over ${wksLabel(rangeScale(range).weeks)} —
-        its rate over the ${AVG_WEEKS} full weeks before the range${rangeScale(range).live?", pro-rated to the days so far":""} — so the
-        list opens with what is driving the total. The arrow after Qty says whether it was more of it (hover for the usual);
+        <b>vs usual</b> is the dollars above or below what this product usually comes to — ${usualWords(usualPlan(range))};
+        something bought now and then is measured against its ${USUAL_LONG_WEEKS}-week average. Under $${DELTA_MIN} either way is
+        shown grey. The list opens with what is driving the total. The arrow after Qty says whether it was more of it (hover for the usual);
         Change says whether it was the price. <b>Was</b> is the last price paid before the range; Change compares the latest
         price in the range with it, and is blank when nothing was bought before. Tap a product for its price history.</div>`
       :`<div class="note">No product lines from ${esc(name)} in ${esc(range.label)}.</div>`}
