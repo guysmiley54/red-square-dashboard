@@ -30,6 +30,7 @@
   .metric .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
   .metric .val{font-size:26px;font-weight:700;font-family:var(--mono);line-height:1.15}
   .metric .sub{font-size:11px;color:var(--dim);margin-top:2px}
+  #filters input[type=date]{border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px;font-family:var(--mono)}
   #filters{background:#fff;border-bottom:1px solid var(--line);padding:8px 14px;display:flex;flex-wrap:wrap;gap:7px;align-items:center;position:sticky;top:47px;z-index:19}
   main{max-width:1280px;margin:0 auto;padding:14px}
   .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
@@ -90,6 +91,11 @@
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:40;display:flex;align-items:center;justify-content:center;padding:16px}
   .modal .box{background:#fff;border-radius:12px;padding:18px;max-width:680px;width:100%;max-height:88vh;overflow:auto}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .help h2{font-size:17px;margin:22px 0 8px} .help h2:first-child{margin-top:0}
+  .help p,.help li{font-size:14px;line-height:1.55} .help ol,.help ul{padding-left:22px;margin:6px 0}
+  .help img{display:block;width:100%;max-width:1150px;border:1px solid var(--line);border-radius:8px;margin:8px 0 4px}
+  .help .cap{font-size:12px;color:var(--dim);margin-bottom:10px}
+  .help .b{display:inline-block;width:18px;height:18px;border-radius:50%;background:var(--red);color:#fff;font:700 11px/18px sans-serif;text-align:center;margin-right:4px}
   @media (max-width:760px){.grid2{grid-template-columns:1fr}}
   .sw{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
 </style>
@@ -101,11 +107,11 @@
     <span id="buildtag" style="font-size:9px;color:#666"></span></div>
   <div class="tag" id="tagpick"></div>
   <span class="spacer"></span>
-  <a class="hbtn" onclick="go('sales')">Sales</a>
-  <a class="hbtn" onclick="go('placed')">Placed</a>
-  <a class="hbtn" onclick="go('favs')">Favourites</a>
   <a class="hbtn" onclick="go('reports')">Reports</a>
+  <a class="hbtn" onclick="go('sales')">Sales</a>
+  <a class="hbtn" onclick="go('order')">Order</a>
   <a class="hbtn" onclick="go('admin')">Admin</a>
+  <a class="hbtn" onclick="go('help')" title="How to use this page">?</a>
   <button onclick="loadAll()">↻</button>
 </header>
 <div id="filters"></div>
@@ -113,23 +119,41 @@
 
 <script>
 /* =====================================================================================
-   ORDER BUILDER v3
+   CAMBRIDGE CENTRAL — Red Square Cambridge + Luma Kitchen, one ledger.
 
-   ONE LEDGER. Red Square Cambridge is the accounting entity: budget, income, spend and COGS
-   cover both kitchens as a single set of books. The Cambridge/Luma switch in the header is
-   an ORDER TAG — it sets what goes on the delivery docket and which address the supplier
-   sees, and it moves no money anywhere. Everything that split by site in v2 now aggregates.
+   Since v23 (29 Sep 2026) this file IS Glenorchy HQ (ghq-v16) with Cambridge's config: the
+   range bar, books/forecast header, Reports cards, supplier drill with "vs usual", the Sales
+   tab's refund rule, help page — all of it. A fix to one should be carried to the other; the
+   diff between them is kept to the config below and the few places marked CAMBRIDGE.
+
+   TWO TAGS, ONE LEDGER. Red Square Cambridge is the accounting entity; Cambridge and Luma are
+   delivery tags on it (same building, same address). The Cambridge / Luma switch in the header
+   shows only where it changes something — the Order tab, its builder, Placed, Favourites, and
+   the Sales tab (Adrian, 21 Sep 2026). The front page, Reports, the drills and Admin read the
+   whole ledger, so the switch is hidden there rather than left looking like it filters.
+
+   SETTINGS STAY WHERE CAMBRIDGE HAS ALWAYS KEPT THEM (Adrian, 29 Sep 2026). A supplier's
+   Ordering state is read from SupplierSettings: visible=no -> off, portal_only=yes -> portal,
+   otherwise here; changes are written back to those two columns. Turned-off items are the
+   hidden column of CategoryOverrides. Glenorchy HQ ignores all three and keeps its own lists
+   (SupplierVisibility / ItemVisibility, scope glenorchy), so the two sites never touch each
+   other's. Moving Cambridge to a scoped list needs Orders.gs gs-v14 and a one-time copy — see
+   claude/CENTRAL-HANDOVER.md §4 — and was deliberately not done here.
+
+   Drafts are kept under ob3_drafts — Cambridge Central's key since v3, so drafts in progress
+   carry across this upgrade. Both dashboards live on the same GitHub Pages origin; Glenorchy's
+   are under ghq_drafts and never count here.
 
    COGS ONLY. Rent, energy, waste, repairs and the other overheads are dropped at load, so
    they cannot reach a catalogue, a report, a group total or the countdown.
 
    Reads over gviz; writes through the Orders.gs web app, which is also where every global
-   setting lives — rep emails, supplier visibility, category overrides and favourites are
+   setting lives — rep emails, supplier settings, category overrides and favourites are
    the same for everyone opening the link.
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v22-1500"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v23-1330"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -137,13 +161,12 @@ const SALES_SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sal
 const SALES_CUTOVER  = "2026-08-03";
 const WEBAPP_URL     = "https://script.google.com/macros/s/AKfycbz4LRNzbabVhkQ2PT0v2IxSPboDpyBNcW2PCpjqVb6knLicd9_0V4bXE_2ltMKikzxQmg/exec";
 
-/* The ledger covers both kitchens. Glenorchy is a separate business, filtered out at the
-   first read of every row. */
+/* Cambridge and Luma. Glenorchy is a separate business, filtered out at the first read of
+   every row. */
 const LEDGER_VENUES = ["Red Square Cambridge","Luma Kitchen"];
 const ENTITY = "Red Square Cambridge";
 
-/* Delivery tags. Same street for both — the unit numbers on paperwork are per supplier, not
-   universal, so none is printed. */
+/* Two delivery tags, one set of books. */
 const TAGS = [
   { key:"cambridge", name:"Red Square Cambridge", short:"Cambridge", addr:"66 Kennedy Drive, Cambridge TAS 7170" },
   { key:"luma",      name:"Luma Kitchen",         short:"Luma",      addr:"66 Kennedy Drive, Cambridge TAS 7170" }
@@ -175,20 +198,26 @@ let GSEARCH="", GFOCUS=false, GCARET=0, GCAT_FILT="", GSORT={col:"freq",dir:-1};
 /* Every supplier's catalogue, built once per store and reused. Deriving twenty catalogues
    on each keystroke of a search box is the difference between instant and unusable. */
 let GCAT=null, GCAT_FOR=null;
+/* CAMBRIDGE: per tag on the Order tab, the whole ledger (both kitchens) everywhere else —
+   the switch isn't shown there, so the search must not quietly follow it. */
 function globalCatalogue(){
-  if(GCAT&&GCAT_FOR===TAG.name) return GCAT;
+  const v=onTagRoute()?TAG.name:null, key=v||"*";
+  if(GCAT&&GCAT_FOR===key) return GCAT;
   const out=[];
-  supplierList().forEach(s=>{
+  supplierList(undefined,{venue:v}).forEach(s=>{
     if(!s.visible) return;
-    deriveCatalogue(LINES,s.name,new Date()).forEach(p=>out.push(p));
+    deriveCatalogue(LINES,s.name,new Date(),{venue:v}).forEach(p=>out.push(p));
   });
-  GCAT=out; GCAT_FOR=TAG.name;
+  GCAT=out; GCAT_FOR=key;
   return out;
 }
 function clearCatalogueCache(){ GCAT=null; GCAT_FOR=null; }
 let HOME_INV=null;                     // supplier whose invoices are open on the order list
 let SORT={col:"name",dir:1};
-let RANGE={preset:"8w",from:null,to:null};
+/* The reading range for the front page and Reports — Supplier Explorer's control, which is
+   the one that has proved practical: Week / Month / Quarter / All time, stepped with ‹ ›, or
+   any two dates. Independent of WEEK_OFF, which is the ORDERING week on the Order tab. */
+let RANGE={kind:"week",off:0,from:null,to:null};
 let DRAFTS={}, LOCAL_ORDERS=[];
 
 /* ================= HELPERS ================= */
@@ -440,10 +469,17 @@ const supActive=n=>{const c=CFG[norm(n)];return c?c.active:true;};
 const rowGroup=r=>{const g=supGroup(r.supplier);return g!=="Ungrouped"?g:(r.category||"Ungrouped");};
 const isCogs=r=>!NON_COGS.has(String(rowGroup(r)||"").trim().toLowerCase());
 
-/* Global settings. Per-site routing is gone: a setting means the same thing in every view. */
+/* Rep email, cc and note are shared facts about the supplier. ORDERING is this dashboard's
+   own (Adrian, 18 Sep): here (on the Order tab), portal (spend everywhere, no ordering here —
+   they insist on their own platform), off (spend everywhere, no ordering here). Spend is
+   visible in every state; the moment a supplier vanished from the front page the header
+   total would stop adding up to the table. visible and portal_only are derived so the
+   ordering code keeps reading the names it always did. */
 function sset(name){
   const s=SSET[norm(name)]||{};
-  return { rep_email:s.rep_email||"", visible:s.visible!==false, portal_only:!!s.portal_only,
+  const ordering=s.ordering||"here";
+  return { rep_email:s.rep_email||"", ordering, orderHere:ordering==="here",
+           visible:ordering!=="off", portal_only:ordering==="portal",
            cc:s.cc||"", note:s.note||"" };
 }
 
@@ -463,6 +499,12 @@ const TAB_COLUMNS={
   "Favourites":["fav_id","fav_name","venue"],
   "FavouriteLines":["fav_id","item_key","qty"],
   "CategoryOverrides":["item_key","category"],
+  /* Created by Orders.gs on the first "turn off" from this dashboard. Until then gviz hands
+     back the first sheet instead, the signature check rejects it, and the load treats that as
+     "nothing turned off". */
+  "ItemVisibility":["item_key","scope","hidden"],
+  /* Same story: created by Orders.gs on the first supplier turned off from this dashboard. */
+  "SupplierVisibility":["supplier","scope","visible"],   // "ordering" arrived later and sits last; read when present
   "Sales":["date","venue","sales"]
 };
 async function fetchTab(name){
@@ -532,7 +574,7 @@ async function loadAll(){
   LOAD_WARN=[];
   try{
     const warn=l=>e=>{LOAD_WARN.push(l+": "+e.message);return [];};
-    const [inv,lines,cfgRows,pmRows,manRows,ordRows,ordLineRows,setRows,favRows,favLineRows,covRows,feed,weekly]=await Promise.all([
+    const [inv,lines,cfgRows,pmRows,manRows,ordRows,ordLineRows,setRows,favRows,favLineRows,covRows,feed,weekly,visRows,supVisRows]=await Promise.all([
       fetchTab("Invoices"),
       fetchTab("InvoiceLines"),
       fetchTab("SupplierConfig").catch(warn("SupplierConfig")),
@@ -545,7 +587,9 @@ async function loadAll(){
       fetchTab("FavouriteLines").catch(()=>[]),
       fetchTab("CategoryOverrides").catch(()=>[]),
       fetchSalesDaily().catch(warn("sales feed")),
-      fetchWeeklySales(gvizDate(SALES_CUTOVER)).catch(warn("weekly Sales tab"))
+      fetchWeeklySales(gvizDate(SALES_CUTOVER)).catch(warn("weekly Sales tab")),
+      Promise.resolve([]),   // ItemVisibility — Glenorchy HQ's list, not read here (CAMBRIDGE)
+      Promise.resolve([])    // SupplierVisibility — likewise
     ]);
 
     CFG={};
@@ -559,7 +603,7 @@ async function loadAll(){
        downstream can reintroduce it. */
     INV=inv.map(r=>({venue:r.venue||"",supplier:r.supplier||"",number:String(r.invoice_number||""),
       date:gvizDate(r.invoice_date)||gvizDate(r.scanned),subtotal:num_(r.subtotal),gst:num_(r.gst),
-      total:num_(r.total),category:r.category||"",type:r.type||"invoice",src:r.source||"",
+      total:num_(r.total),freight:num_(r.freight),category:r.category||"",type:r.type||"invoice",src:r.source||"",
       scannedAt:gvizDateTime(r.scanned)}))
       .filter(r=>r.supplier&&r.date&&r.type!=="superseded"&&LEDGER_VENUES.indexOf(r.venue)>=0);
 
@@ -588,6 +632,7 @@ async function loadAll(){
       const k=String(r.item_key||"").trim(); if(!k) return;
       const c=String(r.category||"").trim();
       if(c) COVER[k]=c;
+      /* CAMBRIDGE: the hidden column is this dashboard's turned-off list. */
       if(String(r.hidden||"").trim().toLowerCase()==="yes") HIDDEN[k]=true;
     });
 
@@ -616,11 +661,14 @@ async function loadAll(){
     LINES.forEach(l=>{ l.key=prodKey(l.supplier,l.code,l.desc,l.unit);
                        l.cat=categorise(l.supplier,l.desc,l.invCategory,l.key); });
 
+    /* CAMBRIDGE: Ordering comes from SupplierSettings, as it always has for this dashboard —
+       visible=no is off, portal_only=yes is portal, anything else is here. Rep email, cc and
+       note are shared facts about the supplier. */
     SSET={};
     setRows.forEach(r=>{const k=norm(r.supplier);if(!k)return;
-      SSET[k]={rep_email:String(r.rep_email||"").trim(),
-               visible:String(r.visible||"").trim().toLowerCase()!=="no",
-               portal_only:String(r.portal_only||"").trim().toLowerCase()==="yes",
+      const off=String(r.visible||"").trim().toLowerCase()==="no";
+      const portal=String(r.portal_only||"").trim().toLowerCase()==="yes";
+      SSET[k]={rep_email:String(r.rep_email||"").trim(), ordering:off?"off":portal?"portal":"here",
                cc:String(r.cc||"").trim(), note:String(r.note||"").trim()};});
 
     const favLines={};
@@ -710,17 +758,21 @@ function parseOrders(rows,lineRows){
 }
 
 /* ================= INCOME, SPEND, COUNTDOWN =================
-   One ledger: every figure below sums both kitchens. */
+   One ledger, two kitchens. */
 const currentWeek=today=>{const s=addD(weekStart(today||new Date()),WEEK_OFF*7);
-  const e=addD(s,6);e.setHours(23,59,59,999);return {start:s,end:e};};
+  const e=addD(s,6);e.setHours(23,59,59,999);return {start:s,end:e,kind:"week"};};
+/* Catch-up: off on every load, so it is reached for, never left on. One state for the front
+   page and the Order tab, so the envelope is the same number wherever it is read. */
+let CATCHUP=false;
+function toggleCatchup(){ CATCHUP=!CATCHUP; renderFilters(); route(); }
 const weekLabel=wk=>fmtD(wk.start)+" – "+fmtD(wk.end)+(WEEK_OFF===0?" (this week)":WEEK_OFF===-1?" (last week)":"");
 function dailySales(rows){
   const m={};
   (rows||[]).forEach(r=>{ if(!r.date) return; const k=fmtISO(r.date); m[k]=(m[k]||0)+(r.sales||0); });
   return m;
 }
-/* A day with no feed rows is no data, not zero takings — Luma is shut Mondays and would
-   otherwise drag the entity's Monday average down every week. */
+/* A day with no feed rows is no data, not zero takings — a closed day would otherwise
+   drag that weekday's average down every week. */
 function dowProfile(map,wkStart,weeks){
   const acc=Array.from({length:7},()=>({s:0,n:0}));
   for(let w=1;w<=weeks;w++) for(let d=0;d<7;d++){
@@ -730,17 +782,23 @@ function dowProfile(map,wkStart,weeks){
   }
   return acc.map(a=>a.n?a.s/a.n:0);
 }
-function forecastWeek(map,wk,today,profile){
+/* Any period: a week, a month, a quarter, two dates. Days already gone count what they took;
+   today takes the larger of what it has taken and what a normal today takes; days to come
+   take their weekday's usual. A period entirely in the past is therefore actual = forecast,
+   and a month in progress is month-to-date plus a normal remainder. profile is indexed by
+   weekday (0 = Monday), so the period may start on any day. */
+function forecastPeriod(map,period,today,profile){
   const t=mid(today||new Date()); let actual=0,forecast=0; const days=[];
-  for(let d=0;d<7;d++){
-    const dt=addD(wk.start,d),iso=fmtISO(dt),a=map[iso]||0;
+  for(let dt=mid(period.start); +dt<=+period.end; dt=addD(dt,1)){
+    const iso=fmtISO(dt),a=map[iso]||0,dow=(dt.getDay()+6)%7;
     const isToday=+dt===+t,past=+dt<+t;
-    const used=past?a:(isToday?Math.max(a,profile[d]||0):(profile[d]||0));
+    const used=past?a:(isToday?Math.max(a,profile[dow]||0):(profile[dow]||0));
     actual+=a; forecast+=used;
-    days.push({iso,dow:d,actual:a,used,past,isToday,est:!past&&!(isToday&&a>=(profile[d]||0))});
+    days.push({iso,dow,actual:a,used,past,isToday,est:!past&&!(isToday&&a>=(profile[dow]||0))});
   }
   return {actual,forecast,days};
 }
+const forecastWeek=forecastPeriod;
 /* Every supplier counts, portal-only included: hiding a supplier from the ordering screen
    must never hide their money. Non-COGS never reaches here — it was dropped at load. */
 function capturedSpend(inv,wk){
@@ -826,39 +884,83 @@ function gstRate(supplier){
   const r=gst/sub;
   return r<0.005?0:Math.min(0.1,Math.round(r*1000)/1000);
 }
-function weekModel(today){
-  const wk=currentWeek(today), now=today||new Date();
+/* The countdown for ANY period. The weekday profile is always the most recent DOW_WEEKS
+   complete weeks — for the current week that is what it always was; for a month in
+   progress it is the freshest read on what the remaining days will take.
+
+   Drafts only count while the period is live: a draft sitting in the browser belongs to the
+   order about to be placed, not to last month. Open orders count whenever their date falls
+   in the period, since an order still awaiting its invoice is money that period has spent.
+
+   A finished period's "left to spend" is budget minus actual, which is the running tally —
+   a heavy week after a quiet weekend shows here as the amount to claw back next period. */
+/* FORECAST ONLY IN WEEK MODE (Adrian, 17 Sep). The countdown — income forecast, 30%
+   envelope, minus what is used — is a lever for the orders about to go out, and a lever
+   needs a short horizon. Over a month "left to spend $8k" is true and useless, and
+   forecasting spend to fix it would presume the decision instead of informing it. So a
+   live week is a countdown; anything else is the books to date, no forecast anywhere, and
+   the fourth tile is the TALLY: 30% of income to date minus spend to date. Negative is the
+   amount to claw back; the week countdown is where it gets clawed back. */
+function periodModel(period,today,opts){
+  opts=opts||{};
+  const now=today||new Date(), t=mid(now);
   const map=dailySales(SALES);
-  const profile=dowProfile(map,wk.start,DOW_WEEKS);
-  const sales=forecastWeek(map,wk,now,profile);
-  const cap=capturedSpend(INV,wk);
-  const open=openOrders(ORDERS.concat(LOCAL_ORDERS),INV,wk,now);
+  const live=+t>=+mid(period.start)&&+t<=+period.end;
+  const countdown=live&&period.kind==="week";
+  const profile=countdown?dowProfile(map,weekStart(t),DOW_WEEKS):Array(7).fill(0);
+  const sales=forecastPeriod(map,period,now,profile);
+  if(!countdown) sales.forecast=sales.actual;
+  const cap=capturedSpend(INV,period);
+  const open=openOrders(ORDERS.concat(LOCAL_ORDERS),INV,period,now);
   const committed=open.reduce((s,o)=>s+o.total,0);
-  const drafted=allDraftTotal();
-  const budget=sales.forecast*TARGET_COGS_PCT/100;
+  const drafted=live?allDraftTotal():0;
   const used=cap.cogs+committed+drafted;
-  return {wk,sales,cap,open,committed,drafted,used,budget,remaining:budget-used,
+  /* Catch-up: the calendar month's tally up to the day before this week, folded into this
+     week's envelope. Resets by itself in a week that starts on the 1st. Open orders from
+     those earlier weeks count as their spend, exactly as they do inside a week. */
+  let catchup=null;
+  if(countdown&&opts.catchup){
+    const from=new Date(period.start.getFullYear(),period.start.getMonth(),1), to=endOfDay(addD(period.start,-1));
+    if(+from<=+to){
+      const win={start:from,end:to};
+      const inc=Object.keys(map).reduce((a,k)=>{const d=gvizDate(k);return d&&d>=from&&d<=to?a+map[k]:a;},0);
+      const sp=capturedSpend(INV,win).cogs+openOrders(ORDERS.concat(LOCAL_ORDERS),INV,win,now).reduce((a,o)=>a+o.total,0);
+      catchup={from,to,income:inc,spend:sp,tally:inc*TARGET_COGS_PCT/100-sp};
+    } else catchup={from,to,income:0,spend:0,tally:0};
+  }
+  const budget=sales.forecast*TARGET_COGS_PCT/100+(catchup?catchup.tally:0);
+  const allowed=sales.actual*TARGET_COGS_PCT/100;           // books mode: what 30% of income to date allows
+  return {wk:period,period,live,countdown,catchup,sales,cap,open,committed,drafted,used,budget,remaining:budget-used,
+    allowed,tally:allowed-(cap.cogs+committed),
     cogsActual: sales.actual>0?cap.cogs/sales.actual*100:0,
     cogsProjected: sales.forecast>0?used/sales.forecast*100:0};
 }
+/* Ordering routes: the ordering week, stepped with WEEK_OFF. */
+function weekModel(today){
+  const wk=currentWeek(today);
+  wk.short=WEEK_OFF===0?"this week":WEEK_OFF===-1?"last week":fmtD(wk.start)+" – "+fmtD(wk.end);
+  return periodModel(wk,today,{catchup:CATCHUP});
+}
+/* Reading routes: whatever the range bar says. */
+function rangeModel(today){ return periodModel(reportRange(),today,{catchup:CATCHUP}); }
 
 /* ================= CATALOGUE ================= */
 /* No master product list exists in the platform. What you buy IS the catalogue, derived
    from the invoice lines, so it needs no upkeep and prices follow the invoices. Charges are
    not stock and are stripped. */
-/* Ordering data is PER STORE; money is not. Cambridge and Luma each order their own stock,
-   so the catalogue, drafts, favourites and order history are scoped to the active tag —
-   while budget, income and the countdown stay pooled under the one accounting entity. Pass
-   venue:null to deliberately cross both (the reports' product drilldown does). */
+/* Ordering data is scoped to the active tag (only one here). venue:null crosses every
+   ledger venue — both kitchens here — kept so the code matches
+   Cambridge Central line for line. */
+/* Charges are not stock. "admin\s*fee" only ever caught the literal phrase, so "Admin
+   service fee", "Distribution Fee" and "Min Order Charge" all stayed in the catalogue —
+   and Fill Usual duly ordered twenty-two admin fees. Checked against all 2,030 distinct
+   descriptions in the data: this removes exactly six lines, every one a real charge.
+   Shared by the catalogue and the Reports top-10s, so both agree on what a product is. */
+const FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|\bfees?\b|\bcharges?\b|\bcartage\b|\bmin(imum)?\.?\s*order\b/i;
 function deriveCatalogue(lines,supplier,now,opts){
   opts=opts||{};
   const venue=opts.venue===undefined?TAG.name:opts.venue;
   const listDays=opts.listDays||CAT_DAYS, rateDays=opts.rateDays||RATE_DAYS;
-  /* Charges are not stock. "admin\s*fee" only ever caught the literal phrase, so "Admin
-     service fee", "Distribution Fee" and "Min Order Charge" all stayed in the catalogue —
-     and Fill Usual duly ordered twenty-two admin fees. Checked against all 2,030 distinct
-     descriptions in the data: this removes exactly six lines, every one a real charge. */
-  const FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|\bfees?\b|\bcharges?\b|\bcartage\b|\bmin(imum)?\.?\s*order\b/i;
   const t=+(now||new Date()),listFrom=t-listDays*864e5,rateFrom=t-rateDays*864e5;
   const map={};
   (lines||[]).forEach(l=>{
@@ -927,6 +1029,21 @@ function stableCat(p){
   return best?best[0]:categorise(p.supplier,p.desc,p.buys[0].invCategory,p.key);
 }
 
+/* ---- "Usual week": the benchmark a week's spend is read against. Supplier Explorer's rule,
+   the one that has proved practical: a window shorter than four weeks is NOT divided by its
+   own span — a fortnightly supplier would read as double in the week they delivered and
+   vanish the next. Take the real spend over the AVG_WEEKS complete weeks before `before`
+   and divide by AVG_WEEKS. Weeks with no delivery count as zero weeks, because a supplier you
+   buy from fortnightly really does average half as much. `before` is a week start, so the
+   current (partial) week never dilutes its own benchmark. Same row filter as spendRows. */
+const AVG_WEEKS=4;
+function usualWeek(before,keyOf){
+  const end=mid(before), start=addD(end,-7*AVG_WEEKS), m={};
+  INV.forEach(r=>{ if(!r.date||r.date<start||r.date>=end||!supActive(r.supplier)) return;
+    const k=keyOf(r); m[k]=(m[k]||0)+r.total; });
+  Object.keys(m).forEach(k=>m[k]/=AVG_WEEKS);
+  return m;
+}
 function supplierList(now,opts){
   opts=opts||{};
   const venue=opts.venue===undefined?TAG.name:opts.venue;
@@ -949,10 +1066,10 @@ function supplierList(now,opts){
     }
     if(!s.last||r.date>s.last) s.last=r.date;
   });
-  const wks=CAT_DAYS/7;
+  const wks=CAT_DAYS/7, usual=usualWeek(wk.start,r=>r.supplier);
   return Object.values(m).map(s=>{
     const cfg=sset(s.name);
-    s.group=supGroup(s.name); s.avgWk=s.spend/wks;
+    s.group=supGroup(s.name); s.avgWk=s.spend/wks; s.usualWk=usual[s.name]||0;
     /* Against the same point of the week across recent weeks, averaged over ALL of them —
        including the ones with no delivery, since a supplier you buy from fortnightly really
        does average half as much. A supplier with no history at this point of the week has
@@ -963,12 +1080,12 @@ function supplierList(now,opts){
     s.vsUsual=(s.usualToDate!=null&&s.usualToDate>0)?(s.week-s.usualToDate)/s.usualToDate*100:null;
     s.daysSince=Math.round((t-+s.last)/864e5);
     s.lines=LINES.some(l=>l.supplier===s.name&&(!venue||l.venue===venue));
-    s.visible=cfg.visible; s.portal=cfg.portal_only; s.rep=cfg.rep_email;
-    s.orderable=s.visible&&s.lines;
+    s.ordering=cfg.ordering; s.visible=cfg.visible; s.portal=cfg.portal_only; s.rep=cfg.rep_email;
+    s.orderable=cfg.orderHere&&s.lines;
     return s;
   }).sort((a,b)=>b.avgWk-a.avgWk);
 }
-const orderableSuppliers=()=>supplierList().filter(s=>s.orderable&&(!HIDE_PORTAL||!s.portal));
+const orderableSuppliers=()=>supplierList().filter(s=>s.orderable);
 function supplierEmail(name){
   const cfg=sset(name);
   if(cfg.rep_email) return cfg.rep_email;
@@ -1018,8 +1135,7 @@ function orderTotals(supplier,venue){
   const sub=lines.reduce((s,l)=>s+l.total,0);
   return {lines,sub,gst:sub*rate,total:sub+sub*rate,rate};
 }
-/* Every open draft at BOTH stores counts against the countdown — one ledger, so a Luma
-   draft spends Cambridge's budget just as a Cambridge one does. */
+/* Every open draft counts against the countdown. */
 function allDraftTotal(){
   let t=0;
   Object.values(DRAFTS).forEach(d=>{ if(d&&d.supplier) t+=orderTotals(d.supplier,d.tag).total; });
@@ -1027,8 +1143,13 @@ function allDraftTotal(){
 }
 
 /* ================= UI SHELL ================= */
+/* CAMBRIDGE: the switch only where it changes something (Adrian, 21 Sep 2026). */
+function tagRoute(h){ return h==="order"||h==="placed"||h==="favs"||h==="sales"||h.startsWith("s::"); }
+function onTagRoute(){ return tagRoute(decodeURIComponent(location.hash.slice(1))); }
 function renderTagPicker(){
-  document.getElementById("tagpick").innerHTML=
+  const el=document.getElementById("tagpick");
+  el.style.display=(TAGS.length<2||!onTagRoute())?"none":"";
+  el.innerHTML=TAGS.length<2||!onTagRoute()?"":
     TAGS.map(t=>`<button class="${TAG.key===t.key?"sel":""}" onclick="setTag('${t.key}')" title="Delivery tag only — all money sits under ${esc(ENTITY)}">${esc(t.short)}</button>`).join("");
 }
 function setTag(k){
@@ -1042,7 +1163,9 @@ function setTag(k){
 function renderFilters(){
   /* The Sales tab carries its own period control. Showing the ordering week stepper above it
      put two date pickers on one screen where only the lower one moved the data. */
-  if(location.hash.slice(1)==="sales"){ document.getElementById("filters").innerHTML=""; return; }
+  const h=decodeURIComponent(location.hash.slice(1));
+  if(h==="sales"||h==="help"){ document.getElementById("filters").innerHTML=""; return; }
+  if(!isOrderingRoute(h)){ document.getElementById("filters").innerHTML=rangeBar(); return; }
   document.getElementById("filters").innerHTML=`
     <span class="chip sm on" style="cursor:default" title="Ordering for delivery to ${esc(TAG.name)}">Tag: ${esc(TAG.short)}</span>
     <span class="chip sm" style="cursor:default;background:#f7f6f3">Books: ${esc(ENTITY)}</span>
@@ -1050,14 +1173,20 @@ function renderFilters(){
     <span class="chip sm" onclick="stepWeek(-1)">‹</span>
     <span class="chip sm on" style="cursor:default">${esc(weekLabel(currentWeek()))}</span>
     <span class="chip sm" onclick="stepWeek(1)" ${WEEK_OFF>=0?'style="opacity:.35"':""}>›</span>
-    ${WEEK_OFF!==0?`<span class="chip sm" onclick="thisWeek()">this week</span>`:""}`;
+    ${WEEK_OFF!==0?`<span class="chip sm" onclick="thisWeek()">this week</span>`:""}
+    ${catchupChip(WEEK_OFF===0)}`;
 }
 function stepWeek(d){ if(WEEK_OFF+d>0) return; WEEK_OFF+=d; renderFilters(); route(); }
+/* Ordering routes carry the ordering-week stepper; everything else reads the books through
+   the range bar. Placed orders and favourites are ordering; the supplier and product drills
+   are reading. */
+function isOrderingRoute(h){ return h==="order"||h==="placed"||h==="favs"||h==="admin"||h.startsWith("s::"); }
 function thisWeek(){ WEEK_OFF=0; renderFilters(); route(); }
 function go(h){ location.hash=h; route(); }
 function warnBar(){ return LOAD_WARN.length?`<div class="err"><b>Some data didn't load.</b><br>${LOAD_WARN.map(esc).join("<br>")}</div>`:""; }
 
 function summaryBar(m){
+  if(!m.countdown) return booksBar(m);
   const b=Math.max(m.budget,1), seg=v=>Math.max(0,Math.min(100,v/b*100));
   const over=m.used>m.budget&&m.budget>0;
   const cls=m.cogsProjected<=TARGET_COGS_PCT?"good":"over";
@@ -1065,9 +1194,10 @@ function summaryBar(m){
      what is coming in, and what does that make the percentage. Spend first because it is the
      number being controlled; the COGS % last because it is the consequence of the other
      three rather than something you act on directly. */
+  const when=m.period.short||m.period.label||"this week";
   return `<div class="summary">
     <div class="tile">
-      <div class="k">Spent so far</div>
+      <div class="k">${m.live?"Spent so far":"Spent"} — ${esc(when)}</div>
       <div class="v">${money0(m.cap.cogs)}</div>
       <div class="sub">${m.cap.n} invoice(s) captured${m.committed?` · ${money0(m.committed)} awaiting invoice`:""}${m.drafted?` · ${money0(m.drafted)} in drafts`:""}</div>
     </div>
@@ -1076,17 +1206,45 @@ function summaryBar(m){
       <div class="v">${m.budget>0?money0(m.remaining):"—"}</div>
       <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i></div>
       <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Awaiting invoice ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span></div>
-      <div class="sub">${money0(m.used)} of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${over?" — <b style='color:var(--red)'>over</b>":""}</div>
+      <div class="sub">${money0(m.used)} of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${m.catchup?` ${m.catchup.tally<0?"less":"plus"} ${money0(Math.abs(m.catchup.tally))} ${m.catchup.tally<0?"over":"under"} from ${fmtD(m.catchup.from)} – ${fmtD(m.catchup.to)}`:""}${over?" — <b style='color:var(--red)'>over</b>":""}</div>
     </div>
     <div class="tile">
-      <div class="k">Income this week</div>
+      <div class="k">Income — ${esc(when)}</div>
       <div class="v">${money0(m.sales.actual)}</div>
-      <div class="sub">Forecast ${money0(m.sales.forecast)} · both kitchens</div>
+      <div class="sub">${m.live?`Forecast ${money0(m.sales.forecast)}`:"Period complete"}</div>
     </div>
     <div class="tile ${m.sales.forecast>0?cls:""}">
-      <div class="k">COGS % — projected vs ${TARGET_COGS_PCT}%</div>
+      <div class="k">COGS %${m.live?" — projected":""} vs ${TARGET_COGS_PCT}%</div>
       <div class="v">${m.sales.forecast>0?pct1(m.cogsProjected):"—"}</div>
-      <div class="sub">${m.sales.actual>0?`${pct1(m.cogsActual)} on income so far. `:""}Both kitchens, one set of books.</div>
+      <div class="sub">${m.live&&m.sales.actual>0?`${pct1(m.cogsActual)} on income so far. `:""}Both kitchens, one set of books.</div>
+    </div></div>`;
+}
+/* The books to date — no forecast. Same four positions as the countdown so the eye lands in
+   the same place: what went out, where that leaves you, what came in, the percentage. */
+function booksBar(m){
+  const when=m.period.short||m.period.label||"";
+  const spent=m.cap.cogs+m.committed, under=m.tally>=0;
+  const cls=m.sales.actual>0?(m.cogsActual<=TARGET_COGS_PCT-2?"good":m.cogsActual<=TARGET_COGS_PCT+2?"amber":"over"):"";
+  return `<div class="summary">
+    <div class="tile">
+      <div class="k">Spent — ${esc(when)}</div>
+      <div class="v">${money0(spent)}</div>
+      <div class="sub">${m.cap.n} invoice(s)${m.committed?` · ${money0(m.committed)} awaiting invoice`:""}${m.live?" · to date":""}</div>
+    </div>
+    <div class="tile ${m.sales.actual>0?(under?"good":"over"):""}">
+      <div class="k">Tally vs ${TARGET_COGS_PCT}% — ${esc(ENTITY)}</div>
+      <div class="v">${m.sales.actual>0?(under?"+":"−")+money0(Math.abs(m.tally)):"—"}</div>
+      <div class="sub">${m.sales.actual>0?`${money0(m.allowed)} allowed at ${TARGET_COGS_PCT}% of income, ${money0(spent)} spent — <b>${under?"under":"over"}</b>${m.live?" so far":""}`:"needs income"}</div>
+    </div>
+    <div class="tile">
+      <div class="k">Income — ${esc(when)}</div>
+      <div class="v">${money0(m.sales.actual)}</div>
+      <div class="sub">${m.live?"to date, no forecast":"period complete"}</div>
+    </div>
+    <div class="tile ${cls}">
+      <div class="k">COGS % vs ${TARGET_COGS_PCT}%</div>
+      <div class="v">${m.sales.actual>0?pct1(m.cogsActual):"—"}</div>
+      <div class="sub">${m.sales.actual>0?(m.cogsActual<=TARGET_COGS_PCT?(TARGET_COGS_PCT-m.cogsActual).toFixed(1)+" points under target":(m.cogsActual-TARGET_COGS_PCT).toFixed(1)+" points over target"):"needs income"}. Both kitchens, one set of books.</div>
     </div></div>`;
 }
 
@@ -1094,6 +1252,9 @@ function summaryBar(m){
 function route(){
   const h=decodeURIComponent(location.hash.slice(1));
   renderFilters();          // the bar belongs to the route, so it is decided here, once
+  renderTagPicker();        // and so does the Cambridge / Luma switch
+  if(h==="order"){ SUPPLIER=""; return renderOrderHome(); }
+  if(h==="help") return renderHelp();
   if(h==="admin") return renderAdmin();
   if(h==="favs") return renderFavs();
   if(h==="reports") return renderReports();
@@ -1117,18 +1278,26 @@ function route(){
    it is safe to scan once the base is spelled out beside it, which it was not when a bare
    red percentage sat next to a full-week average it had nothing to do with. */
 const DAYSHORT=new Date().toLocaleDateString("en-AU",{weekday:"short"});
-function renderHome(){
+/* Placed and Favourites only mean anything while ordering, so they sit inside the Order tab
+   as a chip row rather than in the header (Adrian, 18 Sep). */
+function orderTabs(cur){
+  const t=(k,l)=>`<span class="chip sm ${cur===k?"on":""}" onclick="go('${k}')">${l}</span>`;
+  return `<div style="display:flex;gap:6px;margin-bottom:10px">${t("order","Order")}${t("placed","Placed orders")}${t("favs","Favourites")}</div>`;
+}
+function renderOrderHome(){
   const m=weekModel(), all=supplierList();
-  const shown=all.filter(s=>s.orderable&&(!HIDE_PORTAL||!s.portal));
-  const portalCount=all.filter(s=>s.orderable&&s.portal).length;
+  const shown=all.filter(s=>s.orderable);
+  const portalCount=0;
   document.getElementById("app").innerHTML=`
-    ${warnBar()}${summaryBar(m)}
+    ${warnBar()}${summaryBar(m)}${orderTabs("order")}
     <div class="card">
       <div class="label">Start an order — ${esc(TAG.name)}</div>
       ${portalCount?`<div style="margin-bottom:10px"><span class="chip sm ${HIDE_PORTAL?"on":""}" onclick="togglePortal()">${HIDE_PORTAL?"portal-only hidden":"portal-only shown"} (${portalCount})</span></div>`:""}
       <table><thead><tr>
         <th style="width:30px"></th>
-        <th>Supplier</th><th class="num">Spend so far</th><th class="num hide-sm">Last delivery</th><th class="num">Draft</th>
+        <th>Supplier</th><th class="num">Spend so far</th>
+        <th class="num hide-sm" title="Average per week over the ${AVG_WEEKS} full weeks before this one">Usual/wk</th>
+        <th class="num hide-sm">Last delivery</th><th class="num">Draft</th>
       </tr></thead><tbody>
       ${shown.map(s=>{
         const d=DRAFTS[draftId(s.name,TAG.name)], n=d?Object.keys(d.qty||{}).length:0;
@@ -1140,9 +1309,10 @@ function renderHome(){
         return `<tr class="${n?"picked":""} ${openHere?"picked":""}">
           <td style="text-align:center;cursor:pointer;color:var(--dim)" onclick="toggleHomeInv('${esc(s.name)}')"
               title="Show invoices">${openHere?"▾":"▸"}</td>
-          <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.portal?' <span class="pill">portal</span>':""}${s.rep?"":' <span class="pill">no rep email</span>'}</td>
+          <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.rep?"":' <span class="pill">no rep email</span>'}</td>
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
             ${v!=null?`<br><span class="${s.week>=s.usualToDate?"up":"down"}" style="font-size:11px">${s.week>=s.usualToDate?"+":"−"}${money0(Math.abs(s.week-s.usualToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.usualToDate)} by ${esc(DAYSHORT)}</span>`:""}</td>
+          <td class="num hide-sm">${s.usualWk?money(s.usualWk):'<span style="color:var(--dim)">—</span>'}</td>
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
           <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
         </tr>`
@@ -1150,13 +1320,18 @@ function renderHome(){
              ${invoiceTable(s.name,TAG.name,15)}</td></tr>`:"");}).join("")}
       </tbody></table>
       ${shown.length?"":'<div class="note">No suppliers with itemised lines in the last '+CAT_DAYS+' days.</div>'}
-      <div class="note" id="homenote">Ordering is per store — this list, the catalogue, drafts and favourites are
-        <b>${esc(TAG.name)}</b>. Budget and income are pooled across both kitchens.
+      <div class="note" id="homenote">This list, the catalogue, drafts and favourites are
+        <b>${esc(TAG.name)}</b>.
         <b>Spend so far</b> is this store's invoices for that supplier this week to date. Underneath is how that
         compares with the same day over the last 6 weeks — like for like, because measuring a Tuesday against a
-        whole week would show almost every supplier as down until Friday. Cost of goods only.</div>
+        whole week would show almost every supplier as down until Friday. <b>Usual/wk</b> is the average over the
+        ${AVG_WEEKS} full weeks before this one — a whole-week figure, so it is what Sunday's number should land near,
+        not Tuesday's. Cost of goods only.</div>
     </div>
     ${productSearchCard()}`;
+  wireGlobalSearch();
+}
+function wireGlobalSearch(){
   const g=document.getElementById("gsearch");
   if(g){
     g.addEventListener("input",e=>{
@@ -1169,10 +1344,65 @@ function renderHome(){
 }
 function togglePortal(){ HIDE_PORTAL=!HIDE_PORTAL; route(); }
 
+/* ================= HOME =================
+   The Supplier Explorer front page, for this venue: what was spent, with whom, against the
+   range in the bar above. Ordering moved to its own tab on 17 Sep 2026 — the front page is
+   for reading the books, the Order tab is for spending against them. */
+let SUPP_SORT={key:"spend",dir:-1};
+function sortSuppliers(k){ if(SUPP_SORT.key===k) SUPP_SORT.dir*=-1; else SUPP_SORT={key:k,dir:k==="name"?1:-1}; route(); }
+function avgNoteFor(d,range){
+  return d.short
+    ?`<b>Usual/wk</b> is the average over the ${AVG_WEEKS} full weeks before ${fmtD(range.start)}, not this range —
+       a week divided by itself is just the week. ▲▼ marks a range more than 10% off its usual.`
+    :`<b>Avg/wk</b> is spend ÷ ${wksLabel(d.weeks)}.`;
+}
+const wksLabel=w=>{const n=Math.round(w*10)/10;return n+(n===1?" week":" weeks");};
+function renderHome(){
+  const m=rangeModel(), range=reportRange(), d=spendRows(range);
+  const total=d.sup.reduce((s,x)=>s+x.spend,0), nInv=d.sup.reduce((s,x)=>s+x.n,0);
+  const K={name:x=>x.name.toLowerCase(),n:x=>x.n,spend:x=>x.spend,avgWk:x=>x.avgWk||0,last:x=>+(x.last||0)};
+  const fn=K[SUPP_SORT.key]||K.spend;
+  const sup=d.sup.slice().sort((a,b)=>{const x=fn(a),y=fn(b);return (x<y?-1:x>y?1:0)*SUPP_SORT.dir||a.name.localeCompare(b.name);});
+  const head=(k,l,cls)=>`<th class="s ${cls||""} ${SUPP_SORT.key===k?"act":""}" onclick="sortSuppliers('${k}')">${l}${SUPP_SORT.key===k?(SUPP_SORT.dir<0?" ▼":" ▲"):""}</th>`;
+  const avgHead=d.short?"Usual/wk":"Avg/wk";
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
+    ${productSearchCard({chips:false})}
+    <div class="card"><div class="label">Suppliers by spend — ${esc(range.label)}</div>
+      <table><thead><tr>${head("name","Supplier")}${head("n","Invoices","num hide-sm")}${head("spend","Total","num")}
+        ${head("avgWk",avgHead,"num")}${head("last","Last invoice","num hide-sm")}</tr></thead>
+      <tbody>${sup.map(x=>`<tr class="click" onclick="go('rsup::${encodeURIComponent(x.name)}')">
+        <td><b>${esc(x.name)}</b>${x.group&&x.group!=="Ungrouped"?` <span class="pill">${esc(x.group)}</span>`:""}${sset(x.name).portal_only?' <span class="pill">portal</span>':""}</td>
+        <td class="num hide-sm">${x.n}</td>
+        <td class="num"><b>${money(x.spend)}</b></td>
+        <td class="num">${x.avgWk?money(x.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(x)}</td>
+        <td class="num hide-sm">${fmtD(x.last)}</td></tr>`).join("")}</tbody>
+      ${sup.length?`<tfoot><tr><td><b>${sup.length} supplier${sup.length===1?"":"s"}</b></td><td class="num hide-sm">${nInv}</td>
+        <td class="num"><b>${money(total)}</b></td><td class="num"></td><td class="hide-sm"></td></tr></tfoot>`:""}
+      </table>
+      ${sup.length?"":`<div class="note">No invoices dated in ${esc(range.label)}.</div>`}
+      <div class="note">Tap a column to sort, a supplier for its products and invoices. Every supplier counts here
+        whatever its ordering setting — portal and off are hidden from ordering, never from spend. ${avgNoteFor(d,range)}</div>
+      <div style="margin-top:8px;font-size:12px"><a style="cursor:pointer;color:var(--dim);text-decoration:underline" onclick="go('admin')">⚙ supplier settings</a></div>
+    </div>
+    ${d.grp.length>1?`<div class="card"><div class="label">Spend by group — ${esc(range.label)}</div>
+      <table><thead><tr><th>Group</th><th class="num">Spend</th><th class="num hide-sm">${avgHead}</th><th class="num">%</th></tr></thead>
+      <tbody>${d.grp.map(g=>`<tr class="click" onclick="go('grp::${encodeURIComponent(g.name)}')">
+        <td><b>${esc(g.name)}</b></td><td class="num">${money(g.spend)}</td>
+        <td class="num hide-sm">${g.avgWk?money(g.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(g)}</td>
+        <td class="num">${total?pct1(g.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
+      <div class="note">Cost of goods only — ${money(total)} over ${wksLabel(d.weeks)}. Tap a group for its suppliers.</div>
+    </div>`:""}`;
+  wireGlobalSearch();
+}
+
 /* Find a product without knowing who sells it — the question you have standing in the
    coolroom. Searches every supplier at once, which is the point: the same thing often comes
    from two of them at two prices, and that is worth seeing side by side. */
-function productSearchCard(){
+/* chips:false is the front page — a plain search box, Supplier Explorer style. The category
+   chips stay on the Order tab, where browsing a category is how you find what to add. A chip
+   picked over there is ignored here rather than silently narrowing a box that shows no chip. */
+function productSearchCard(opts){
+  const chips=!(opts&&opts.chips===false);
   const q=GSEARCH.trim().toLowerCase();
   const all=globalCatalogue();
   /* Counts come from the text match alone, so each chip shows what it would give you rather
@@ -1184,22 +1414,23 @@ function productSearchCard(){
   pool.forEach(p=>{counts[p.cat]=(counts[p.cat]||0)+1;});
   const cats=Object.keys(counts).sort();
   /* A category on its own is a valid search: "show me everything in Frozen". */
-  const browsing=!!GCAT_FILT&&q.length<2;
+  const catFilt=chips?GCAT_FILT:"";
+  const browsing=!!catFilt&&q.length<2;
   let rows=[];
   if(q.length>=2||browsing){
-    rows=sortGlobal(pool.filter(p=>!GCAT_FILT||p.cat===GCAT_FILT));
+    rows=sortGlobal(pool.filter(p=>!catFilt||p.cat===catFilt));
   }
   const shown=rows.slice(0,40);
   return `<div class="card">
     <div class="label">Find a product — every supplier</div>
     <input type="search" id="gsearch" placeholder="Search all products…" value="${esc(GSEARCH)}">
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+    ${chips?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
       <span class="chip sm ${GCAT_FILT?"":"on"}" onclick="setGCat('')">All</span>
       ${cats.map(c=>`<span class="chip sm ${GCAT_FILT===c?"on":""}" onclick="setGCat('${esc(c)}')">${esc(c)} <span style="color:var(--dim);font-weight:400">${counts[c]}</span></span>`).join("")}
-    </div>
-    ${q.length<2&&!browsing?`<div class="note">Type at least two characters, or pick a category to browse it.
+    </div>`:""}
+    ${q.length<2&&!browsing?`<div class="note">Type at least two characters${chips?", or pick a category to browse it":""}.
         Searches every supplier for ${esc(TAG.name)}.</div>`
-     :!rows.length?`<div class="note">Nothing matching ${q.length>=2?`“${esc(GSEARCH)}”`:""}${q.length>=2&&GCAT_FILT?" in ":""}${GCAT_FILT?esc(GCAT_FILT):""} at ${esc(TAG.name)} in the last ${CAT_DAYS} days.</div>`
+     :!rows.length?`<div class="note">Nothing matching ${q.length>=2?`“${esc(GSEARCH)}”`:""}${q.length>=2&&catFilt?" in ":""}${catFilt?esc(catFilt):""} at ${esc(TAG.name)} in the last ${CAT_DAYS} days.</div>`
      :`<table style="margin-top:8px"><thead><tr>
          ${gHead("name","Product")}${gHead("supplier","Supplier","hide-sm")}${gHead("cat","Category","hide-sm")}
          ${gHead("price","Unit price","num")}${gHead("qty90","90-day qty","num hide-sm")}
@@ -1275,7 +1506,7 @@ function renderBuilder(){
   const myFavs=FAVS.filter(f=>f.venue===TAG.name&&(!f.supplier||f.supplier===name));
   document.getElementById("app").innerHTML=`
     ${warnBar()}${summaryBar(m)}
-    <a class="back" onclick="go('')">All suppliers</a>
+    <a class="back" onclick="go('order')">Order</a>
     <div class="panels">
       <div><div class="card">
         <div class="label">${esc(name)} — catalogue</div>
@@ -1332,7 +1563,8 @@ function renderBuilder(){
         </tbody></table>
         ${rows.length?"":`<div class="note">Nothing bought from this supplier in the last ${CAT_DAYS} days.</div>`}
         <div class="note">Tick items to change their category in bulk, or to turn them off — delivery charges,
-          admin fees and one-off lines you will never order. Turned-off items stay in every spend total and
+          admin fees and one-off lines you will never order. Turning an item off here does not affect Glenorchy HQ;
+          categories are shared with Cambridge Central. Turned-off items stay in every spend total and
           report; they only leave the ordering screens. Click a product name for its unit price history.
           <b>Fill usual</b> is deliberately mean: the
           average quantity per order, rounded down, anything under ${FILL_FLOOR_CUTOFF} left at zero, and the whole
@@ -1453,12 +1685,15 @@ async function bulkHide(off){
   const keys=Object.keys(PICKED).filter(k=>PICKED[k]);
   if(!keys.length) return;
   const cat2=deriveCatalogue(LINES,SUPPLIER,new Date(),{venue:null});
+  /* CAMBRIDGE: the hidden column of CategoryOverrides, as before. The category rides along
+     so a row written for the first time carries the one on screen. Glenorchy HQ never
+     reads this column. */
   const items=keys.map(k=>{const p=cat2.find(x=>x.key===k);
     return {item_key:k,hidden:off?"yes":"no",supplier:p?p.supplier:SUPPLIER,description:p?p.desc:"",
             category:COVER[k]||""};});
   keys.forEach(k=>{ if(off) HIDDEN[k]=true; else delete HIDDEN[k]; });
   PICKED={};
-  try{ await post({action:"category_bulk",items}); toast(`${keys.length} product(s) turned ${off?"off":"back on"} for everyone.`); }
+  try{ await post({action:"category_bulk",items}); toast(`${keys.length} product(s) turned ${off?"off":"back on"} at Cambridge and Luma.`); }
   catch(e){ if(e.message==="no-webapp") toast("Changed here only — WEBAPP_URL isn't set."); else alert(e.message); }
   route();
 }
@@ -1563,91 +1798,344 @@ async function saveCategory(key,cat,p){
 }
 
 /* ================= REPORTS ================= */
-const RANGE_PRESETS=[["This week",1],["4w",4],["8w",8],["13w",13],["26w",26]];
+const endOfDay=d=>{const e=new Date(d);e.setHours(23,59,59,999);return e;};
 function reportRange(){
-  const wk=currentWeek();
-  if(RANGE.preset==="custom"&&RANGE.from&&RANGE.to){
+  const now=mid(new Date()), o=RANGE.off||0;
+  if(RANGE.kind==="custom"&&RANGE.from&&RANGE.to){
     const a=gvizDate(RANGE.from), b=gvizDate(RANGE.to);
-    if(a&&b&&a<=b){ const e=new Date(b); e.setHours(23,59,59,999);
-      return {start:a,end:e,label:fmtD(a)+" – "+fmtD(b)}; }
+    if(a&&b&&a<=b) return {start:mid(a),end:endOfDay(b),label:fmtD(a)+" – "+fmtD(b),short:fmtD(a)+" – "+fmtD(b),kind:"custom"};
   }
-  const weeks=(RANGE_PRESETS.find(p=>p[0]===RANGE.preset)||["8w",8])[1];
-  return {start:addD(wk.start,-7*(weeks-1)),end:wk.end,
-          label:weeks===1?("week of "+fmtD(wk.start)):(weeks+" weeks to "+fmtD(wk.end))};
+  if(RANGE.kind==="all"){
+    const first=INV.reduce((m,r)=>(r.date&&(!m||r.date<m))?r.date:m,null)||now;
+    return {start:mid(first),end:endOfDay(now),label:"all captured data",short:"all time",kind:"all"};
+  }
+  if(RANGE.kind==="month"){
+    const a=new Date(now.getFullYear(),now.getMonth()+o,1), b=new Date(a.getFullYear(),a.getMonth()+1,0);
+    const lbl=a.toLocaleDateString("en-AU",{month:"long",year:"numeric"});
+    return {start:a,end:endOfDay(b),label:lbl,short:lbl,kind:"month"};
+  }
+  if(RANGE.kind==="quarter"){
+    const q=Math.floor(now.getMonth()/3)+o;
+    const a=new Date(now.getFullYear(),q*3,1), b=new Date(a.getFullYear(),a.getMonth()+3,0);
+    const lbl="Q"+(a.getMonth()/3+1)+" "+a.getFullYear();
+    return {start:a,end:endOfDay(b),label:lbl,short:lbl,kind:"quarter"};
+  }
+  const a=addD(weekStart(now),7*o), b=addD(a,6);
+  return {start:a,end:endOfDay(b),label:fmtD(a)+" – "+fmtD(b)+(o===0?" (this week)":o===-1?" (last week)":""),
+          short:o===0?"this week":o===-1?"last week":fmtD(a)+" – "+fmtD(b),kind:"week"};
 }
 function spendRows(range){
   const bySup={},byGrp={};
   INV.forEach(r=>{
     if(!r.date||r.date<range.start||r.date>range.end||!supActive(r.supplier)) return;
     const g=rowGroup(r);
-    (bySup[r.supplier]=bySup[r.supplier]||{name:r.supplier,spend:0,n:0,group:g}).spend+=r.total;
+    (bySup[r.supplier]=bySup[r.supplier]||{name:r.supplier,spend:0,n:0,group:g,last:null}).spend+=r.total;
     bySup[r.supplier].n++;
+    if(!bySup[r.supplier].last||r.date>bySup[r.supplier].last) bySup[r.supplier].last=r.date;
     (byGrp[g]=byGrp[g]||{name:g,spend:0,n:0}).spend+=r.total; byGrp[g].n++;
   });
   const weeks=Math.max(1,(range.end-range.start)/864e5/7);
-  const fin=o=>{o.perWk=o.spend/weeks;return o;};
-  return {sup:Object.values(bySup).map(fin).sort((a,b)=>b.spend-a.spend),
-          grp:Object.values(byGrp).map(fin).sort((a,b)=>b.spend-a.spend), weeks};
+  /* Under four weeks the range's own per-week rate is noise (see usualWeek); the column
+     becomes the benchmark from before the range, and the arrow says how this range sits
+     against it. Four weeks or more, the range's own average is a fair number and stands. */
+  const short=weeks<AVG_WEEKS;
+  const uS=short?usualWeek(range.start,r=>r.supplier):{}, uG=short?usualWeek(range.start,rowGroup):{};
+  const fin=u=>o=>{ o.perWk=o.spend/weeks; o.avgWk=short?(u[o.name]||0):o.perWk;
+    o.trend=short&&o.avgWk>0?(o.perWk-o.avgWk)/o.avgWk:null; return o; };
+  return {sup:Object.values(bySup).map(fin(uS)).sort((a,b)=>b.spend-a.spend),
+          grp:Object.values(byGrp).map(fin(uG)).sort((a,b)=>b.spend-a.spend), weeks, short};
 }
+/* Lives in the sticky #filters strip on every reading route, so the range is one control
+   and every card under it agrees. */
 function rangeBar(){
-  const r=reportRange();
-  return `<div class="card" style="padding:10px 14px">
-    <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-      <span class="label" style="margin:0">Range</span>
-      ${RANGE_PRESETS.map(([k])=>`<span class="chip sm ${RANGE.preset===k?"on":""}" onclick="setRange('${k}')">${k}</span>`).join("")}
-      <span class="chip sm ${RANGE.preset==="custom"?"on":""}" onclick="setRange('custom')">custom</span>
-      <span class="chip sm" onclick="resetRange()" title="Back to 8 weeks ending this week">reset</span>
-      ${RANGE.preset==="custom"?`
-        <input type="date" id="rfrom" value="${esc(RANGE.from||fmtISO(r.start))}" style="font-size:13px;padding:6px 8px">
-        <input type="date" id="rto" value="${esc(RANGE.to||fmtISO(r.end))}" style="font-size:13px;padding:6px 8px">
-        <span class="chip sm" onclick="applyCustom()">apply</span>`:""}
-      <span style="flex:1"></span>
-      <span class="chip sm" onclick="stepWeek(-1)">‹</span>
-      <span class="chip sm" onclick="stepWeek(1)" ${WEEK_OFF>=0?'style="opacity:.35"':""}>›</span>
-      <span style="font-size:12px;color:var(--dim)">${esc(r.label)}</span>
-    </div>
-    <div class="note" style="margin-top:6px">A preset range ends on the selected week, so the ‹ › arrows move the
-      whole window. Over 8 or 26 weeks one week's shift barely moves the totals — pick <b>This week</b> to see
-      the arrows bite.</div></div>`;
+  const r=reportRange(), o=RANGE.off||0, step=RANGE.kind!=="all";
+  const chip=(k,l)=>`<span class="chip sm ${RANGE.kind===k?"on":""}" onclick="setRangeKind('${k}')">${l}</span>`;
+  return `<span class="chip sm" style="cursor:default;background:#f7f6f3">Books: ${esc(ENTITY)}</span>
+    <span style="color:var(--line)">|</span>
+    ${step?`<span class="chip sm" onclick="shiftRange(-1)" title="Previous period">‹</span>`:""}
+    ${chip("week","Week")}${chip("month","Month")}${chip("quarter","Quarter")}${chip("all","All time")}
+    ${step?`<span class="chip sm" onclick="shiftRange(1)" title="Next period" ${RANGE.kind!=="custom"&&o>=0?'style="opacity:.35"':""}>›</span>`:""}
+    <input type="date" id="rfrom" value="${fmtISO(r.start)}" onchange="applyRangeDates()">
+    <span style="color:var(--dim);font-size:12px">→</span>
+    <input type="date" id="rto" value="${fmtISO(mid(r.end))}" onchange="applyRangeDates()">
+    ${catchupChip(RANGE.kind==="week"&&o===0)}
+    <span style="flex:1"></span>
+    <span style="font-size:12px;color:var(--dim)">${esc(r.label)}</span>`;
 }
-function setRange(k){ RANGE.preset=k; route(); }
-function resetRange(){ RANGE={preset:"8w",from:null,to:null}; WEEK_OFF=0; renderFilters(); route(); }
-function applyCustom(){
-  RANGE.from=(document.getElementById("rfrom")||{}).value||null;
-  RANGE.to=(document.getElementById("rto")||{}).value||null;
-  route();
+/* One chip, only where a week envelope is on screen. Off on every load. */
+function catchupChip(show){
+  if(!show) return "";
+  return `<span class="chip sm ${CATCHUP?"on":""}" onclick="toggleCatchup()"
+    title="Fold this month's tally so far (30% of income less spend, up to the day before this week) into this week's envelope">catch-up${CATCHUP?" on":""}</span>`;
 }
+function setRangeKind(k){ RANGE={kind:k,off:0,from:null,to:null}; renderFilters(); route(); }
+function shiftRange(d){
+  if(RANGE.kind==="all") return;
+  if(RANGE.kind==="custom"){
+    const a=gvizDate(RANGE.from), b=gvizDate(RANGE.to); if(!a||!b) return;
+    const len=Math.round((mid(b)-mid(a))/864e5)+1;
+    RANGE.from=fmtISO(addD(a,d*len)); RANGE.to=fmtISO(addD(b,d*len));
+  } else { if(RANGE.off+d>0) return; RANGE.off+=d; }   // the books have no future
+  renderFilters(); route();
+}
+function applyRangeDates(){
+  const from=(document.getElementById("rfrom")||{}).value, to=(document.getElementById("rto")||{}).value;
+  const a=gvizDate(from), b=gvizDate(to);
+  if(!a||!b||a>b) return;
+  RANGE={kind:"custom",off:0,from,to}; renderFilters(); route();
+}
+function resetRange(){ RANGE={kind:"week",off:0,from:null,to:null}; renderFilters(); route(); }
+const trendMark=o=>o.trend==null?"":o.trend>0.1?' <span class="up">▲</span>':o.trend<-0.1?' <span class="down">▼</span>':' <span style="color:var(--dim)">–</span>';
+/* Product-level reading of the range. Supplier and group totals are the front page. */
 function renderReports(){
-  const m=weekModel(), range=reportRange(), d=spendRows(range);
-  const total=d.sup.reduce((s,x)=>s+x.spend,0);
-  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}${rangeBar()}
-    <div class="grid2">
-      <div class="card"><div class="label">Suppliers by spend — in range</div>
-        <table><thead><tr><th>Supplier</th><th class="num">Spend</th><th class="num hide-sm">Per week</th><th class="num">%</th></tr></thead>
-        <tbody>${d.sup.map(s=>`<tr class="click" onclick="go('rsup::${encodeURIComponent(s.name)}')">
-          <td><b>${esc(s.name)}</b>${sset(s.name).portal_only?' <span class="pill">portal</span>':""}</td>
-          <td class="num">${money(s.spend)}</td><td class="num hide-sm">${money(s.perWk)}</td>
-          <td class="num">${total?pct1(s.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
-        <div class="note">Totals follow the range above, not a fixed window. Portal-only suppliers are included —
-          hidden from ordering, never from spend.</div>
-      </div>
-      <div class="card"><div class="label">Spend by group — in range</div>
-        <table><thead><tr><th>Group</th><th class="num">Spend</th><th class="num hide-sm">Per week</th><th class="num">%</th></tr></thead>
-        <tbody>${d.grp.map(g=>`<tr class="click" onclick="go('grp::${encodeURIComponent(g.name)}')">
-          <td><b>${esc(g.name)}</b></td><td class="num">${money(g.spend)}</td>
-          <td class="num hide-sm">${money(g.perWk)}</td><td class="num">${total?pct1(g.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
-        <div class="note">Cost of goods only — ${money(total)} over ${Math.round(d.weeks*10)/10} weeks.</div>
-      </div>
-    </div>`;
+  const m=rangeModel(), range=reportRange(), prods=rangeProducts(range);
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
+    <div class="grid2">${repBoughtCard(range,prods)}${repSoldCard(range)}</div>
+    ${repWasteCard(range)}
+    ${repCreepCard(range,prods)}`;
 }
+/* ================= REPORTS: TOP 10s =================
+   The ordering screens answer "what does X cost today". These answer "where did the money
+   go" and "what did we actually sell" for the range on the chips above, which is a different
+   question and belongs with the other spend reports.
+
+   Products come from invoice lines (what you buy IS the catalogue — no master list exists),
+   grouped by the same key the ordering screens use, charges stripped by the same FEE test,
+   inactive suppliers excluded the same way spendRows does it. Line totals, not invoice
+   totals, so the column will not add up to "Suppliers by spend" — fees and GST live there. */
+let REP_SOLD_BY="sales", REP_CREEP_DIR="up";
+function setSoldBy(k){ REP_SOLD_BY=k; route(); }
+function setCreepDir(k){ REP_CREEP_DIR=k; route(); }
+
+/* "Usual" for a product over the range (Adrian, 21 Sep): its rate over the AVG_WEEKS complete
+   weeks before the range, scaled to the range's length — and PRO-RATED while the range is
+   still running, because a Tuesday measured against a whole usual week reads ▼ on everything.
+   Same window the supplier table's Usual/wk uses, so the two agree. */
+function rangeScale(range){
+  const days=Math.round((+mid(range.end)-+mid(range.start))/864e5)+1, t=mid(new Date());
+  const elapsed=+t<+mid(range.start)?0:+t>+mid(range.end)?days:Math.round((+t-+mid(range.start))/864e5)+1;
+  return {days,weeks:days/7,elapsed,live:elapsed<days,frac:days?elapsed/days:1};
+}
+/* more than usual = ▲. For spend that is the red one; for sales it is the green one. */
+function usualMark(actual,usual,kind){
+  if(!(usual>0)) return "";
+  const up=actual>usual*1.1, down=actual<usual*0.9;
+  if(!up&&!down) return ' <span style="color:var(--dim)">–</span>';
+  const good=(kind==="sales"||kind==="money")?up:down;
+  const fmt=kind==="money"?money0(usual):String(Math.round(usual*10)/10);
+  return ` <span class="${good?"down":"up"}" title="usual ${fmt}">${up?"▲":"▼"}</span>`;
+}
+const usualNote=sc=>`▲▼ compares with the product's <b>usual</b> — its rate over the ${AVG_WEEKS} full weeks before the range,
+  scaled to ${sc.weeks===1?"a week":wksLabel(sc.weeks)}${sc.live?` and pro-rated to the ${sc.elapsed} of ${sc.days} days so far`:""};
+  more or less than 10% off it earns an arrow, hover for the figure, nothing where the product was not seen before.`;
+function rangeProducts(range){
+  const map={}, sc=rangeScale(range), uFrom=addD(mid(range.start),-7*AVG_WEEKS);
+  LINES.forEach(l=>{
+    if(!l.date||!(l.price>0)||!(l.qty>0)||FEE.test(l.desc)||!supActive(l.supplier)) return;
+    if(l.date>range.end) return;
+    const k=l.key||prodKey(l.supplier,l.code,l.desc,l.unit);
+    const p=map[k]||(map[k]={key:k,supplier:l.supplier,desc:l.desc,unit:l.unit,cat:l.cat||"",before:[],inRange:[]});
+    if(l.date<range.start) p.before.push(l);
+    else { p.inRange.push(l); p.desc=l.desc; p.unit=l.unit; }
+  });
+  return Object.values(map).filter(p=>p.inRange.length).map(p=>{
+    p.inRange.sort((a,b)=>a.date-b.date); p.before.sort((a,b)=>a.date-b.date);
+    p.qty=p.inRange.reduce((s,b)=>s+b.qty,0);
+    p.spend=p.inRange.reduce((s,b)=>s+b.total,0);
+    p.price=p.inRange[p.inRange.length-1].price;
+    /* Baseline is the last price paid BEFORE the range — "what were we paying". With nothing
+       bought before it, the first price inside the range stands in, so a rise mid-range still
+       shows and a steady price reads as no change rather than as a phantom rise. */
+    const b0=p.before.length?p.before[p.before.length-1]:p.inRange[0];
+    p.base=b0.price; p.baseDate=b0.date; p.baseFromBefore=!!p.before.length;
+    p.change=p.base?(p.price-p.base)/p.base*100:null;
+    /* Extra paid: every delivery in the range priced against the baseline. Negative = saved. */
+    p.extra=p.inRange.reduce((s,b)=>s+b.qty*(b.price-p.base),0);
+    const uB=p.before.filter(b=>b.date>=uFrom);
+    p.usualWk=uB.reduce((s,b)=>s+b.qty,0)/AVG_WEEKS;
+    p.usualQty=p.usualWk*sc.weeks*(sc.live?sc.frac:1);
+    /* Usual SPEND by the same rule, so a supplier reading ▲ on the front page can be traced to
+       the products behind it (Adrian, 24 Sep 2026). delta is dollars above (or below) the run
+       rate; a product never bought before the range is all delta and is marked new. */
+    p.usualSpendWk=uB.reduce((s,b)=>s+b.total,0)/AVG_WEEKS;
+    p.usualSpend=p.usualSpendWk*sc.weeks*(sc.live?sc.frac:1);
+    p.delta=p.spend-p.usualSpend;
+    p.isNew=!p.before.length;
+    return p;
+  });
+}
+function creepChip(p){
+  if(p.change==null||Math.abs(p.change)<0.05) return `<span style="color:var(--dim)">—</span>`;
+  const up=p.change>0;
+  return `<span class="${up?"up":"down"}" title="was ${money(p.base)} ${p.baseFromBefore?"before this range ("+fmtD(p.baseDate)+")":"at the start of the range"}">${up?"▲":"▼"} ${Math.abs(Math.round(p.change*10)/10)}%</span>`;
+}
+const signed=v=>(v<0?"\u2212":"")+money(Math.abs(v));
+const qtyFmt=(q,u)=>`${Math.round(q*100)/100}${u?` <span style="color:var(--dim);font-size:11px">${esc(u)}</span>`:""}`;
+
+function repBoughtCard(range,prods){
+  const list=prods.slice().sort((a,b)=>b.spend-a.spend);
+  const tot=list.reduce((s,p)=>s+p.spend,0);
+  const top=list.slice(0,10);
+  const sc=rangeScale(range);
+  return `<div class="card"><div class="label">Top 10 purchased — by spend in range</div>
+    ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Supplier</th><th class="num">Qty</th>
+      <th class="num">Spend</th><th class="num hide-sm">%</th><th class="num">Price</th></tr></thead>
+      <tbody>${top.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
+        <td><b>${esc(p.desc)}</b></td>
+        <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
+        <td class="num">${qtyFmt(p.qty,p.unit)}${usualMark(p.qty,p.usualQty,"spend")}</td>
+        <td class="num"><b>${money(p.spend)}</b></td>
+        <td class="num hide-sm" style="color:var(--dim)">${tot?pct1(p.spend/tot*100):""}</td>
+        <td class="num">${money(p.price)} ${creepChip(p)}</td></tr>`).join("")}</tbody></table>
+      <div class="note">${list.length} products · ${money(tot)} on product lines in ${esc(range.label)}. Line totals with
+        delivery and fees stripped, so this will not match the supplier totals to the cent. Price is the latest paid
+        in the range; the arrow compares it with what you were paying before the range. ${usualNote(sc)} Tap a row for the history.</div>`
+      :`<div class="note">No product lines dated in ${esc(range.label)}.</div>`}</div>`;
+}
+
+/* The item feed for a range, shared by the sold and wastage cards. One status, one fetch:
+   loadSalesWeek is idempotent while busy, so both cards asking on the same render costs one
+   request. `prior` is the AVG_WEEKS complete weeks before the range, for "usual", fetched
+   second so the range itself always lands first. */
+function feedFor(range){
+  const feedStart=gvizDate(SALES_CUTOVER);
+  const days=Math.round((+mid(range.end)-+mid(range.start))/864e5)+1;
+  if(feedStart&&range.end<feedStart) return {status:"pre",feedStart};
+  if(days>SALES_MAX_DAYS) return {status:"wide",days};
+  const start=feedStart&&range.start<feedStart?feedStart:range.start;
+  const w={start,end:range.end}, k=sdKey(w);
+  if(!SD[k]){ loadSalesWeek(w); return {status:"loading",start}; }
+  if(SD_ERR&&!SD[k].length) return {status:"err"};
+  const out={status:"ok",rows:SD[k],start,w,k,prior:null};
+  let ps=addD(mid(range.start),-7*AVG_WEEKS); if(feedStart&&ps<feedStart) ps=feedStart;
+  const pe=endOfDay(addD(mid(range.start),-1));
+  if(+ps<+pe){
+    const pw={start:ps,end:pe}, pk=sdKey(pw);
+    if(!SD[pk]) loadSalesWeek(pw);
+    else out.prior={rows:sdSales(SD[pk]),days:Math.round((+mid(pe)-+mid(ps))/864e5)+1};
+    out.priorPending=!SD[pk];
+  }
+  return out;
+}
+function feedNote(f,head,range){
+  if(f.status==="pre") return `<div class="card">${head}<div class="note">Item-level sales only exist from ${fmtD(f.feedStart)} and this range
+      ends before that. Weekly totals are all the platform kept until then.</div></div>`;
+  if(f.status==="wide") return `<div class="card">${head}<div class="note">That range is ${f.days} days. The item feed is 108,000 rows, so anything
+      past ${SALES_MAX_DAYS} days is a download, not a report — Week, Month or Quarter shows the list.</div></div>`;
+  if(f.status==="loading") return `<div class="card">${head}<div class="note">Loading the item-level feed for ${esc(range.label)}…</div></div>`;
+  if(f.status==="err") return `<div class="card">${head}<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div></div>`;
+  return "";
+}
+
+function repSoldCard(range){
+  const head=`<div class="label">Top 10 sold — in range
+    <span style="float:right;display:flex;gap:5px">
+      <span class="chip sm ${REP_SOLD_BY==="sales"?"on":""}" onclick="setSoldBy('sales')">by revenue</span>
+      <span class="chip sm ${REP_SOLD_BY==="qty"?"on":""}" onclick="setSoldBy('qty')">by units</span></span></div>`;
+  const f=feedFor(range); if(f.status!=="ok") return feedNote(f,head,range);
+  const sc=rangeScale(range), byQty=REP_SOLD_BY==="qty";
+  /* Paid units only. A $0 line is a loyalty coffee or a binned sandwich — counting it as sold
+     would inflate anything these numbers go on to feed. Kitchen requests are not sales. */
+  /* Refunds (negative lines) come off; $0 lines never count. (29 Sep 2026) */
+  const rows=sdSales(f.rows).filter(r=>r.sales!==0), m={}, tradingDays={};
+  rows.forEach(r=>{ const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",qty:0,sales:0,uq:0,us:0});
+    o.qty+=r.qty; o.sales+=r.sales; if(r.sales>0) tradingDays[fmtISO(r.ts)]=1; });
+  /* Units/day over the days that actually traded in the range, so a Monday-morning week is
+     not divided by seven. */
+  const nDays=Math.max(1,Object.keys(tradingDays).length);
+  if(f.prior){
+    const pw=f.prior.days/7, mult=sc.weeks*(sc.live?sc.frac:1)/pw;
+    f.prior.rows.forEach(r=>{ if(r.sales===0||!m[r.item]) return; m[r.item].uq+=r.qty*mult; m[r.item].us+=r.sales*mult; });
+  }
+  const list=Object.values(m).sort((a,b)=>byQty?b.qty-a.qty:b.sales-a.sales);
+  const rev=list.reduce((s,o)=>s+o.sales,0), units=list.reduce((s,o)=>s+o.qty,0);
+  const top=list.slice(0,10);
+  const mark=o=>{ if(f.priorPending) return ' <span style="color:var(--dim)">…</span>';
+    return byQty?usualMark(o.qty,o.uq,"sales"):usualMark(o.sales,o.us,"money"); };
+  return `<div class="card">${head}
+    ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Category</th><th class="num">${byQty?"Units":"Revenue"}</th>
+      <th class="num hide-sm">${byQty?"Revenue":"Units"}</th><th class="num" title="units over the ${nDays} trading day(s) in the range">Units/day</th><th class="num">%</th></tr></thead>
+      <tbody>${top.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
+        <td class="hide-sm">${o.group?`<span class="pill">${esc(o.group)}</span>`:""}</td>
+        <td class="num"><b>${byQty?Math.round(o.qty*100)/100:money(o.sales)}</b>${mark(o)}</td>
+        <td class="num hide-sm">${byQty?money(o.sales):Math.round(o.qty*100)/100}</td>
+        <td class="num">${Math.round(o.qty/nDays*10)/10}</td>
+        <td class="num" style="color:var(--dim)">${byQty?(units?pct1(o.qty/units*100):""):(rev?pct1(o.sales/rev*100):"")}</td></tr>`).join("")}</tbody></table>
+      <div class="note">${list.length} products · ${money(rev)} paid sales${f.start>range.start?` from ${fmtD(f.start)} (the feed starts there)`:""}.
+        Paid units only — $0 lines (loyalty coffees, wastage) and kitchen requests are excluded.
+        % is share of ${byQty?"units":"revenue"} across every product in the range. Units/day is over the ${nDays}
+        trading day(s) in the range. ${usualNote(sc)}</div>`
+      :`<div class="note">No paid item sales in ${esc(range.label)}.</div>`}</div>`;
+}
+
+/* Wastage for the range, always by % wasted (Adrian, 21 Sep). Same definition as the Sales
+   tab's card — a $0 line in a perishable group, for an item that also sold for money. */
+function repWasteCard(range){
+  const head=`<div class="label">Wastage — in range, by % wasted</div>`;
+  const f=feedFor(range); if(f.status!=="ok") return feedNote(f,head,range);
+  const w=wasteRows(sdSales(f.rows));
+  if(!w.list.length) return `<div class="card">${head}<div class="note">Nothing binned in ${PERISHABLE.join(", ")} in
+      ${esc(range.label)} — or those items are not in a perishable group in the Overrides tab yet.</div></div>`;
+  const list=w.list.slice().sort((a,b)=>b.pct-a.pct||b.value-a.value), top=list.slice(0,15);
+  return `<div class="card">${head}
+    <div style="font-size:13px;margin-bottom:10px"><b>${Math.round(w.units)}</b> items binned, worth <b>${money(w.value)}</b>
+      at what they were selling for — ${pct1(w.pctAll)} of everything made in these groups.</div>
+    <table><thead><tr><th>Product</th><th class="hide-sm">Group</th><th class="num">Binned</th>
+      <th class="num hide-sm">Sold</th><th class="num">% wasted</th><th class="num">Value</th></tr></thead>
+    <tbody>${top.map(o=>`<tr><td><b>${esc(o.name)}</b></td>
+      <td class="hide-sm"><span class="pill">${esc(o.group)}</span></td>
+      <td class="num">${Math.round(o.free*100)/100}</td>
+      <td class="num hide-sm">${Math.round(o.sold*100)/100}</td>
+      <td class="num ${o.pct>=25?"up":""}"><b>${pct1(o.pct)}</b></td>
+      <td class="num">${money(o.value)}</td></tr>`).join("")}
+      <tr style="border-top:2px solid var(--line)"><td><b>Total</b></td><td class="hide-sm"></td>
+        <td class="num"><b>${Math.round(w.units*100)/100}</b></td>
+        <td class="num hide-sm">${Math.round(w.soldAll*100)/100}</td>
+        <td class="num"><b>${pct1(w.pctAll)}</b></td>
+        <td class="num"><b>${money(w.value)}</b></td></tr></tbody></table>
+    <div class="note">${list.length>top.length?`Worst ${top.length} of ${list.length}. `:""}Perishable groups only:
+      ${PERISHABLE.join(", ")}. Valued at that item's own average selling price in the range. Red at 25% or more.</div></div>`;
+}
+
+function repCreepCard(range,prods){
+  const moved=prods.filter(p=>p.change!=null&&Math.abs(p.extra)>=0.005);
+  const ups=moved.filter(p=>p.extra>0).sort((a,b)=>b.extra-a.extra);
+  const downs=moved.filter(p=>p.extra<0).sort((a,b)=>a.extra-b.extra);
+  const upTot=ups.reduce((s,p)=>s+p.extra,0), downTot=downs.reduce((s,p)=>s+p.extra,0);
+  const list=(REP_CREEP_DIR==="up"?ups:downs).slice(0,10);
+  const head=`<div class="label">Price creep — what price moves cost in range
+    <span style="float:right;display:flex;gap:5px">
+      <span class="chip sm ${REP_CREEP_DIR==="up"?"on":""}" onclick="setCreepDir('up')">rises (${ups.length})</span>
+      <span class="chip sm ${REP_CREEP_DIR==="down"?"on":""}" onclick="setCreepDir('down')">falls (${downs.length})</span></span></div>`;
+  if(!moved.length)
+    return `<div class="card">${head}<div class="note">Nothing bought in ${esc(range.label)} is priced differently from
+      what you were paying before it.</div></div>`;
+  return `<div class="card">${head}
+    <div style="font-size:13px;margin-bottom:8px">Rises cost <b class="up">${money(upTot)}</b> ·
+      falls saved <b class="down">${money(-downTot)}</b> · net <b>${signed(upTot+downTot)}</b>${upTot+downTot<0?" saved":" extra"} in ${esc(range.label)}</div>
+    ${list.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Supplier</th><th class="num hide-sm">Was → now</th>
+      <th class="num">Change</th><th class="num hide-sm">Qty</th><th class="num">${REP_CREEP_DIR==="up"?"Extra paid":"Saved"}</th></tr></thead>
+      <tbody>${list.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
+        <td><b>${esc(p.desc)}</b></td>
+        <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
+        <td class="num hide-sm">${money(p.base)} → ${money(p.price)}</td>
+        <td class="num">${creepChip(p)}</td>
+        <td class="num hide-sm">${qtyFmt(p.qty,p.unit)}</td>
+        <td class="num"><b>${money(Math.abs(p.extra))}</b></td></tr>`).join("")}</tbody></table>`
+      :`<div class="note">No ${REP_CREEP_DIR==="up"?"rises":"falls"} in this range.</div>`}
+    <div class="note">Extra paid = units bought in the range × (price paid − the price you were paying before the range).
+      Where nothing was bought before the range, the first price inside it is the baseline. Sorted by dollars, not
+      percent — a 3% rise on milk outranks a 30% rise on saffron. Tap a row for the full price history.</div></div>`;
+}
+
 function renderGroupDrill(group){
-  const m=weekModel(), range=reportRange(), bySup={};
+  const m=rangeModel(), range=reportRange(), bySup={};
   INV.forEach(r=>{ if(rowGroup(r)!==group||!r.date||r.date<range.start||r.date>range.end) return;
     (bySup[r.supplier]=bySup[r.supplier]||{name:r.supplier,spend:0,n:0}).spend+=r.total; bySup[r.supplier].n++; });
   const rows=Object.values(bySup).sort((a,b)=>b.spend-a.spend);
   const tot=rows.reduce((s,r)=>s+r.spend,0);
-  document.getElementById("app").innerHTML=`${summaryBar(m)}${rangeBar()}
-    <a class="back" onclick="go('reports')">Reports</a>
+  document.getElementById("app").innerHTML=`${summaryBar(m)}
+    <a class="back" onclick="go('')">All suppliers</a>
     <div class="card"><div class="label">${esc(group)} — ${esc(range.label)}</div>
       <div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(tot)}</div>
       <table><thead><tr><th>Supplier</th><th class="num">Spend</th><th class="num">Invoices</th></tr></thead>
@@ -1655,50 +2143,131 @@ function renderGroupDrill(group){
         <td><b>${esc(s.name)}</b></td><td class="num">${money(s.spend)}</td><td class="num">${s.n}</td></tr>`).join("")}</tbody></table>
     </div>`;
 }
-/* The Supplier Explorer products layout: what was bought, how much, what it cost, and how
-   today's price compares with the average actually paid across the range. */
-/* Deliberately NOT filtered by the report range. Drilling into a supplier is a question
-   about the products themselves — what they cost and how that has moved — and a range that
-   kept resetting the answer made the price history useless. Both stores, full history. */
+/* ================= SUPPLIER DRILL =================
+   The Supplier Explorer supplier page (Adrian, 18 Sep): a statement, the products bought,
+   the invoices — every one of them for the range in the bar above, Week by default. The
+   180-day catalogue this used to show belongs to ordering and still drives the builder.
+
+   Statement rows are WHOLE weeks or months, whichever the toggle says, covering the range —
+   built from the range's periods first and then filled completely, so a Week range shows
+   that week, a Month range under the Week toggle shows the four or five weeks it touches,
+   and nothing from outside the range appears. Reconcile these against the supplier's own
+   statement; a difference is a missing invoice or a billing error. */
+let STMT_PERIOD="week", SUPP_PROD_SORT={key:"delta",dir:-1};
+function setStmt(v){ STMT_PERIOD=v; route(); }
+function sortSuppProds(k){ if(SUPP_PROD_SORT.key===k) SUPP_PROD_SORT.dir*=-1; else SUPP_PROD_SORT={key:k,dir:k==="name"||k==="cat"?1:-1}; route(); }
+function statementCard(name,range){
+  const wk=STMT_PERIOD==="week";
+  const pKey=d=>wk?fmtISO(weekStart(d)):d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+  const pName=k=>{ if(wk){ const a=gvizDate(k); return fmtD(a)+" – "+fmtD(addD(a,6)); }
+                   const [y,m]=k.split("-"); return new Date(+y,+m-1,1).toLocaleDateString("en-AU",{month:"long",year:"numeric"}); };
+  const keys=new Set(); for(let d=mid(range.start); +d<=+range.end; d=addD(d,1)) keys.add(pKey(d));
+  const per={};
+  INV.forEach(r=>{ if(r.supplier!==name||!r.date) return; const k=pKey(r.date); if(!keys.has(k)) return;
+    const m=per[k]||(per[k]={n:0,sub:0,gst:0,freight:0,credits:0,total:0});
+    m.n++; m.sub+=r.subtotal; m.gst+=r.gst; m.freight+=r.freight||0; m.total+=r.total; if(r.type==="credit_note") m.credits+=r.total; });
+  const mkeys=Object.keys(per).sort().reverse().slice(0,wk?16:12);
+  const tot=mkeys.reduce((a,k)=>a+per[k].total,0), anyFreight=mkeys.some(k=>per[k].freight);
+  const email=supplierEmail(name);
+  return `<div class="card"><div class="label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>${wk?"Weekly":"Monthly"} statement — ${esc(name)}</span>
+      <span style="margin-left:auto;display:flex;gap:5px">
+        <span class="chip sm ${wk?"":"on"}" onclick="setStmt('month')">Month</span>
+        <span class="chip sm ${wk?"on":""}" onclick="setStmt('week')">Week</span></span></div>
+    ${email?`<div style="font-size:12px;margin-bottom:8px;color:var(--dim)">Contact: <a href="mailto:${esc(email)}" style="color:var(--red)">${esc(email)}</a></div>`:""}
+    ${mkeys.length?`<table><thead><tr><th>${wk?"Week":"Month"}</th><th class="num">Invoices</th><th class="num hide-sm">Subtotal</th>
+      <th class="num hide-sm">GST</th>${anyFreight?'<th class="num hide-sm">Freight</th>':""}<th class="num hide-sm">Credits</th><th class="num">Total</th></tr></thead>
+      <tbody>${mkeys.map(k=>{const m=per[k];return `<tr><td>${pName(k)}</td><td class="num">${m.n}</td>
+        <td class="num hide-sm">${money(m.sub)}</td><td class="num hide-sm">${money(m.gst)}</td>${anyFreight?`<td class="num hide-sm">${money(m.freight)}</td>`:""}
+        <td class="num hide-sm">${m.credits?money(m.credits):""}</td><td class="num"><b>${money(m.total)}</b></td></tr>`;}).join("")}
+        <tr style="border-top:2px solid var(--ink)"><td><b>Total shown</b></td><td class="num"></td><td class="num hide-sm"></td>
+        <td class="num hide-sm"></td>${anyFreight?'<td class="num hide-sm"></td>':""}<td class="num hide-sm"></td><td class="num"><b>${money(tot)}</b></td></tr>
+      </tbody></table>`:`<div class="note">No invoices from ${esc(name)} in ${esc(range.label)}.</div>`}
+    <div class="note">Reconcile these totals against the supplier's own statement — differences mean a missing invoice or a
+      billing error. Whole ${wk?"weeks":"months"} covering ${esc(range.label)}, not the range itself.</div></div>`;
+}
+/* The supplier's usual on PRODUCT LINES — fees stripped, the AVG_WEEKS complete weeks before
+   the range, scaled and pro-rated like every other usual. Computed over every line, not just
+   the products bought in the range, so a product dropped altogether still lowers the usual. */
+function usualLineSpend(name,range){
+  const sc=rangeScale(range), uFrom=addD(mid(range.start),-7*AVG_WEEKS), uTo=mid(range.start);
+  let t=0, seen=false;
+  LINES.forEach(l=>{ if(l.supplier!==name||!l.date||l.date>=uTo||!(l.price>0)||!(l.qty>0)||FEE.test(l.desc)) return;
+    seen=true; if(l.date>=uFrom) t+=l.total; });
+  const wk=t/AVG_WEEKS;
+  return {wk,scaled:wk*sc.weeks*(sc.live?sc.frac:1),seen,sc};
+}
+/* WHAT IS DRIVING IT. The front page says a supplier is ▲; this says which products. One
+   sentence: how far over (or under) usual, and the three products that account for most of
+   it. Nothing where the supplier has no history before the range. */
+function driversNote(name,prods,range){
+  const u=usualLineSpend(name,range); if(!u.seen) return "";
+  const spend=prods.reduce((a,p)=>a+p.spend,0), d=spend-u.scaled, sc=u.sc;
+  const over=spend>u.scaled*1.1, under=spend<u.scaled*0.9;
+  const usualTxt=`usual ${money0(u.scaled)}${sc.live?` for the ${sc.elapsed} of ${sc.days} days so far`:""}`;
+  if(!over&&!under) return `<div class="note" style="margin:0 0 10px"><b>About usual</b> — ${money0(spend)} against ${usualTxt}.</div>`;
+  const pool=over?prods.filter(p=>p.delta>0).sort((a,b)=>b.delta-a.delta):prods.filter(p=>p.delta<0).sort((a,b)=>a.delta-b.delta);
+  const top=pool.slice(0,3), rest=pool.length-top.length;
+  const list=top.map(p=>`<b>${esc(p.desc)}</b> ${over?"+":"−"}${money0(Math.abs(p.delta))}${p.isNew?" (new)":""}`).join(", ");
+  return `<div id="drivers" style="font-size:13px;margin:0 0 10px;line-height:1.5">
+    <b class="${over?"up":"down"}">${money0(Math.abs(d))} ${over?"over":"under"} usual</b> — ${money0(spend)} against ${usualTxt}.
+    ${top.length?`${over?"Driving it":"Biggest drops"}: ${list}${rest?` and ${rest} more`:""}.`:""}
+    ${under?`<span style="color:var(--dim)">Products not bought at all in the range are not listed.</span>`:""}</div>`;
+}
+const deltaChip=p=>{
+  if(p.isNew) return `<span class="up">+${money(p.spend)}</span> <span class="pill" title="never bought before this range">new</span>`;
+  if(Math.abs(p.delta)<0.5) return `<span style="color:var(--dim)">–</span>`;
+  return `<span class="${p.delta>0?"up":"down"}" title="usual ${money(p.usualSpend)}">${p.delta>0?"+":"−"}${money(Math.abs(p.delta))}</span>`;
+};
 function renderSupplierProducts(name){
-  const m=weekModel();
-  const all=sortCat(deriveCatalogue(LINES,name,new Date(),{venue:null}));
-  const rows=all.filter(p=>SHOW_HIDDEN||!p.hidden);
-  const hiddenN=all.length-rows.length;
-  const spend=rows.reduce((s,p)=>s+p.spendTotal,0);
+  const m=rangeModel(), range=reportRange();
+  const all=rangeProducts(range).filter(p=>p.supplier===name).map(p=>{p.hidden=!!HIDDEN[p.key];return p;});
+  const rows=all.filter(p=>SHOW_HIDDEN||!p.hidden), hiddenN=all.length-rows.length;
+  const K={name:p=>p.desc.toLowerCase(),cat:p=>p.cat.toLowerCase(),qty:p=>p.qty,spend:p=>p.spend,price:p=>p.price,
+           was:p=>p.base,change:p=>p.change==null?-Infinity:p.change,delta:p=>p.delta};
+  const fn=K[SUPP_PROD_SORT.key]||K.delta;
+  rows.sort((a,b)=>{const x=fn(a),y=fn(b);return (x<y?-1:x>y?1:0)*SUPP_PROD_SORT.dir||a.desc.localeCompare(b.desc);});
+  const head=(k,l,cls)=>`<th class="s ${cls||""} ${SUPP_PROD_SORT.key===k?"act":""}" onclick="sortSuppProds('${k}')">${l}${SUPP_PROD_SORT.key===k?(SUPP_PROD_SORT.dir<0?" ▼":" ▲"):""}</th>`;
+  /* Money over every product, turned-off ones included — they leave the ordering screens,
+     never the spend. */
+  const spend=all.reduce((a,p)=>a+p.spend,0);
   document.getElementById("app").innerHTML=`${summaryBar(m)}
-    <a class="back" onclick="go('reports')">Reports</a>
+    <a class="back" onclick="go('')">All suppliers</a>
+    ${sset(name).orderHere?`<div style="margin-bottom:10px"><a class="btn outline" onclick="go('s::${encodeURIComponent(name)}')">🛒 Build order</a></div>`
+      :sset(name).portal_only?`<div class="note" style="margin:0 0 10px">Orders go through this supplier's own portal — no ordering here. Change that in Admin.</div>`:""}
+    ${statementCard(name,range)}
     <div class="card">
-      <div class="label">${esc(name)} — products — last ${CAT_DAYS} days, both stores</div>
-      ${hiddenN?`<div style="margin-bottom:8px"><span class="chip sm ${SHOW_HIDDEN?"on":""}" onclick="toggleHidden()">${SHOW_HIDDEN?"hiding":"show"} ${hiddenN} turned-off item(s)</span></div>`:""}
-      <div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:10px">${money(spend)}</div>
-      <table><thead><tr>
-        ${sortHead("name","Product")}${sortHead("cat","Category","hide-sm")}${sortHead("qty","Qty","num")}
-        ${sortHead("spend","Spend","num")}${sortHead("price","Unit price","num")}${sortHead("last","Last bought","num hide-sm")}
-      </tr></thead><tbody>
-      ${rows.map(p=>{
-        const avgPaid=p.qtyTotal?p.spendTotal/p.qtyTotal:0;
-        const vs=avgPaid?((p.price-avgPaid)/avgPaid*100):0;
-        return `<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
-          <td><b>${esc(p.desc)}</b>${p.variants.length>1?` <span class="pill">${p.variants.length} merged</span>`:""}</td>
-          <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
-          <td class="num">${Math.round(p.qtyTotal*100)/100} ${esc(p.unit||"")}</td>
-          <td class="num">${money(p.spendTotal)}</td>
-          <td class="num">${money(p.price)}${Math.abs(vs)>=1?`<br><span class="${vs>0?"up":"down"}" style="font-size:11px">${vs>0?"+":""}${Math.round(vs)}% vs avg</span>`:""}</td>
-          <td class="num hide-sm">${fmtD(p.lastDate)}</td></tr>`;}).join("")}
-      </tbody></table>
-      ${rows.length?"":'<div class="note">Nothing bought from this supplier in the last '+CAT_DAYS+' days.</div>'}
-      <div class="note">Click a product for its unit price history. This view ignores the report range on
-        purpose — it is about the products, not the period.</div>
+      <div class="label">Products (${rows.length}) — ${esc(range.label)}
+        ${hiddenN?`<span class="chip sm ${SHOW_HIDDEN?"on":""}" onclick="toggleHidden()" style="margin-left:8px">${SHOW_HIDDEN?"hiding":"show"} ${hiddenN} turned-off</span>`:""}</div>
+      ${rows.length?`<div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:6px">${money(spend)}</div>
+      ${driversNote(name,all,range)}
+      <table><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}${head("qty","Qty","num")}
+        ${head("spend","Spend","num")}${head("delta","vs usual","num")}${head("price","Price","num")}${head("was","Was","num hide-sm")}${head("change","Change","num")}</tr></thead>
+      <tbody>${rows.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
+        <td><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}${p.hidden?' <span class="pill">off</span>':""}</td>
+        <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
+        <td class="num">${Math.round(p.qty*100)/100}${usualMark(p.qty,p.usualQty,"spend")}</td>
+        <td class="num">${money(p.spend)}</td>
+        <td class="num">${deltaChip(p)}</td>
+        <td class="num"><b>${money(p.price)}</b></td>
+        <td class="num hide-sm" title="${p.baseFromBefore?"last paid before the range, "+fmtD(p.baseDate):"first price inside the range"}">${p.baseFromBefore?money(p.base):'<span style="color:var(--dim)">—</span>'}</td>
+        <td class="num">${creepChip(p)}</td></tr>`).join("")}</tbody></table>
+      <div class="note">Line totals with delivery and fees stripped, so this will not match the statement to the cent.
+        <b>vs usual</b> is the dollars above or below what this product usually costs over ${wksLabel(rangeScale(range).weeks)} —
+        its rate over the ${AVG_WEEKS} full weeks before the range${rangeScale(range).live?", pro-rated to the days so far":""} — so the
+        list opens with what is driving the total. The arrow after Qty says whether it was more of it (hover for the usual);
+        Change says whether it was the price. <b>Was</b> is the last price paid before the range; Change compares the latest
+        price in the range with it, and is blank when nothing was bought before. Tap a product for its price history.</div>`
+      :`<div class="note">No product lines from ${esc(name)} in ${esc(range.label)}.</div>`}
     </div>
-    ${invoicePanel(name,null,60)}`;
+    ${invoicePanel(name,null,60,range)}`;
 }
 /* Unit price history: the movement over time, not just the latest figure. */
 function renderPriceHistory(key){
-  const m=weekModel();
+  const m=rangeModel();
   const sup=(LINES.find(l=>l.key===key)||{}).supplier;
   const p=sup?deriveCatalogue(LINES,sup,new Date(),{venue:null}).find(x=>x.key===key):null;
-  if(!p){ document.getElementById("app").innerHTML=`<a class="back" onclick="go('reports')">Reports</a>
+  if(!p){ document.getElementById("app").innerHTML=`<a class="back" onclick="go('')">All suppliers</a>
     <div class="card"><div class="note">That product isn't in the last ${CAT_DAYS} days of buying.</div></div>`; return; }
   const buys=p.buys.slice().reverse();
   const prices=p.buys.map(b=>b.price), lo=Math.min(...prices), hi=Math.max(...prices);
@@ -1787,7 +2356,7 @@ const CAT_MAP={
   "food d/h":{type:"Food"},"dine in":{type:"Food"},"food t/a":{type:"Food"},
   "takeway food":{type:"Food"},"takeaway food":{type:"Food"},
   "luma food d/h":{type:"Food"},"luma beverage dine in":{type:"Beverage"},
-  "sundries":{type:"Sundries"},"impos":{type:"Uncategorised"}
+  "sundries":{type:"Sundries"},"impos":{type:"Uncategorised"},"no cat.":{type:"Uncategorised"}
 };
 async function sdTab(name){
   const u=`https://docs.google.com/spreadsheets/d/${SALES_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(name)}&_=${Date.now()}`;
@@ -1872,6 +2441,14 @@ let SALES_DAY=null, SALES_PERIOD="week", SALES_SORT={col:"sales",dir:-1}, SALES_
 let SALES_PROD_VENUE=null, SALES_FROM=null, SALES_TO=null, SALES_GROUP=[];
 const salesProdVenue=()=>SALES_PROD_VENUE===null?TAG.name:SALES_PROD_VENUE;
 function setProdVenue(v){ SALES_PROD_VENUE=v; route(); }
+/* Store chips on the products and wastage cards. One tag means nothing to switch, so the
+   chips (and the "Both" option) are not rendered at all. */
+function venueChips(cur){
+  if(TAGS.length<2) return "";
+  return `<span style="float:right;display:flex;gap:5px">
+        ${TAGS.map(t=>`<span class="chip sm ${cur===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
+        <span class="chip sm ${cur==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span>`;
+}
 const sdSales=rows=>rows.filter(r=>r.group!==LANE_KITCHEN);
 function wHead(col,label,cls){
   const on=WASTE_SORT.col===col;
@@ -1943,7 +2520,7 @@ function renderSales(){
   const straddles=feedStart&&w.start<feedStart&&w.end>=feedStart;
   const weeklyRevenue=SALES.filter(r=>r.date>=w.start&&r.date<=w.end).reduce((t,r)=>t+r.sales,0);
   const revenue=preFeed?weeklyRevenue:rows.reduce((t,r)=>t+r.sales,0);
-  /* Spend for the same window: invoices dated inside it, both kitchens, cost of goods only
+  /* Spend for the same window: invoices dated inside it, cost of goods only
      (INV already is). On a single day this is lumpy — a Monday delivery lands on Monday
      while Monday's sales are a seventh of the week — so the day view says so rather than
      letting one big drop read as a 200% COGS day. */
@@ -1957,7 +2534,7 @@ function renderSales(){
     ${SD_ERR?`<div class="err">Couldn't read the feed: ${esc(SD_ERR)}</div>`:""}
     <div class="summary" style="grid-template-columns:2fr 1fr 1fr">
       <div class="tile" style="text-align:center;padding:16px 14px">
-        <div class="k">Combined sales — both kitchens</div>
+        <div class="k">Sales — ${esc(ENTITY)}</div>
         <div class="v" style="font-size:40px">${money0(headline)}</div>
         <div class="sub">${esc(w.label)} ·
           ${LEDGER_VENUES.map(v=>`${esc(vShort(v))} ${money0(rows.filter(r=>r.venue===v).reduce((t,r)=>t+r.sales,0))}`).join(" · ")}</div>
@@ -1965,7 +2542,7 @@ function renderSales(){
       <div class="tile" style="text-align:center;padding:16px 14px">
         <div class="k">Spend — ${w.day?"this day":"this week"}</div>
         <div class="v" style="font-size:30px">${money0(spend)}</div>
-        <div class="sub">invoices dated in the period · both kitchens</div>
+        <div class="sub">invoices dated in the period</div>
       </div>
       <div class="tile ${cogsCls}" style="text-align:center;padding:16px 14px">
         <div class="k">COGS % vs ${TARGET_COGS_PCT}%</div>
@@ -2037,7 +2614,7 @@ function sdHourCard(rows,w){
   }
   const met=(k,v,sub)=>`<div class="metric"><div class="k">${k}</div><div class="val">${v}</div><div class="sub">${sub}</div></div>`;
   return `<div class="card">
-    <div class="label">Sales by time of day <span class="pill">hourly · both kitchens</span></div>
+    <div class="label">Sales by time of day <span class="pill">hourly</span></div>
     <div class="chart">${cols}</div>
     <div class="mets">
       ${met("Revenue",money0(total),esc(w.label))}
@@ -2065,7 +2642,7 @@ function sdDayCard(rows,w){
       <div class="lb">${dm(k)}</div></div>`).join("");
   const met=(k,v,sub)=>`<div class="metric"><div class="k">${k}</div><div class="val">${v}</div><div class="sub">${sub}</div></div>`;
   return `<div class="card">
-    <div class="label">Sales by day <span class="pill">both kitchens</span></div>
+    <div class="label">Sales by day</div>
     <div class="chart">${cols}</div>
     <div class="mets">
       ${met("Revenue",money0(total),esc(w.label))}
@@ -2123,12 +2700,16 @@ function sdProdCard(rows,w){
   /* Built before the group filter, so choosing one doesn't make the others disappear. */
   const groups=[...new Set(rowsForGroups.map(r=>r.group).filter(Boolean))].sort();
   const cols=pv==="both"?LEDGER_VENUES:[pv];
+  /* Sold is paid lines less refunds. A $0 line is binned or given away and counts nowhere here
+     (the wastage card has it). Adding every line's qty put 62 Assorted Sandwiches against
+     $348.50 for 21-27 Sep — the 18 binned ones read as sold at $5.62 each. (29 Sep 2026) */
   rows.forEach(r=>{
+    if(r.sales===0) return;
     const o=m[r.item]||(m[r.item]={name:r.item,group:r.group||"",sales:0,qty:0});
     o.sales+=r.sales; o.qty+=r.qty;
     o[r.venue]=(o[r.venue]||0)+r.sales;
   });
-  let list=Object.values(m);
+  let list=Object.values(m).filter(o=>o.sales>0||o.qty>0);
   const q=SALES_Q.trim().toLowerCase();
   if(q) list=list.filter(o=>o.name.toLowerCase().includes(q)||o.group.toLowerCase().includes(q));
   const d=SALES_SORT.dir;
@@ -2140,9 +2721,7 @@ function sdProdCard(rows,w){
   return `<div class="card"><div class="label">Products (${Object.keys(m).length})
       ${SALES_CATDRILL?`<span class="chip sm on" onclick="drillCat('${esc(SALES_CATDRILL)}')" style="margin-left:8px">${esc(SALES_CATDRILL)} ✕</span>`:""}
       ${SALES_GROUP.length?`<span class="chip sm on" onclick="drillGroup('')" style="margin-left:8px">${SALES_GROUP.length} categor${SALES_GROUP.length===1?"y":"ies"} ✕</span>`:""}
-      <span style="float:right;display:flex;gap:5px">
-        ${TAGS.map(t=>`<span class="chip sm ${pv===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
-        <span class="chip sm ${pv==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span></div>
+${venueChips(pv)}</div>
     <div style="font-size:12px;color:var(--dim);margin-bottom:8px">tap a column to sort ·
       ${Object.keys(SD_ITEM||{}).length} names merged · ${Object.keys((SD_OVER||{}).item||{}).length+Object.keys((SD_OVER||{}).dept||{}).length} overrides applied</div>
     <input type="search" id="psearch" placeholder="Search products…" value="${esc(SALES_Q)}">
@@ -2178,41 +2757,42 @@ function setWasteSort(c){
   else WASTE_SORT={col:c,dir:(c==="name"||c==="group")?1:-1};
   route();
 }
-function sdWasteCard(rows){
-  /* Same store scope as the products list — wastage is a per-kitchen question, and a Luma
-     chef looking at Cambridge's bin is not useful. */
-  const wv=salesProdVenue();
-  if(wv!=="both") rows=rows.filter(r=>r.venue===wv);
+function wasteRows(rows){
   const paid={};
   rows.forEach(r=>{ if(r.sales>0) paid[r.item.toLowerCase()]=1; });
   const m={};
   rows.forEach(r=>{
     if(PERISHABLE.indexOf(r.group)===-1) return;
     const o=m[r.item]||(m[r.item]={name:r.item,group:r.group,sold:0,free:0,rev:0});
-    if(r.sales>0){ o.sold+=r.qty; o.rev+=r.sales; } else o.free+=r.qty;
+    /* A refund is a sale taken back, not food in the bin. */
+    if(r.sales!==0){ o.sold+=r.qty; o.rev+=r.sales; } else o.free+=r.qty;
   });
-  let list=Object.values(m).filter(o=>o.free>0&&o.sold>0&&paid[o.name.toLowerCase()]);
-  list.forEach(o=>{ o.price=o.rev/o.sold; o.value=o.free*o.price;
-                    o.pct=o.free/(o.sold+o.free)*100; });
+  const list=Object.values(m).filter(o=>o.free>0&&o.sold>0&&paid[o.name.toLowerCase()]);
+  list.forEach(o=>{ o.price=o.rev/o.sold; o.value=o.free*o.price; o.pct=o.free/(o.sold+o.free)*100; });
+  const units=list.reduce((t,o)=>t+o.free,0), value=list.reduce((t,o)=>t+o.value,0);
+  const soldAll=list.reduce((t,o)=>t+o.sold,0);
+  return {list,units,value,soldAll,pctAll:(soldAll+units)?units/(soldAll+units)*100:0};
+}
+function sdWasteCard(rows){
+  /* Same store scope as the products list. */
+  const wv=salesProdVenue();
+  if(wv!=="both") rows=rows.filter(r=>r.venue===wv);
+  const list=wasteRows(rows).list;
   const wd=WASTE_SORT.dir;
   const wby={ name:(a,b)=>a.name.localeCompare(b.name), group:(a,b)=>a.group.localeCompare(b.group)||a.name.localeCompare(b.name),
               free:(a,b)=>a.free-b.free, sold:(a,b)=>a.sold-b.sold, pct:(a,b)=>a.pct-b.pct, value:(a,b)=>a.value-b.value };
   list.sort((a,b)=>wd*(wby[WASTE_SORT.col]||wby.value)(a,b));
   if(!list.length) return `<div class="card"><div class="label">Wastage
-      <span style="float:right;display:flex;gap:5px">
-        ${TAGS.map(t=>`<span class="chip sm ${wv===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
-        <span class="chip sm ${wv==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span></div>
-    <div class="note">Nothing binned in ${PERISHABLE.join(", ")} at ${wv==="both"?"either kitchen":esc(wv)} for this
+${venueChips(wv)}</div>
+    <div class="note">Nothing binned in ${PERISHABLE.join(", ")} at ${esc(wv)} for this
       period — or those items are not in a perishable group in the Overrides tab yet.</div></div>`;
   const units=list.reduce((t,o)=>t+o.free,0), value=list.reduce((t,o)=>t+o.value,0);
   const soldAll=list.reduce((t,o)=>t+o.sold,0);
   const pctAll=(soldAll+units)?units/(soldAll+units)*100:0;
   return `<div class="card"><div class="label">Wastage
-      <span style="float:right;display:flex;gap:5px">
-        ${TAGS.map(t=>`<span class="chip sm ${wv===t.name?"on":""}" onclick="setProdVenue('${esc(t.name)}')">${esc(t.short)}</span>`).join("")}
-        <span class="chip sm ${wv==="both"?"on":""}" onclick="setProdVenue('both')">Both</span></span></div>
+${venueChips(wv)}</div>
     <div style="font-size:13px;margin-bottom:10px"><b>${Math.round(units)}</b> items binned at
-      ${wv==="both"?"both kitchens":esc(wv)}, worth <b>${money(value)}</b> at what they were selling for —
+      ${esc(wv)}, worth <b>${money(value)}</b> at what they were selling for —
       ${pct1(pctAll)} of everything made in these groups.</div>
     <table><thead><tr>${wHead("name","Product")}${wHead("group","Group","hide-sm")}${wHead("free","Binned","num")}
       ${wHead("sold","Sold","num hide-sm")}${wHead("pct","% wasted","num")}${wHead("value","Value","num")}</tr></thead>
@@ -2233,20 +2813,21 @@ function sdWasteCard(rows){
 
 /* ================= INVOICES PANEL =================
    Supplier Explorer's invoice list, reusable: the builder shows this store's invoices under
-   the catalogue, the reports drilldown shows both stores'. Clicking an invoice opens its
+   the catalogue, the reports drilldown shows the full history. Clicking an invoice opens its
    own lines, which is the only place in this app you see what an invoice actually contained
    rather than a product rolled up across many of them. */
 let OPEN_INV=null;
 function toggleInv(k){ OPEN_INV = OPEN_INV===k ? null : k; route(); }
-function invoicePanel(supplier,venue,limit){
+function invoicePanel(supplier,venue,limit,range){
   return `<div class="card">
-    <div class="label">Invoices — ${esc(supplier)}${venue?" · "+esc(venue):" · both stores"}</div>
-    ${invoiceTable(supplier,venue,limit)}</div>`;
+    <div class="label">Invoices — ${esc(supplier)}${venue?" · "+esc(venue):""}${range?" · "+esc(range.label):""}</div>
+    ${invoiceTable(supplier,venue,limit,range)}</div>`;
 }
-function invoiceTable(supplier,venue,limit){
-  const rows=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)&&r.date)
+function invoiceTable(supplier,venue,limit,range){
+  const rows=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)&&r.date
+                         &&(!range||(r.date>=range.start&&r.date<=range.end)))
                 .sort((a,b)=>b.date-a.date).slice(0,limit||40);
-  if(!rows.length) return `<div class="note">No invoices for this supplier${venue?" at "+esc(venue):""} in the data.</div>`;
+  if(!rows.length) return `<div class="note">No invoices for this supplier${venue?" at "+esc(venue):""}${range?" in "+esc(range.label):" in the data"}.</div>`;
   const tot=rows.reduce((s,r)=>s+r.total,0);
   return `<div style="font-size:13px;color:var(--dim);margin:6px 0 8px">${rows.length} invoice(s), ${money(tot)}</div>
     <table><thead><tr><th>Date</th><th class="hide-sm">Invoice</th><th class="hide-sm">Venue</th>
@@ -2286,8 +2867,7 @@ function renderPlaced(){
   rec.closed.forEach(c=>status[c.o.id]={state:"closed",inv:c.inv,how:c.how});
   const rows=ORDERS.concat(LOCAL_ORDERS).filter(o=>o.venue===TAG.name&&o.date>=addD(m.wk.start,-28))
                    .sort((a,b)=>b.date-a.date);
-  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
-    <a class="back" onclick="go('')">All suppliers</a>
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}${orderTabs("placed")}
     <div class="card"><div class="label">Orders placed — last 4 weeks · ${esc(TAG.name)}</div>
       <table><thead><tr><th>Placed</th><th>Supplier</th><th class="hide-sm">Deliver</th><th class="num hide-sm">Items</th>
         <th class="num">Total</th><th>Reconciliation</th><th class="num"></th></tr></thead>
@@ -2457,8 +3037,7 @@ function recallFav(id){
 }
 function renderFavs(){
   const m=weekModel();
-  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
-    <a class="back" onclick="go('')">All suppliers</a>
+  document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}${orderTabs("favs")}
     <div class="card"><div class="label">Saved favourites — ${esc(TAG.name)}</div>
       <table><thead><tr><th>Name</th><th class="hide-sm">Supplier</th><th class="num">Items</th><th class="num"></th></tr></thead>
       <tbody>${FAVS.filter(f=>f.venue===TAG.name).map(f=>`<tr><td><b>${esc(f.name)}</b>${f.by?`<br><span style="color:var(--dim);font-size:11px">${esc(f.by)}</span>`:""}</td>
@@ -2476,25 +3055,111 @@ async function deleteFav(id){
   FAVS=FAVS.filter(x=>x.id!==id); route();
 }
 
+/* ================= HELP =================
+   For the crew. Screenshots live in help/ next to this file (annotated from the test data,
+   so no real figures travel with a forwarded link); the badges in each picture are numbered
+   to match the text. Keep this page in step with the layout — a stale help page is worse
+   than none. */
+function renderHelp(){
+  const B=n=>`<span class="b">${n}</span>`;
+  document.getElementById("app").innerHTML=`<div class="card help">
+    <h2>What this is</h2>
+    <p>One page for how Cambridge and Luma are trading against what they are buying. It reads the same invoices and sales feed
+      I do, updates itself, and works on a phone. Nothing here can be broken by clicking on it.</p>
+
+    <h2>Getting around</h2>
+    <img src="help/nav.png" alt="The header">
+    <p>${B(1)}<b>Reports</b> — top 10 bought, top 10 sold, wastage, price creep. ${B(2)}<b>Sales</b> — the day-by-day
+      sales view. ${B(3)}<b>Order</b> — the ordering tool, if you use it. ${B(4)}<b>Admin</b> — supplier settings. ${B(5)}<b>?</b> — this page.
+      The <b>Cambridge Central</b> logo is the front page: suppliers by spend. On the <b>Order</b> and <b>Sales</b> tabs a
+      <b>Cambridge · Luma</b> switch appears in the header: ordering is per kitchen, the books are one. <b>↻</b> reloads the numbers.</p>
+
+    <h2>The date range</h2>
+    <img src="help/range-bar.png" alt="The range bar">
+    <p>The grey bar sits at the top of the front page, Reports and every supplier page, and <b>everything below it
+      follows it</b>. Change it once and every card changes.</p>
+    <ul>
+      <li>${B(1)}<b>‹ ›</b> step back and forward one period at a time. You cannot step into the future.</li>
+      <li>${B(2)}<b>Week · Month · Quarter · All time</b> pick the period. Week is Monday to Sunday. It opens on Week.</li>
+      <li>${B(3)}The two dates set any range you like — pick a from and a to and the page follows.</li>
+      <li>${B(4)}<b>catch-up</b> is only there in the current week; see the header below.</li>
+    </ul>
+    <p><b>On a Monday</b> "Week" is only a few hours of trading. Tap <b>‹</b> once to see last week in full — that is
+      the week you would have had in the Monday email.</p>
+
+    <h2>The four boxes at the top</h2>
+    <img src="help/header-week.png" alt="The header in the current week">
+    <p>In the <b>current week</b> this is the countdown against the 30% target: what has been spent, what is left to
+      spend, income so far with a forecast for the rest of the week, and where COGS is projected to land. If
+      <b>Left to spend</b> goes red we are over for the week. <b>catch-up</b> folds this month's over- or under-spend so
+      far into the week's envelope — use it after a heavy week to see what you have to claw back.</p>
+    <img src="help/header-month.png" alt="The header for a month">
+    <p>For <b>any other range</b> there is no forecast, just the books: what was spent, the <b>tally</b> against 30% of
+      income (green is under, red is over — the amount to claw back next period), income, and the actual COGS %.</p>
+
+    <h2>Front page — suppliers by spend</h2>
+    <img src="help/front-page.png" alt="Suppliers by spend">
+    <p>Every supplier we bought from in the range, biggest first. <b>Usual/wk</b> is what we normally spend on them
+      per week (the four full weeks before); a red ▲ means this range is more than 10% over that, green ▼ under. Tap a
+      column heading to sort, tap a supplier to open it.</p>
+
+    <h2>Finding the wastage</h2>
+    <ol>
+      <li>Tap <b>Reports</b>.</li>
+      <li>Check the range bar says the week you want — on a Monday, tap <b>‹</b> for last week.</li>
+      <li>Scroll to <b>Wastage</b>.</li>
+    </ol>
+    <img src="help/reports-wastage.png" alt="The wastage card">
+    <p>Worst first by % wasted, red at 25% or more. <b>Value</b> is what the binned items would have sold for, so it is
+      what the bin actually cost. It counts a $0 sale in a perishable group (sandwiches, cakes, hot takeaway, grab &amp;
+      go) for an item that also sold for money — a loyalty coffee is not wastage.</p>
+
+    <h2>The rest of Reports</h2>
+    <img src="help/reports-top10.png" alt="Top 10 purchased and sold">
+    <p><b>Top 10 purchased</b>: what the money went on. The arrow after the quantity compares with what we usually buy
+      of it (hover for the figure); the arrow after the price is a price change against what we were paying before
+      the range. <b>Top 10 sold</b>: by revenue or by units, with units per trading day and the same arrow against the
+      usual. <b>Price creep</b>, further down, is which price rises are actually costing money, in dollars — the top
+      row is the phone call worth making.</p>
+
+    <h2>A supplier's page</h2>
+    <img src="help/supplier.png" alt="A supplier page">
+    <p>Tap any supplier on the front page. A weekly or monthly statement to reconcile against theirs, every product we
+      bought from them in the range with its price and any change, and the invoices themselves — tap one to see its
+      lines. All for the range in the bar.</p>
+    <p><b>When a supplier is ▲ on the front page</b>, this page says why. The line above the products is how far over
+      usual the spend is and the three products doing most of it; the list opens sorted by <b>vs usual</b>, the dollars
+      each product is above or below its normal run. The arrow after Qty tells you it was <i>more of it</i>; a change on
+      the price tells you it was <i>dearer</i>; <b>new</b> is something we had not bought from them before.</p>
+
+    <h2>Questions</h2>
+    <p>Anything confusing, or anything you want that is not here — tell Adrian. The page changes every week or so and
+      the build number under the logo says which version you are on.</p>
+  </div>`;
+}
+
 /* ================= ADMIN ================= */
 function renderAdmin(){
-  const list=supplierList(), overrides=Object.keys(COVER);
+  const list=supplierList(undefined,{venue:null}), overrides=Object.keys(COVER);   // CAMBRIDGE: both kitchens
   document.getElementById("app").innerHTML=`
     <a class="back" onclick="go('')">All suppliers</a>
-    <div class="card"><div class="label">Supplier settings — global, one setting everywhere</div>
-      <table><thead><tr><th>Supplier</th><th>Sales rep email</th><th class="num">Visible</th><th class="num">Portal only</th></tr></thead>
-      <tbody>${list.map(s=>{const c=sset(s.name);return `<tr>
+    <div class="card"><div class="label">Supplier settings</div>
+      <table><thead><tr><th>Supplier</th><th>Sales rep email</th><th class="num">Ordering — Cambridge Central</th></tr></thead>
+      <tbody>${list.map(s=>{const c=sset(s.name);
+        const chip=(v,l)=>`<span class="chip sm ${c.ordering===v?"on":""}" onclick="saveOrdering('${esc(s.name)}','${v}')">${l}</span>`;
+        return `<tr>
         <td><b>${esc(s.name)}</b>${s.lines?"":' <span class="pill">no line items</span>'}</td>
         <td><input type="email" value="${esc(c.rep_email)}" placeholder="${esc(supplierEmail(s.name)||"none known")}"
              style="width:100%;font-size:12px;padding:6px 8px" onchange="saveSupplier('${esc(s.name)}','rep_email',this.value)"></td>
-        <td class="num"><input type="checkbox" ${c.visible?"checked":""} onchange="saveSupplier('${esc(s.name)}','visible',this.checked?'yes':'no')"></td>
-        <td class="num"><input type="checkbox" ${c.portal_only?"checked":""} onchange="saveSupplier('${esc(s.name)}','portal_only',this.checked?'yes':'no')"></td>
+        <td class="num"><span style="display:inline-flex;gap:4px">${chip("here","Order here")}${chip("portal","Portal")}${chip("off","Off")}</span></td>
       </tr>`;}).join("")}</tbody></table>
       <div class="note">
         <b>Sales rep email</b> is who you order from, deliberately separate from the address invoices arrive from —
-        the greyed placeholder is what the invoices suggest, and it's usually a no-reply robot.<br>
-        <b>Portal only</b> keeps a supplier off the ordering list while their invoices still count toward spend and
-        COGS. <b>Visible</b> hides them from ordering entirely. Both apply to every view, for everyone.
+        the greyed placeholder is what the invoices suggest, and it's usually a no-reply robot. Shared with
+        Cambridge Central: it is a fact about the supplier.<br>
+        <b>Ordering</b> is <b>this dashboard's setting only</b>. <b>Order here</b>: on the Order tab with a Build order
+        button. <b>Portal</b>: they insist on their own ordering platform — off the Order tab, the supplier page says so.
+        <b>Off</b>: off the Order tab, nothing said. Spend, reports and the statement show every supplier in every state.
       </div>
     </div>
     <div class="card"><div class="label">Category overrides — ${overrides.length} set by hand</div>
@@ -2507,10 +3172,23 @@ function renderAdmin(){
     </div>`;
 }
 async function saveSupplier(name,field,value){
-  const cur=sset(name);
-  SSET[norm(name)]=Object.assign({},cur,{[field]: field==="visible"?value!=="no":field==="portal_only"?value==="yes":value});
+  SSET[norm(name)]=Object.assign({},SSET[norm(name)]||{},{[field]:value});
   try{ await post({action:"supplier_setting",supplier:name,field,value}); toast("Saved for everyone."); }
   catch(e){ if(e.message==="no-webapp") toast("Not saved — WEBAPP_URL isn't set."); else alert(e.message); }
+}
+async function saveOrdering(name,value){
+  if(["here","portal","off"].indexOf(value)<0) return;
+  SSET[norm(name)]=Object.assign({},SSET[norm(name)]||{},{ordering:value});
+  GCAT=null;   // the every-supplier catalogue excludes "off" suppliers, so it must rebuild
+  route();
+  /* CAMBRIDGE: written as the two SupplierSettings columns this dashboard has always used.
+     here = visible yes, portal no; portal = visible yes, portal yes; off = visible no. */
+  const vis=value==="off"?"no":"yes", por=value==="portal"?"yes":"no";
+  try{
+    await post({action:"supplier_setting",supplier:name,field:"visible",value:vis});
+    await post({action:"supplier_setting",supplier:name,field:"portal_only",value:por});
+    toast("Saved — Cambridge Central only.");
+  }catch(e){ if(e.message==="no-webapp") toast("Not saved — WEBAPP_URL isn't set."); else alert(e.message); }
 }
 
 /* ================= DISPATCH ================= */
@@ -2631,7 +3309,7 @@ function offerFav(lines,supplier){
     <div style="font-size:13px;margin-bottom:8px">Give it a name and it can be reloaded as an editable order.</div>
     <input type="text" id="favname" placeholder="e.g. Monday Kitchen Run" style="width:100%">
     <div style="display:flex;gap:8px;margin-top:12px">
-      <a class="btn" id="favok">Save favourite</a><a class="btn outline" onclick="closeModal();go('')">No thanks</a></div>`);
+      <a class="btn" id="favok">Save favourite</a><a class="btn outline" onclick="closeModal();go('order')">No thanks</a></div>`);
   document.getElementById("favok").onclick=()=>{
     const n=document.getElementById("favname").value.trim(); if(!n) return;
     saveFav(n,lines,supplier);
