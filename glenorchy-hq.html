@@ -150,7 +150,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v17-1545"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v18-1545"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1966,6 +1966,15 @@ function usualWords(U){
   if(U.short) return `the same days of the last ${AVG_WEEKS} weeks`;
   return `the ${AVG_WEEKS} full weeks before the range, scaled${U.sc.live?` to the ${U.sc.elapsed} of ${U.sc.days} days so far`:""}`;
 }
+/* The arrow after a product's Qty on the purchasing views (supplier page, Top 10 purchased). */
+function productMark(p){
+  if(p.isNew) return ' <span class="pill" title="never bought from this supplier before this range">new</span>';
+  const u=p.live?p.usualQtyFull:p.usualQty; if(!(u>0)) return "";
+  const fmt=Math.round(u*10)/10;
+  if(p.up) return ` <span class="up" title="${p.live?"already more than a whole normal week":"more than usual"} — usual ${fmt}, most in any recent week ${Math.round(p.maxWk*10)/10}">▲</span>`;
+  if(p.down) return ` <span class="down" title="usual ${fmt}">▼</span>`;
+  return "";
+}
 /* more than usual = ▲. For spend that is the red one; for sales it is the green one. */
 function usualMark(actual,usual,kind){
   if(!(usual>0)) return "";
@@ -2015,16 +2024,37 @@ function rangeProducts(range){
     if(w4.length){
       p.usualQty=w4.reduce((s,b)=>s+b.qty,0)*U.factor(AVG_WEEKS);
       p.usualSpend=w4.reduce((s,b)=>s+b.total,0)*U.factor(AVG_WEEKS);
+      p.usualQtyFull=p.usualWk*sc.weeks; p.usualSpendFull=p.usualSpendWk*sc.weeks;
       p.usualHow="like";
     } else {
       const lFrom=addD(mid(range.start),-7*USUAL_LONG_WEEKS), wL=p.before.filter(b=>b.date>=lFrom);
       const k=sc.weeks*(sc.live?sc.frac:1)/USUAL_LONG_WEEKS;
       p.usualQty=wL.reduce((s,b)=>s+b.qty,0)*k;
       p.usualSpend=wL.reduce((s,b)=>s+b.total,0)*k;
+      const kF=sc.weeks/USUAL_LONG_WEEKS;
+      p.usualQtyFull=wL.reduce((s,b)=>s+b.qty,0)*kF; p.usualSpendFull=wL.reduce((s,b)=>s+b.total,0)*kF;
       p.usualHow=wL.length?"occasional":"none";
     }
     p.delta=p.spend-p.usualSpend;
     p.isNew=!p.before.length;
+    /* THE FLAG (Adrian, 29 Sep 2026). While the range is running, ▲ only once this product has
+       already passed a whole normal range of it (+10%): more chicken than a full usual week by
+       Tuesday is real, a Monday delivery of a normal amount is not. Nothing is ▼ until the range
+       is over. Finished ranges compare with the usual in the ordinary way. New products carry
+       neither. p.over is the dollars past a whole normal range (live) or past usual (finished). */
+    p.live=sc.live;
+    /* AND beyond its own busiest recent week (29 Sep 2026). A product bought a carton every few
+       weeks averages under one a week, so buying one would always beat "a normal week"; it must
+       also beat every single week in the window its usual came from (4 weeks, or 12 for an
+       occasional line). ▼ likewise needs less than every week in the last 4, all of which had
+       some. Tested on Glenorchy: this week 23 ▲ → 4, last week 96 ▲ → about 30. */
+    const nW=p.usualHow==="occasional"?USUAL_LONG_WEEKS:AVG_WEEKS, wk=Array(nW).fill(0), s0=+mid(range.start);
+    p.before.forEach(b=>{ const d=Math.round((s0-+mid(b.date))/864e5); if(d>=1&&d<=7*nW) wk[Math.ceil(d/7)-1]+=b.qty; });
+    p.maxWk=Math.max(...wk); const minWk=Math.min(...wk.slice(0,AVG_WEEKS));
+    const u=p.live?p.usualQtyFull:p.usualQty;
+    p.up=!p.isNew&&u>0&&p.qty>Math.max(u*1.1,p.maxWk);
+    p.down=!p.isNew&&!p.live&&p.usualQty>0&&minWk>0&&p.qty<Math.min(p.usualQty*0.9,minWk);
+    p.over=p.live?p.spend-(p.usualSpendFull||0):p.delta;
     return p;
   });
 }
@@ -2047,7 +2077,7 @@ function repBoughtCard(range,prods){
       <tbody>${top.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
         <td><b>${esc(p.desc)}</b></td>
         <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
-        <td class="num">${qtyFmt(p.qty,p.unit)}${usualMark(p.qty,p.usualQty,"spend")}</td>
+        <td class="num">${qtyFmt(p.qty,p.unit)}${productMark(p)}</td>
         <td class="num"><b>${money(p.spend)}</b></td>
         <td class="num hide-sm" style="color:var(--dim)">${tot?pct1(p.spend/tot*100):""}</td>
         <td class="num">${money(p.price)} ${creepChip(p)}</td></tr>`).join("")}</tbody></table>
@@ -2217,7 +2247,7 @@ function renderGroupDrill(group){
    that week, a Month range under the Week toggle shows the four or five weeks it touches,
    and nothing from outside the range appears. Reconcile these against the supplier's own
    statement; a difference is a missing invoice or a billing error. */
-let STMT_PERIOD="week", SUPP_PROD_SORT={key:"delta",dir:-1};
+let STMT_PERIOD="week", SUPP_PROD_SORT={key:"spend",dir:-1};
 function setStmt(v){ STMT_PERIOD=v; route(); }
 function sortSuppProds(k){ if(SUPP_PROD_SORT.key===k) SUPP_PROD_SORT.dir*=-1; else SUPP_PROD_SORT={key:k,dir:k==="name"||k==="cat"?1:-1}; route(); }
 function statementCard(name,range){
@@ -2269,13 +2299,20 @@ function driversNote(name,prods,range){
   const over=spend>u.scaled*1.1, under=spend<u.scaled*0.9;
   const usualTxt=`usual ${money0(u.scaled)} (${usualWords(u.U)})`;
   if(!over&&!under) return `<div class="note" style="margin:0 0 10px"><b>About usual</b> — ${money0(spend)} against ${usualTxt}.</div>`;
-  const pool=over?prods.filter(p=>p.delta>=DELTA_MIN).sort((a,b)=>b.delta-a.delta):prods.filter(p=>p.delta<=-DELTA_MIN).sort((a,b)=>a.delta-b.delta);
+  /* Only products carrying an arrow are named: mid-week, those already past a whole normal week;
+     on a finished range, those more than 10% over (or under) usual. New products never. */
+  const pool=over?prods.filter(p=>p.up&&p.over>=DELTA_MIN).sort((a,b)=>b.over-a.over)
+                 :prods.filter(p=>p.down&&p.delta<=-DELTA_MIN).sort((a,b)=>a.delta-b.delta);
   const top=pool.slice(0,3), rest=pool.length-top.length;
-  const list=top.map(p=>`<b>${esc(p.desc)}</b> ${over?"+":"−"}${money0(Math.abs(p.delta))}${p.isNew?" (new)":""}`).join(", ");
+  const list=top.map(p=>`<b>${esc(p.desc)}</b> ${over?"+":"−"}${money0(Math.abs(over?p.over:p.delta))}`).join(", ");
+  const lead=over?(sc.live?"Already past a normal week":"Driving it"):"Biggest drops";
+  const tail=over?(!top.length&&sc.live?`<span style="color:var(--dim)">No single product is past a normal week yet — it's timing so far.</span>`:"")
+                 :(sc.live?`<span style="color:var(--dim)">Products only read ▼ once the week is over.</span>`
+                          :`<span style="color:var(--dim)">Products not bought at all in the range are not listed.</span>`);
   return `<div id="drivers" style="font-size:13px;margin:0 0 10px;line-height:1.5">
     <b class="${over?"up":"down"}">${money0(Math.abs(d))} ${over?"over":"under"} usual</b> — ${money0(spend)} against ${usualTxt}.
-    ${top.length?`${over?"Driving it":"Biggest drops"}: ${list}${rest?` and ${rest} more`:""}.`:""}
-    ${under?`<span style="color:var(--dim)">Products not bought at all in the range are not listed.</span>`:""}</div>`;
+    ${top.length?`${lead}: ${list}${rest?` and ${rest} more`:""}.`:""}
+    ${tail}</div>`;
 }
 const deltaChip=p=>{
   if(p.isNew) return `<span class="up">+${money(p.spend)}</span> <span class="pill" title="never bought before this range">new</span>`;
@@ -2290,7 +2327,7 @@ function renderSupplierProducts(name){
   const rows=all.filter(p=>SHOW_HIDDEN||!p.hidden), hiddenN=all.length-rows.length;
   const K={name:p=>p.desc.toLowerCase(),cat:p=>p.cat.toLowerCase(),qty:p=>p.qty,spend:p=>p.spend,price:p=>p.price,
            was:p=>p.base,change:p=>p.change==null?-Infinity:p.change,delta:p=>p.delta};
-  const fn=K[SUPP_PROD_SORT.key]||K.delta;
+  const fn=K[SUPP_PROD_SORT.key]||K.spend;
   rows.sort((a,b)=>{const x=fn(a),y=fn(b);return (x<y?-1:x>y?1:0)*SUPP_PROD_SORT.dir||a.desc.localeCompare(b.desc);});
   const head=(k,l,cls)=>`<th class="s ${cls||""} ${SUPP_PROD_SORT.key===k?"act":""}" onclick="sortSuppProds('${k}')">${l}${SUPP_PROD_SORT.key===k?(SUPP_PROD_SORT.dir<0?" ▼":" ▲"):""}</th>`;
   /* Money over every product, turned-off ones included — they leave the ordering screens,
@@ -2307,21 +2344,22 @@ function renderSupplierProducts(name){
       ${rows.length?`<div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:6px">${money(spend)}</div>
       ${driversNote(name,all,range)}
       <table><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}${head("qty","Qty","num")}
-        ${head("spend","Spend","num")}${head("delta","vs usual","num")}${head("price","Price","num")}${head("was","Was","num hide-sm")}${head("change","Change","num")}</tr></thead>
+        ${head("spend","Spend","num")}${head("price","Price","num")}${head("was","Was","num hide-sm")}${head("change","Change","num")}</tr></thead>
       <tbody>${rows.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
         <td><b>${esc(p.desc)}</b>${p.unit?` <span style="color:var(--dim);font-size:11px">(${esc(p.unit)})</span>`:""}${p.hidden?' <span class="pill">off</span>':""}</td>
         <td class="hide-sm"><span class="pill">${esc(p.cat)}</span></td>
-        <td class="num">${Math.round(p.qty*100)/100}${usualMark(p.qty,p.usualQty,"spend")}</td>
+        <td class="num">${Math.round(p.qty*100)/100}${productMark(p)}</td>
         <td class="num">${money(p.spend)}</td>
-        <td class="num">${deltaChip(p)}</td>
         <td class="num"><b>${money(p.price)}</b></td>
         <td class="num hide-sm" title="${p.baseFromBefore?"last paid before the range, "+fmtD(p.baseDate):"first price inside the range"}">${p.baseFromBefore?money(p.base):'<span style="color:var(--dim)">—</span>'}</td>
         <td class="num">${creepChip(p)}</td></tr>`).join("")}</tbody></table>
       <div class="note">Line totals with delivery and fees stripped, so this will not match the statement to the cent.
-        <b>vs usual</b> is the dollars above or below what this product usually comes to — ${usualWords(usualPlan(range))};
-        something bought now and then is measured against its ${USUAL_LONG_WEEKS}-week average. Under $${DELTA_MIN} either way is
-        shown grey. The list opens with what is driving the total. The arrow after Qty says whether it was more of it (hover for the usual);
-        Change says whether it was the price. <b>Was</b> is the last price paid before the range; Change compares the latest
+        ${rangeScale(range).live
+          ?`<b>▲ after Qty</b> means you have <i>already</i> bought more of it than in a whole normal week <i>and</i> more than in any
+            single one of the last ${AVG_WEEKS} weeks (${USUAL_LONG_WEEKS} for something bought now and then) — the week isn't over, so
+            nothing reads ▼ yet, and an early delivery of the usual amount doesn't count.`
+          :`<b>▲▼ after Qty</b> mean more (or less) of it than usual by 10% <i>and</i> than in any single one of the last ${AVG_WEEKS} weeks.`}
+        Hover for the usual. <b>new</b> is something not bought from them before. Change says whether it was the price. <b>Was</b> is the last price paid before the range; Change compares the latest
         price in the range with it, and is blank when nothing was bought before. Tap a product for its price history.</div>`
       :`<div class="note">No product lines from ${esc(name)} in ${esc(range.label)}.</div>`}
     </div>
@@ -3192,9 +3230,10 @@ function renderHelp(){
       bought from them in the range with its price and any change, and the invoices themselves — tap one to see its
       lines. All for the range in the bar.</p>
     <p><b>When a supplier is ▲ on the front page</b>, this page says why. The line above the products is how far over
-      usual the spend is and the three products doing most of it; the list opens sorted by <b>vs usual</b>, the dollars
-      each product is above or below its normal run. The arrow after Qty tells you it was <i>more of it</i>; a change on
-      the price tells you it was <i>dearer</i>; <b>new</b> is something we had not bought from them before.</p>
+      usual the spend is so far, against the same days of the last 4 weeks, and the products doing it. A red <b>▲</b> after
+      Qty means we have <i>already</i> bought more of it than in a whole normal week — an early delivery of the usual amount
+      doesn't count, and nothing reads ▼ until the week is over. A change on the price tells you it was <i>dearer</i>;
+      <b>new</b> is something we had not bought from them before.</p>
 
     <h2>Questions</h2>
     <p>Anything confusing, or anything you want that is not here — tell Adrian. The page changes every week or so and
