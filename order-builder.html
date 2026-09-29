@@ -153,7 +153,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v23-1330"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v23-1345"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -3068,14 +3068,16 @@ function renderHelp(){
       I do, updates itself, and works on a phone. Nothing here can be broken by clicking on it.</p>
 
     <h2>Getting around</h2>
-    <img src="help/nav.png" alt="The header">
+    <img src="help/cambridge/nav.png" alt="The header">
     <p>${B(1)}<b>Reports</b> — top 10 bought, top 10 sold, wastage, price creep. ${B(2)}<b>Sales</b> — the day-by-day
       sales view. ${B(3)}<b>Order</b> — the ordering tool, if you use it. ${B(4)}<b>Admin</b> — supplier settings. ${B(5)}<b>?</b> — this page.
       The <b>Cambridge Central</b> logo is the front page: suppliers by spend. On the <b>Order</b> and <b>Sales</b> tabs a
       <b>Cambridge · Luma</b> switch appears in the header: ordering is per kitchen, the books are one. <b>↻</b> reloads the numbers.</p>
+    <img src="help/cambridge/switch.png" alt="The Cambridge / Luma switch">
+    <div class="cap">${B(1)} On Order and Sales only. Everything else is both kitchens together.</div>
 
     <h2>The date range</h2>
-    <img src="help/range-bar.png" alt="The range bar">
+    <img src="help/cambridge/range-bar.png" alt="The range bar">
     <p>The grey bar sits at the top of the front page, Reports and every supplier page, and <b>everything below it
       follows it</b>. Change it once and every card changes.</p>
     <ul>
@@ -3088,17 +3090,17 @@ function renderHelp(){
       the week you would have had in the Monday email.</p>
 
     <h2>The four boxes at the top</h2>
-    <img src="help/header-week.png" alt="The header in the current week">
+    <img src="help/cambridge/header-week.png" alt="The header in the current week">
     <p>In the <b>current week</b> this is the countdown against the 30% target: what has been spent, what is left to
       spend, income so far with a forecast for the rest of the week, and where COGS is projected to land. If
       <b>Left to spend</b> goes red we are over for the week. <b>catch-up</b> folds this month's over- or under-spend so
       far into the week's envelope — use it after a heavy week to see what you have to claw back.</p>
-    <img src="help/header-month.png" alt="The header for a month">
+    <img src="help/cambridge/header-month.png" alt="The header for a month">
     <p>For <b>any other range</b> there is no forecast, just the books: what was spent, the <b>tally</b> against 30% of
       income (green is under, red is over — the amount to claw back next period), income, and the actual COGS %.</p>
 
     <h2>Front page — suppliers by spend</h2>
-    <img src="help/front-page.png" alt="Suppliers by spend">
+    <img src="help/cambridge/front-page.png" alt="Suppliers by spend">
     <p>Every supplier we bought from in the range, biggest first. <b>Usual/wk</b> is what we normally spend on them
       per week (the four full weeks before); a red ▲ means this range is more than 10% over that, green ▼ under. Tap a
       column heading to sort, tap a supplier to open it.</p>
@@ -3109,13 +3111,13 @@ function renderHelp(){
       <li>Check the range bar says the week you want — on a Monday, tap <b>‹</b> for last week.</li>
       <li>Scroll to <b>Wastage</b>.</li>
     </ol>
-    <img src="help/reports-wastage.png" alt="The wastage card">
+    <img src="help/cambridge/reports-wastage.png" alt="The wastage card">
     <p>Worst first by % wasted, red at 25% or more. <b>Value</b> is what the binned items would have sold for, so it is
       what the bin actually cost. It counts a $0 sale in a perishable group (sandwiches, cakes, hot takeaway, grab &amp;
       go) for an item that also sold for money — a loyalty coffee is not wastage.</p>
 
     <h2>The rest of Reports</h2>
-    <img src="help/reports-top10.png" alt="Top 10 purchased and sold">
+    <img src="help/cambridge/reports-top10.png" alt="Top 10 purchased and sold">
     <p><b>Top 10 purchased</b>: what the money went on. The arrow after the quantity compares with what we usually buy
       of it (hover for the figure); the arrow after the price is a price change against what we were paying before
       the range. <b>Top 10 sold</b>: by revenue or by units, with units per trading day and the same arrow against the
@@ -3123,7 +3125,7 @@ function renderHelp(){
       row is the phone call worth making.</p>
 
     <h2>A supplier's page</h2>
-    <img src="help/supplier.png" alt="A supplier page">
+    <img src="help/cambridge/supplier.png" alt="A supplier page">
     <p>Tap any supplier on the front page. A weekly or monthly statement to reconcile against theirs, every product we
       bought from them in the range with its price and any change, and the invoices themselves — tap one to see its
       lines. All for the range in the bar.</p>
