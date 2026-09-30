@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-301300"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-301500"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -1558,6 +1558,17 @@ function fcWhy(d, label, moneyFn, withLines, start, today){
   return `<div style="font-size:11px;color:var(--dim);margin-top:2px">${label} ${dir} the usual ${moneyFn(d.usual)} by day ${d.elapsedDays} — ${bits.join("; ")}</div>`;
 }
 
+/* Projected COGS % for the period, the same figure the forecast card shows. Null when there
+   is nothing to project from. */
+function kpiForecastCogsPct(m){
+  if(!m||m.sales.basis==="none"||!(m.sales.projected>0)) return null;
+  const sSpend=fcSettle(m.spend,m.bSpend), sSales=fcSettle(m.sales,m.bSales), sCogs=fcSettle(m.cogs,m.bCogs);
+  const cogsV=Math.max(m.cogs.actual, Math.min(sCogs.mid, sSpend.mid));
+  let r=cogsV/sSales.mid;
+  if(m.bRatio) r*=m.bRatio.mid;
+  return r;
+}
+
 function forecastCard(){
   if(fcHidden()) return `<div class="card" style="padding:8px 14px"><span style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">Forecast hidden</span> <a style="cursor:pointer;font-size:11px;color:var(--red);text-decoration:underline;margin-left:8px" onclick="fcSetHidden(false)">show</a></div>`;
   const m=forecastModel();
@@ -1576,7 +1587,10 @@ function forecastCard(){
   let cogsMid=haveSales?cogsMidV/sSales.mid:null, cogsLo=null, cogsHi=null;
   if(cogsMid!=null&&m.bRatio){
     const raw=cogsMid;
-    cogsMid=raw/(1+m.bRatio.mid); cogsLo=raw/(1+m.bRatio.hi); cogsHi=raw/(1+m.bRatio.lo);
+    /* bRatio holds RATIOS of actual to projected (see fcBand), so they multiply. This line
+       used to divide by (1 + ratio), left over from when the band held errors - which halved
+       the figure: ~16.5% on screen against a true ~32% (30 Sep 2026). */
+    cogsMid=raw*m.bRatio.mid; cogsLo=raw*m.bRatio.lo; cogsHi=raw*m.bRatio.hi;
   }
   const pctS=v=>v==null?"—":(Math.round(v*1000)/10)+"%";
 
@@ -1760,11 +1774,12 @@ function wagesByDay(shifts, rates){
 }
 
 /* Totals for the current filter, so the KPI card can show a live wage figure. */
-function wagesInScope(){
+function wagesInScope(before){
   if(!SHIFTS_OK) return null;
   let cost=0, est=0, hours=0, leave=0, training=0;
   SHIFTS.forEach(s=>{
     if(!inScope(s.venue,s.date)) return;
+    if(before && s.date>=before) return;
     const c=shiftCost(s,WAGE_RATE);
     if(!(c.cost>0)) return;
     cost+=c.cost; hours+=s.hours; if(c.est) est+=c.cost;
@@ -2076,6 +2091,10 @@ function overheadsCard(){
     o.n++; o.total+=r.total; if(!o.last||r.date>o.last)o.last=r.date;});
   const U=ohUsual();
   const cmp=U&&!U.short;
+  const ohT=fcMid(new Date()), ohF=fromDate(), ohTo=toDate();
+  const ohRunning=!!(ohF&&ohTo&&ohF<=ohT&&ohTo>=ohT);
+  const ohSales=ohRunning?0:scopedSales().reduce((a,r)=>a+r.sales,0);
+  const pS=v=>ohSales?(Math.round(v/ohSales*1000)/10)+"%":"";
   const running=cmp&&toDate()&&toDate()>=fcMid(new Date());
   Object.entries(by).forEach(([s,o])=>{ o.u=cmp?(U.bySup[s]||null):null; o.delta=o.u?o.total-o.u.usual:null; });
   const K={name:e=>e[0].toLowerCase(), group:e=>String(e[1].group).toLowerCase(), n:e=>e[1].n, total:e=>e[1].total,
@@ -2103,9 +2122,9 @@ function overheadsCard(){
     ? `Arrows compare each supplier with its median over the previous ${U.unit}s it was billing in (up to ${OH_LOOKBACK}): <span class="up">▲</span> more than usual, <span class="down">▼</span> less, – within 10%. Hover for the numbers.${running?" This period isn't finished, so a bill still to come can read as ▼.":""}`
     : (U&&U.short ? `No up/down arrows on a range this short — overhead bills are monthly, so pick Month or Quarter to compare.` : "");
   return `<div class="card"><div class="label">Overheads — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""} · ${inc?"included in the totals above":"not in the totals above"}</div>
-    ${list.length?`<table><thead><tr>${head("name","Supplier")}${head("group","Group","hide-sm")}${head("n","Invoices","num")}${head("total","Spend","num")}${cmp?head("usual","Usual","num hide-sm"):""}${head("last","Last bill","num hide-sm")}</tr></thead>
-      <tbody>${list.map(([s,o])=>`<tr class="click" onclick="go('s::${encodeURIComponent(s)}')"><td>${esc(s)}</td><td class="hide-sm">${esc(o.group)}</td><td class="num">${o.n}</td><td class="num"><b>${money(o.total)}</b>${arrow(o.total,o.u)}</td>${usualCell(o)}<td class="num hide-sm">${fmtD(o.last)}</td></tr>`).join("")}</tbody>
-      <tfoot><tr><td><b>Total</b></td><td class="hide-sm"></td><td class="num">${rows.length}</td><td class="num"><b>${money(tot)}</b>${cmp?arrow(tot,U.total):""}</td>${cmp?`<td class="num hide-sm">${U.total?money(U.total.usual):""}</td>`:""}<td class="hide-sm"></td></tr></tfoot></table>`
+    ${list.length?`<table><thead><tr>${head("name","Supplier")}${head("group","Group","hide-sm")}${head("n","Invoices","num")}${head("total","Spend","num")}${ohSales?`<th class="num hide-sm">% of sales</th>`:""}${cmp?head("usual","Usual","num hide-sm"):""}${head("last","Last bill","num hide-sm")}</tr></thead>
+      <tbody>${list.map(([s,o])=>`<tr class="click" onclick="go('s::${encodeURIComponent(s)}')"><td>${esc(s)}</td><td class="hide-sm">${esc(o.group)}</td><td class="num">${o.n}</td><td class="num"><b>${money(o.total)}</b>${arrow(o.total,o.u)}</td>${ohSales?`<td class="num hide-sm">${pS(o.total)}</td>`:""}${usualCell(o)}<td class="num hide-sm">${fmtD(o.last)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td><b>Total</b></td><td class="hide-sm"></td><td class="num">${rows.length}</td><td class="num"><b>${money(tot)}</b>${cmp?arrow(tot,U.total):""}</td>${ohSales?`<td class="num hide-sm"><b>${pS(tot)}</b></td>`:""}${cmp?`<td class="num hide-sm">${U.total?money(U.total.usual):""}</td>`:""}<td class="hide-sm"></td></tr></tfoot></table>`
       :`<div style="font-size:13px;color:var(--dim)">No overhead bills dated in this range.</div>`}
     ${quiet.length?`<div style="font-size:11px;color:var(--dim);margin-top:8px">Regular bills with nothing in this range: ${quiet.map(quietTxt).join("; ")}. Bills are dated on the invoice date, so a monthly bill only shows in the period it's dated.</div>`:""}
     ${foot?`<div style="font-size:11px;color:var(--dim);margin-top:6px">${foot}</div>`:""}
@@ -2127,23 +2146,66 @@ function renderReports(){
     const mk=monthKey(r.date);
     (byMonth[mk]=byMonth[mk]||{s:0,n:0}).s+=r.total; byMonth[mk].n++;
   });
-  const tbl=(obj,label,keyFmt)=>{
+  /* % of SALES alongside % of spend. These tables used to show one column headed "% of total"
+     that was a share of SPEND - so Glenorchy's August rent, $14,188.30, read 16.3% when it is
+     6.4% of that venue's $222,731.16 sales (30 Sep 2026). Now both, each labelled.
+     salesFor(k) gives the sales a row is measured against: the venue's own sales on the By venue
+     table, the month's on By month, the whole scope's everywhere else. While the period is
+     still running the sales column is left out - a week's deliveries against two days of
+     takings is the same mistake the KPI card was making. */
+  const pctCell=(a,b)=>b?(Math.round(a/b*1000)/10)+"%":'<span style="color:var(--dim)">—</span>';
+  const tbl=(obj,label,keyFmt,salesFor)=>{
     const rows=Object.entries(obj).sort((a,b)=>b[1].s-a[1].s);
+    const showS=!!salesFor;
     return `<div class="card"><div class="label">${label}</div>
-      <table><thead><tr><th></th><th class="num">Invoices</th><th class="num">Spend</th><th class="num hide-sm">% of total</th></tr></thead>
-      <tbody>${rows.map(([k,v])=>`<tr><td>${esc(keyFmt?keyFmt(k):k)}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td><td class="num hide-sm">${tot.spend?Math.round(v.s/tot.spend*1000)/10:0}%</td></tr>`).join("")}</tbody></table></div>`;
+      <table><thead><tr><th></th><th class="num">Invoices</th><th class="num">Spend</th><th class="num hide-sm">% of spend</th>${showS?`<th class="num">% of sales</th>`:""}</tr></thead>
+      <tbody>${rows.map(([k,v])=>`<tr><td>${esc(keyFmt?keyFmt(k):k)}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td><td class="num hide-sm">${pctCell(v.s,tot.spend)}</td>${showS?`<td class="num">${pctCell(v.s,salesFor(k))}</td>`:""}</tr>`).join("")}</tbody>
+      ${showS?`<tfoot><tr><td><b>Total</b></td><td class="num">${tot.n}</td><td class="num"><b>${money(tot.spend)}</b></td><td class="num hide-sm">100%</td><td class="num"><b>${pctCell(tot.spend,salesAll)}</b></td></tr></tfoot>`:""}
+      </table>${showS?`<div style="font-size:11px;color:var(--dim);margin-top:6px">${label==="By venue"?`% of sales is each venue's spend against its own sales (${money(salesAll)} across all venues).`:`% of sales is against the ${money(salesAll)} of sales in this range.`}</div>`:""}</div>`;
   };
   const monthRows=Object.entries(byMonth).sort((a,b)=>a[0]<b[0]?-1:1);
 
   // KPI section (needs a "Sales" tab: date, venue, sales, wages)
-  const salesScope=scopedSales();
+  /* A period still running can't be read like a finished one. A week's deliveries land early
+     (Mon-Wed), while its sales arrive day by day and today's are partial - so spend-to-date
+     over sales-to-date read 86% COGS and 103% prime cost on a Wednesday (30 Sep 2026), and
+     Sales looked a quarter of a week short because it WAS a quarter of a week.
+     So while running: Sales and Wages cover the FINISHED days only (both accrue daily, so
+     they compare like for like), and COGS % is the forecast's projection for the whole
+     period, which is built for exactly this. */
+  const kToday=fcMid(new Date()), kFrom=fromDate(), kTo=toDate();
+  const kRunning=!!(kFrom&&kTo&&kFrom<=kToday&&kTo>=kToday);
+  const kDone=kRunning?Math.round((kToday-fcMid(kFrom))/864e5):0;
+  const kDays=kRunning?Math.round((fcMid(kTo)-fcMid(kFrom))/864e5)+1:0;
+  const salesScope=scopedSales().filter(s=>!kRunning||s.date<kToday);
   const salesTot=salesScope.reduce((s,r)=>s+r.sales,0);
   const wagesTot=salesScope.reduce((s,r)=>s+r.wages,0);
   /* Deputy wins where it has data. The weekly form sheets are the payroll record but
      arrive only after week end, so a week still running showed no wages at all and the
      tiles vanished. Deputy is daily, includes leave and training, and can be estimated
      for shifts not yet exported to payroll. Falls back to the forms when it has none. */
-  const dep=wagesInScope();
+  /* Wages lag sales: Deputy only holds timesheets up to the last day processDeputy pulled
+     (on 30 Sep it had Monday but not Tuesday). Dividing two days of sales into one day of
+     wages halves Wages %. So while running, Wages % uses the sales for the SAME days the
+     timesheets cover, and says which days those are. */
+  let wCut=kRunning?kToday:null;
+  if(kRunning){
+    let last=null;
+    SHIFTS.forEach(x=>{ if(x.date&&venueOk(x.venue)&&(!last||x.date>last)) last=x.date; });
+    if(last){ const nx=fcAdd(fcMid(last),1); if(nx<wCut) wCut=nx; }
+  }
+  const dep=wagesInScope(wCut);
+  const wSales=kRunning?scopedSales().filter(x=>x.date<wCut).reduce((a,r)=>a+r.sales,0):salesTot;
+  const wDays=kRunning?Math.max(0,Math.round((wCut-fcMid(kFrom))/864e5)):0;
+  /* The same weekdays a week earlier, for scale: a Monday alone runs 40%+ wages (short
+     trading day, full salaried day) and looks alarming without something to hold it against. */
+  let wPrev=null;
+  if(kRunning&&wDays>0&&SHIFTS_OK){
+    const pa=fcAdd(fcMid(kFrom),-7), pb=fcAdd(wCut,-7);
+    let pw=0; SHIFTS.forEach(x=>{ if(x.date>=pa&&x.date<pb&&venueOk(x.venue)) pw+=shiftCost(x,WAGE_RATE).cost; });
+    const ps=SALES.filter(x=>x.date&&x.date>=pa&&x.date<pb&&venueOk(x.venue)).reduce((a,r)=>a+r.sales,0);
+    if(pw>0&&ps>0) wPrev=pw/ps;
+  }
   const wages=dep?dep.cost:wagesTot;
   const wageSrc=dep?"deputy":(wagesTot>0?"forms":"none");
   /* COGS always from the full set: with overheads excluded from inv, byGroup holds no
@@ -2153,17 +2215,71 @@ function renderReports(){
   const {cogs:cogsSpend,excluded:nonCogsSpend,unmapped}=cogsSplit(fullByGroup);
   const unmappedList=Object.entries(unmapped).sort((a,b)=>b[1]-a[1]);
   const kpiPct=(a,b)=>b?Math.round(a/b*1000)/10+"%":"—";
+  // Whole-range sales for the tables' "% of sales" columns (not the finished-days figure).
+  const salesAllRows=scopedSales();
+  const salesAll=salesAllRows.reduce((a,r)=>a+r.sales,0);
+  const salesByV={}, salesByM={};
+  salesAllRows.forEach(r=>{ salesByV[r.venue]=(salesByV[r.venue]||0)+r.sales; const mk=monthKey(r.date); salesByM[mk]=(salesByM[mk]||0)+r.sales; });
+  const sDen=!kRunning && salesAll>0;
+
+  /* Profit & loss for the range: sales less every captured expense, the balance being profit.
+     Always the FULL set of bills, whatever the overheads toggle says - a profit that quietly
+     drops the rent is not a profit. Finished periods only: part-way through a week the rent and
+     the deliveries have landed and most of the takings haven't. */
+  let pnlCard="";
+  if(!kRunning && salesAll>0){
+    /* EX GST throughout, as a P&L is. The feed's sales are Yellowfin's "Net Sales Inc GST"
+       (see BACKFILL-MISSING-DAY.md), so they come off at 1/11; bills come off by their own GST
+       field, because fresh food carries none and a flat 1/11 would overstate the saving.
+       Wages carry no GST. Manual purchases have no GST split and stay at their full amount. */
+    const salesEx=salesAll/1.1;
+    let cogsEx=0; const ohGroups={};
+    scopedInv().forEach(r=>{ const ex=(+r.total||0)-(+r.gst||0);
+      if(isNonCogs(r)){ const g=rowGroup(r)||"Other"; ohGroups[g]=(ohGroups[g]||0)+ex; } else cogsEx+=ex; });
+    const ohList=Object.entries(ohGroups).sort((a,b)=>b[1]-a[1]);
+    const ohTot=ohList.reduce((a,[,v])=>a+v,0);
+    const wagesP=wages||0;
+    const exp=cogsEx+wagesP+ohTot, profit=salesEx-exp;
+    const pc=v=>(Math.round(v/salesEx*1000)/10)+"%";
+    const line=(label,v,opts)=>`<tr${opts&&opts.top?' style="border-top:2px solid var(--ink)"':""}><td${opts&&opts.indent?' style="padding-left:22px;color:var(--dim)"':""}>${opts&&opts.bold?"<b>"+label+"</b>":label}</td><td class="num">${opts&&opts.bold?"<b>"+money(v)+"</b>":money(v)}</td><td class="num">${pc(v)}</td></tr>`;
+    const pcls=profit<0?"up":"down";
+    pnlCard=`<div class="card"><div class="label">Profit &amp; loss — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):" · all venues"}</div>
+      <table><thead><tr><th></th><th class="num">$ ex GST</th><th class="num">% of sales</th></tr></thead><tbody>
+        ${line("Sales",salesEx,{bold:true})}
+        ${line("Cost of goods",cogsEx,{top:true})}
+        ${line(wagesP>0?"Wages":"Wages — no labour data",wagesP)}
+        ${line("Overheads",ohTot)}
+        ${ohList.map(([g,v])=>line(esc(g),v,{indent:true})).join("")}
+        ${line("Total expenses",exp,{bold:true,top:true})}
+        <tr style="border-top:2px solid var(--ink)"><td><b>Profit</b></td><td class="num"><b class="${pcls}">${profit<0?"−":""}${money(Math.abs(profit))}</b></td><td class="num"><b class="${pcls}">${pc(profit)}</b></td></tr>
+      </tbody></table>
+      <div style="font-size:11px;color:var(--dim);margin-top:6px">Sales less every bill captured in this range and the wages above. Not a full P&amp;L: anything that never arrives as an invoice or a manual purchase (bank and card fees, loan repayments, insurance paid by direct debit, super and payroll tax if Deputy's cost leaves them out) isn't here, so the real profit is lower. Bills land on their invoice date — a quarterly bill or rent paid in advance falls wholly in one period, so a week can swing hard; a month or quarter reads truer. All figures ex GST: sales are the feed's GST-inclusive takings ÷ 1.1, bills are less their own GST, wages have none. So these won't match the GST-inclusive KPI tiles above.</div>
+    </div>`;
+  } else if(kRunning){
+    pnlCard=`<div class="card"><div class="label">Profit &amp; loss</div><div style="font-size:13px;color:var(--dim)">Shown once this period is finished. Step back a period (‹) for the last complete one.</div></div>`;
+  }
+  let kCogsPct=cogsSpend/salesTot, kCogsLbl="COGS % of sales", kFc=null;
+  if(kRunning){
+    kFc=forecastModel();
+    const fcP=kFc&&kpiForecastCogsPct(kFc);
+    kCogsPct=fcP; kCogsLbl=fcP!=null?"COGS % (projected)":"COGS % — not yet";
+  }
+  const pctOf=v=>v==null||!isFinite(v)?"—":Math.round(v*1000)/10+"%";
   const clampNote = (!FILTER.from && INV_MIN_DATE) ? ` (sales from ${fmtD(INV_MIN_DATE)}, matched to invoice history)` : "";
-  const kpiCard=salesTot>0?`
-    <div class="card"><div class="label">KPIs — ${esc(periodLabel())}${clampNote}</div>
+  const kpiCard=(kRunning&&kDone===0)?`
+    <div class="card"><div class="label">KPIs — ${esc(periodLabel())}</div>
+      <div style="font-size:13px;color:var(--dim)">First day of the period — KPIs appear once a full day of trade is in. The forecast above has the projection.</div>
+    </div>`:salesTot>0?`
+    <div class="card"><div class="label">KPIs — ${esc(periodLabel())}${clampNote}${kRunning?` · ${kDone} of ${kDays} days done`:""}</div>
       <div class="statgrid">
-        <div class="stat"><div class="v">${money(salesTot)}</div><div class="k">Sales</div></div>
-        <div class="stat"><div class="v">${kpiPct(cogsSpend,salesTot)}</div><div class="k">COGS % of sales</div></div>
-        ${wages>0?`<div class="stat"><div class="v">${kpiPct(wages,salesTot)}</div><div class="k">Wages % of sales</div></div>
-        <div class="stat"><div class="v">${kpiPct(cogsSpend+wages,salesTot)}</div><div class="k">Prime cost %</div></div>`:`<div class="stat"><div class="v" style="color:var(--dim)">—</div><div class="k">Wages % — no labour data</div></div>`}
+        <div class="stat"><div class="v">${money(salesTot)}</div><div class="k">${kRunning?"Sales, finished days":"Sales"}</div></div>
+        <div class="stat"><div class="v">${pctOf(kCogsPct)}</div><div class="k">${kCogsLbl}</div></div>
+        ${wages>0&&wSales>0?`<div class="stat"><div class="v">${kpiPct(wages,wSales)}</div><div class="k">${kRunning?(wDays<kDone?`Wages %, ${wDays} day${wDays===1?"":"s"} with timesheets`:"Wages %, finished days"):"Wages % of sales"}</div></div>
+        <div class="stat"><div class="v">${kCogsPct==null?"—":pctOf(kCogsPct+wages/wSales)}</div><div class="k">${kRunning?"Prime cost % (est.)":"Prime cost %"}</div></div>`:`<div class="stat"><div class="v" style="color:var(--dim)">—</div><div class="k">Wages % — no labour data</div></div>`}
       </div>
       <div style="font-size:11px;color:var(--dim);margin-top:6px">
-        COGS = ${money(cogsSpend)} of ${money(fullSpend)} spend; ${money(nonCogsSpend)} excluded as non-COGS (cleaning, equipment, energy, overheads and similar).
+        ${kRunning?`<b>This period isn't finished.</b> Sales are the ${kDone} finished day${kDone===1?"":"s"} only — today's trade is still coming in.${wDays<kDone?` Deputy has timesheets to ${fmtD(fcAdd(wCut,-1))} only, so Wages % is ${money(wages)} against the ${money(wSales)} of sales on those same ${wDays} day${wDays===1?"":"s"}.`:""}${wPrev!=null?` The same day${wDays===1?"":"s"} last week ran ${Math.round(wPrev*1000)/10}% wages — early-week days always run high.`:""} COGS % is the forecast's projection for the whole period: deliveries for the week land in its first few days, so spend so far against sales so far would read ${kpiPct(cogsSpend,salesTot)} and mean nothing. Prime cost is that projection plus wages to date.<br>`:""}
+        COGS ${kRunning?"so far ":""}= ${money(cogsSpend)} of ${money(fullSpend)} spend; ${money(nonCogsSpend)} excluded as non-COGS (cleaning, equipment, energy, overheads and similar).
         ${wageSrc==="deputy"?`<br>Wages ${money(wages)} from Deputy timesheets${dep.leave||dep.training?` including ${money(dep.leave+dep.training)} of leave and training`:``}${dep.est>0?`, of which ${money(dep.est)} is estimated from hours at recent rates because Deputy has not yet exported those shifts to payroll`:``}.`:``}
         ${SALES_SOURCE?`<br>Sales from the ImPOS feed from ${fmtD(SALES_SOURCE)}; earlier sales and all wages from the weekly reporting sheets, spread evenly across each week. Wages arrive the Monday after week end, so the current week shows none.`:""}
         ${unmappedList.length?`<br><b style="color:var(--red)">Unmapped:</b> ${unmappedList.map(([g,v])=>esc(g)+" "+money(v)).join(", ")} — counted in COGS; assign a group in supplier settings if that's wrong.`:""}
@@ -2189,13 +2305,14 @@ function renderReports(){
     </div>
     ${forecastCard()}
     ${kpiCard}
-    ${FILTER.venues.length===1?"":tbl(byVenue,"By venue")}
-    ${tbl(byGroup,"By group")}
-    ${tbl(byCat,"By category")}
+    ${pnlCard}
+    ${FILTER.venues.length===1?"":tbl(byVenue,"By venue",null,sDen?(k=>salesByV[k]||0):null)}
+    ${tbl(byGroup,"By group",null,sDen?(()=>salesAll):null)}
+    ${tbl(byCat,"By category",null,sDen?(()=>salesAll):null)}
     ${overheadsCard()}
     <div class="card"><div class="label">By month</div>
-      <table><thead><tr><th>Month</th><th class="num">Invoices</th><th class="num">Spend</th></tr></thead>
-      <tbody>${monthRows.map(([k,v])=>`<tr><td>${monthName(k)}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td></tr>`).join("")}</tbody></table></div>`;
+      <table><thead><tr><th>Month</th><th class="num">Invoices</th><th class="num">Spend</th><th class="num">Sales</th><th class="num">Spend % of sales</th></tr></thead>
+      <tbody>${monthRows.map(([k,v])=>{const sm=salesByM[k]||0; const partial=monthKey(kToday)===k; return `<tr><td>${monthName(k)}${partial?' <span style="color:var(--dim);font-size:11px">(to date)</span>':""}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td><td class="num">${sm?money(sm):'<span style="color:var(--dim)">—</span>'}</td><td class="num">${partial?'<span style="color:var(--dim)" title="Month not finished">—</span>':pctCell(v.s,sm)}</td></tr>`;}).join("")}</tbody></table></div>`;
 }
 
 /* ================= CONFIG VIEW ================= */
