@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-122900"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-300930"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -248,10 +248,18 @@ function scopedInv(){ return INV.filter(r=>supActive(r.supplier)&&inScope(r.venu
 // Home-page rows: scopedInv minus non-COGS bills unless the toggle is on. Deliberately NOT
 // folded into scopedInv(): Reports feeds cogsSplit(), and hiding the excluded rows there
 // would make it report $0 excluded while looking perfectly healthy.
+/* 30 Sep 2026: the home page is the PRODUCT supplier list, so overheads never appear on it,
+   whatever the toggle says. The toggle now drives Reports instead - which is where "turn
+   non-COGS off" was expected to change the total and didn't. */
 function scopedInvHome(){
+  return scopedInv().filter(r=>!isNonCogs(r));
+}
+/* Rows Reports totals are built from: everything, or COGS only, per the toggle. */
+function scopedInvReports(){
   const rows = scopedInv();
   return nonCogsShown() ? rows : rows.filter(r=>!isNonCogs(r));
 }
+function onReports(){ return decodeURIComponent(location.hash.slice(1)).split("::")[0]==="r"; }
 // What the toggle is holding back, for the chip. Hidden money should not be invisible money.
 function nonCogsHidden(){
   const rows = scopedInv().filter(isNonCogs);
@@ -725,7 +733,7 @@ function renderFilters(){
     <span style="color:var(--dim);font-size:12px">→</span>
     <input type="date" id="fTo" value="${FILTER.to}" onchange="setRange()">
     <span style="color:var(--line)">|</span>
-    ${nonCogsChip()}
+    ${onReports()?nonCogsChip():""}
     ${(FILTER.from||FILTER.to||FILTER.venues.length||FILTER.presetKind)?`<span class="clear" onclick="clearFilter()">clear</span>`:""}
   `;
 }
@@ -733,14 +741,15 @@ function renderFilters(){
    Guarded on INV because renderFilters runs once before the first fetch resolves. */
 function nonCogsChip(){
   const on = nonCogsShown();
-  let label = on ? "Non-COGS shown" : "Non-COGS hidden";
+  let label = on ? "Overheads in totals" : "Overheads excluded";
   if(!on && typeof INV!=="undefined" && INV && INV.length){
     const h = nonCogsHidden();
-    if(h.n) label = `Non-COGS hidden (${h.n} &middot; ${money(h.total)})`;
+    if(h.n) label = `Overheads excluded (${h.n} &middot; ${money(h.total)})`;
   }
   return `<span class="chip ${on?"on":""}" onclick="toggleNonCogs()" `
     + `title="Rent, energy, waste, repairs, equipment and other bills that aren't cost of goods. `
-    + `Front page only - Reports always shows everything.">${label}</span>`;
+    + `Decides whether Reports totals include them. They always have their own Overheads card, `
+    + `and never appear in the supplier list on the front page.">${label}</span>`;
 }
 function fmtISO(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function setPreset(kind){
@@ -917,8 +926,8 @@ function screenContext(){
       header:{date:fmtD(r.date),venue:r.venue,subtotal:r.subtotal,gst:r.gst,freight:r.freight,cdl:r.cdl||0,total:r.total,type:r.type,status:r.status,duplicateFlag:r.dup||false},
       lines:lines.map(l=>({desc:l.desc,qty:l.qty,unit:l.unit,price:l.price,total:l.total}))}};
   }
-  // home / reports: portfolio view
-  const inv=scopedInv();
+  // home / reports: portfolio view - same rows the screen is showing
+  const inv=view==="r"?scopedInvReports():scopedInvHome();
   const bySup={};
   inv.forEach(r=>{const s=bySup[r.supplier]=bySup[r.supplier]||{total:0,n:0};s.total+=r.total;s.n++;});
   const groups={};
@@ -1463,7 +1472,8 @@ function forecastModel(){
   const sfSales=today;
   const cut=SALES_CUTOVER?gvizDate(SALES_CUTOVER):null;
 
-  const mAll=fcSpendMap(false), mCogs=fcSpendMap(true), mSales=fcSalesMap();
+  const ohIn=nonCogsShown();                 // Spend line follows the Reports toggle
+  const mAll=fcSpendMap(!ohIn), mCogs=fcSpendMap(true), mSales=fcSalesMap();
   const shAll  =fcShape(fcWeeks(mAll  ,today,null,FC.HIST_WEEKS));
   const shCogs =fcShape(fcWeeks(mCogs ,today,null,FC.HIST_WEEKS));
   const shSales=fcShape(fcWeeks(mSales,today,cut ,FC.HIST_WEEKS));
@@ -1495,7 +1505,8 @@ function forecastModel(){
     rSpend:fcRecent(mAll ,start,end,4),
     rSales:fcRecent(mSales,start,end,4),
     dSpend:fcDrivers(INV, r=>r.date, r=>r.supplier, r=>r.total,
-             r=>supActive(r.supplier)&&venueOk(r.venue), start,end,today,FC.HIST_WEEKS),
+             r=>supActive(r.supplier)&&venueOk(r.venue)&&(ohIn||!isNonCogs(r)), start,end,today,FC.HIST_WEEKS),
+    ohIn,
     dSales:fcDrivers(SALES, r=>r.date, r=>(FILTER.venues.length===1
              ? r.date.toLocaleDateString("en-AU",{weekday:"long"}) : r.venue),
              r=>r.sales, r=>venueOk(r.venue)&&(!cut||(r.date&&r.date>=cut)),
@@ -1606,8 +1617,8 @@ function forecastCard(){
       <table>
         <thead><tr><th></th><th class="num">So far</th><th class="num">Projected</th><th class="num hide-sm">Likely range</th></tr></thead>
         <tbody>
-          ${row("Spend",m.spend.actual,sSpend.mid,sSpend.lo,sSpend.hi,money0)}
-          ${row("COGS",m.cogs.actual,cogsMidV,null,null,money0)}
+          ${row(m.ohIn?"Spend":"Spend (excl. overheads)",m.spend.actual,sSpend.mid,sSpend.lo,sSpend.hi,money0)}
+          ${m.ohIn?row("COGS",m.cogs.actual,cogsMidV,null,null,money0):""}
           ${haveSales?row("Sales",m.sales.actual,sSales.mid,sSales.lo,sSales.hi,money0):""}
           ${haveSales?row("COGS % of sales",null,cogsMid,cogsLo,cogsHi,pctS):""}
         </tbody>
@@ -1765,6 +1776,7 @@ function wagesInScope(){
 
 /* ================= ROUTING ================= */
 function route(){
+  if(typeof INV!=="undefined" && INV.length) renderFilters();   // chip is Reports-only
   const h=decodeURIComponent(location.hash.slice(1));
   const [view,a,b]=h.split("::");
   if(view==="s") return renderSupplier(a);
@@ -1791,6 +1803,7 @@ function crumb(t){ document.getElementById("crumb").textContent=t||""; }
 function renderHome(){
   crumb("");
   const inv=scopedInvHome();
+  const ohHome=nonCogsHidden();
   const ranged=FILTER.from||FILTER.to;
   const window30=r=>ranged?true:r.date>=Date.now()-30*864e5;
   const bySupplier={};
@@ -1819,7 +1832,7 @@ function renderHome(){
     const refEnd=(scopeMax>new Date(0))?scopeMax.getTime():Date.now();
     const refStart=refEnd-RATE_DAYS*864e5;
     INV.forEach(r=>{
-      if(!supActive(r.supplier)||!r.date) return;
+      if(!supActive(r.supplier)||!r.date||isNonCogs(r)) return;
       if(FILTER.venues.length&&FILTER.venues.indexOf(r.venue)===-1) return;
       const t=r.date.getTime();
       if(t<=refStart||t>refEnd) return;
@@ -1884,6 +1897,7 @@ function renderHome(){
           <td class="num hide-sm">${fmtD(s.last)}</td>
         </tr>`).join("")}</tbody></table>
       ${useRateWindow?`<div style="font-size:11px;color:var(--dim);margin-top:6px">Avg/wk is measured over the 4 weeks to ${fmtD(scopeMax>new Date(0)?scopeMax:new Date())}, not the selected range — a range this short would otherwise swing wildly.</div>`:""}
+      ${ohHome.n?`<div style="font-size:11px;color:var(--dim);margin-top:6px">Not listed: ${ohHome.n} overhead bill${ohHome.n>1?"s":""} (rent, energy, waste, repairs…) totalling ${money(ohHome.total)} — <a style="cursor:pointer;text-decoration:underline" onclick="go('r')">see Reports</a>.</div>`:""}
       <div style="margin-top:10px;font-size:12px"><a style="cursor:pointer;color:var(--dim);text-decoration:underline" onclick="go('cfg')">⚙ supplier settings${hiddenCount?` (${hiddenCount} hidden)`:""}</a></div>
     </div>
     ${groupCards.length>1?`<div class="card"><div class="label">Spend by group — ${ranged?"in range":"last 30d"}</div>
@@ -1977,9 +1991,45 @@ function renderReconcile(){
       <div style="font-size:13px;line-height:1.6">These staff names didn't match any pipeline supplier, so their entries may be wrongly flagged above. Add rows to a <b>StaffSupplierMap</b> tab (columns <b>staff_name</b>, <b>pipeline_name</b>) to map them:<br><br>${unmapped.map(u=>`<span class="pill vol">${esc(u)}</span>`).join(" ")}</div></div>`:""}`;
 }
 
+/* Sort state for the Overheads card. */
+let OH_SORT={key:"total",dir:-1};
+function sortOverheads(k){ if(OH_SORT.key===k) OH_SORT.dir*=-1; else OH_SORT={key:k,dir:(k==="name"||k==="group")?1:-1}; route(); }
+
+/* Overheads card: every non-COGS bill in range, per supplier, whatever the toggle says - so
+   rent, power and waste are always visible in Reports. Below it, the REGULAR bills that
+   have nothing in this range, with when they were last billed. Energy and waste are
+   monthly, so a week usually holds none of them; saying so beats the rows just vanishing. */
+function overheadsCard(){
+  const rows=scopedInv().filter(isNonCogs);
+  const by={};
+  rows.forEach(r=>{const o=by[r.supplier]||(by[r.supplier]={group:rowGroup(r),n:0,total:0,last:null});
+    o.n++; o.total+=r.total; if(!o.last||r.date>o.last)o.last=r.date;});
+  const K={name:e=>e[0].toLowerCase(), group:e=>String(e[1].group).toLowerCase(), n:e=>e[1].n, total:e=>e[1].total, last:e=>e[1].last?+e[1].last:0};
+  const f=K[OH_SORT.key]||K.total;
+  const list=Object.entries(by).sort((a,b)=>{const x=f(a),y=f(b);return (x<y?-1:x>y?1:0)*OH_SORT.dir||a[0].localeCompare(b[0]);});
+  const tot=rows.reduce((s,r)=>s+r.total,0);
+  // Regular overhead suppliers: 3+ bills in the 180 days to the end of the range.
+  const end=toDate()||new Date(), since=+end-180*864e5;
+  const reg={};
+  INV.forEach(r=>{ if(!isNonCogs(r)||!supActive(r.supplier)||!r.date||!venueOk(r.venue)) return;
+    if(+r.date<since||+r.date>+end) return;
+    const o=reg[r.supplier]||(reg[r.supplier]={group:rowGroup(r),n:0,last:null,avg:0});
+    o.n++; o.avg+=r.total; if(!o.last||r.date>o.last)o.last=r.date; });
+  const quiet=Object.entries(reg).filter(([s,o])=>o.n>=3&&!by[s]).sort((a,b)=>b[1].avg-a[1].avg);
+  const head=(k,l,c)=>`<th class="${c||""}" style="cursor:pointer;user-select:none" onclick="sortOverheads('${k}')">${l}${OH_SORT.key===k?(OH_SORT.dir<0?" ↓":" ↑"):""}</th>`;
+  const inc=nonCogsShown();
+  return `<div class="card"><div class="label">Overheads — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""} · ${inc?"included in the totals above":"not in the totals above"}</div>
+    ${list.length?`<table><thead><tr>${head("name","Supplier")}${head("group","Group","hide-sm")}${head("n","Invoices","num")}${head("total","Spend","num")}${head("last","Last bill","num hide-sm")}</tr></thead>
+      <tbody>${list.map(([s,o])=>`<tr class="click" onclick="go('s::${encodeURIComponent(s)}')"><td>${esc(s)}</td><td class="hide-sm">${esc(o.group)}</td><td class="num">${o.n}</td><td class="num"><b>${money(o.total)}</b></td><td class="num hide-sm">${fmtD(o.last)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td><b>Total</b></td><td class="hide-sm"></td><td class="num">${rows.length}</td><td class="num"><b>${money(tot)}</b></td><td class="hide-sm"></td></tr></tfoot></table>`
+      :`<div style="font-size:13px;color:var(--dim)">No overhead bills dated in this range.</div>`}
+    ${quiet.length?`<div style="font-size:11px;color:var(--dim);margin-top:8px">Regular bills with nothing in this range: ${quiet.map(([s,o])=>`<a style="cursor:pointer;text-decoration:underline" onclick="go('s::${encodeURIComponent(s)}')">${esc(s)}</a> (${esc(o.group)}, last ${fmtD(o.last)})`).join("; ")}. Bills are dated on the invoice date, so a monthly bill only shows in the week it's dated.</div>`:""}
+  </div>`;
+}
+
 function renderReports(){
   crumb("reports");
-  const inv=scopedInv();
+  const inv=scopedInvReports();
   const tot={spend:0,gst:0,freight:0,cdl:0,credits:0,n:0};
   const byVenue={}, byGroup={}, byCat={}, byMonth={};
   inv.forEach(r=>{
@@ -2011,7 +2061,11 @@ function renderReports(){
   const dep=wagesInScope();
   const wages=dep?dep.cost:wagesTot;
   const wageSrc=dep?"deputy":(wagesTot>0?"forms":"none");
-  const {cogs:cogsSpend,excluded:nonCogsSpend,unmapped}=cogsSplit(byGroup);
+  /* COGS always from the full set: with overheads excluded from inv, byGroup holds no
+     non-COGS groups and cogsSplit would report $0 excluded while looking healthy. */
+  const fullByGroup={}; let fullSpend=0;
+  scopedInv().forEach(r=>{const g=rowGroup(r);(fullByGroup[g]=fullByGroup[g]||{s:0,n:0}).s+=r.total;fullByGroup[g].n++;fullSpend+=r.total;});
+  const {cogs:cogsSpend,excluded:nonCogsSpend,unmapped}=cogsSplit(fullByGroup);
   const unmappedList=Object.entries(unmapped).sort((a,b)=>b[1]-a[1]);
   const kpiPct=(a,b)=>b?Math.round(a/b*1000)/10+"%":"—";
   const clampNote = (!FILTER.from && INV_MIN_DATE) ? ` (sales from ${fmtD(INV_MIN_DATE)}, matched to invoice history)` : "";
@@ -2024,7 +2078,7 @@ function renderReports(){
         <div class="stat"><div class="v">${kpiPct(cogsSpend+wages,salesTot)}</div><div class="k">Prime cost %</div></div>`:`<div class="stat"><div class="v" style="color:var(--dim)">—</div><div class="k">Wages % — no labour data</div></div>`}
       </div>
       <div style="font-size:11px;color:var(--dim);margin-top:6px">
-        COGS = ${money(cogsSpend)} of ${money(tot.spend)} spend; ${money(nonCogsSpend)} excluded as non-COGS (cleaning, equipment, energy, overheads and similar).
+        COGS = ${money(cogsSpend)} of ${money(fullSpend)} spend; ${money(nonCogsSpend)} excluded as non-COGS (cleaning, equipment, energy, overheads and similar).
         ${wageSrc==="deputy"?`<br>Wages ${money(wages)} from Deputy timesheets${dep.leave||dep.training?` including ${money(dep.leave+dep.training)} of leave and training`:``}${dep.est>0?`, of which ${money(dep.est)} is estimated from hours at recent rates because Deputy has not yet exported those shifts to payroll`:``}.`:``}
         ${SALES_SOURCE?`<br>Sales from the ImPOS feed from ${fmtD(SALES_SOURCE)}; earlier sales and all wages from the weekly reporting sheets, spread evenly across each week. Wages arrive the Monday after week end, so the current week shows none.`:""}
         ${unmappedList.length?`<br><b style="color:var(--red)">Unmapped:</b> ${unmappedList.map(([g,v])=>esc(g)+" "+money(v)).join(", ")} — counted in COGS; assign a group in supplier settings if that's wrong.`:""}
@@ -2037,7 +2091,7 @@ function renderReports(){
   document.getElementById("app").innerHTML=`
     <a class="back" onclick="go('')">All suppliers</a>
     <div class="card">
-      <div class="label">Spend report — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):" · all venues"}</div>
+      <div class="label">Spend report — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):" · all venues"}${nonCogsShown()?" · incl. overheads":" · excl. overheads"}</div>
       <div class="statgrid">
         <div class="stat"><div class="v">${money(tot.spend)}</div><div class="k">Total spend</div></div>
         <div class="stat"><div class="v">${tot.n}</div><div class="k">Invoices</div></div>
@@ -2053,6 +2107,7 @@ function renderReports(){
     ${FILTER.venues.length===1?"":tbl(byVenue,"By venue")}
     ${tbl(byGroup,"By group")}
     ${tbl(byCat,"By category")}
+    ${overheadsCard()}
     <div class="card"><div class="label">By month</div>
       <table><thead><tr><th>Month</th><th class="num">Invoices</th><th class="num">Spend</th></tr></thead>
       <tbody>${monthRows.map(([k,v])=>`<tr><td>${monthName(k)}</td><td class="num">${v.n}</td><td class="num"><b>${money(v.s)}</b></td></tr>`).join("")}</tbody></table></div>`;
