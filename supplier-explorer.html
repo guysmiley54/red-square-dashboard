@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-300930"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-301300"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -1995,6 +1995,76 @@ function renderReconcile(){
 let OH_SORT={key:"total",dir:-1};
 function sortOverheads(k){ if(OH_SORT.key===k) OH_SORT.dir*=-1; else OH_SORT={key:k,dir:(k==="name"||k==="group")?1:-1}; route(); }
 
+/* Overheads vs usual. Each overhead supplier's spend in the range against the MEDIAN of the
+   same range in up to six previous periods.
+
+   Periods are calendar-aligned where the range is whole months: August is compared with July,
+   June, May... - not with "the 31 days before", which would split two monthly bills across a
+   boundary and swing every comparison. Other ranges step back by their own length.
+
+   Ranges under 28 days get no arrows at all. Overheads are monthly or quarterly bills, so a
+   week either holds the bill or it doesn't, and an arrow on that is noise dressed as signal.
+
+   A period only counts for a supplier once that supplier has billed at least once by its end,
+   so capture starting in April does not read as three months of $0 waste collection. */
+const OH_LOOKBACK=6, OH_MIN_PERIODS=3, OH_PCT=0.10, OH_MIN_ABS=50;
+function ohPeriods(){
+  const f=fromDate(), t=toDate();
+  if(!f||!t) return null;
+  const days=Math.round((fcMid(t)-fcMid(f))/864e5)+1;
+  if(days<28) return {short:true};
+  const isMonthStart=f.getDate()===1;
+  const tNext=new Date(t.getFullYear(),t.getMonth(),t.getDate()+1);
+  const isMonthEnd=tNext.getDate()===1;
+  const out=[];
+  if(isMonthStart&&isMonthEnd){
+    const nM=(t.getFullYear()-f.getFullYear())*12+t.getMonth()-f.getMonth()+1;
+    for(let k=1;k<=OH_LOOKBACK;k++){
+      const s=new Date(f.getFullYear(),f.getMonth()-k*nM,1);
+      const e=new Date(s.getFullYear(),s.getMonth()+nM,0,23,59,59);
+      out.push({s,e});
+    }
+    return {list:out, unit:nM===1?"month":nM===3?"quarter":nM+"-month period"};
+  }
+  for(let k=1;k<=OH_LOOKBACK;k++){
+    const s=fcAdd(fcMid(f),-days*k), e=new Date(fcAdd(fcMid(t),-days*k)); e.setHours(23,59,59);
+    out.push({s,e});
+  }
+  return {list:out, unit:days+"-day period"};
+}
+function ohUsual(){
+  const P=ohPeriods();
+  if(!P||P.short) return P;
+  const rows=INV.filter(r=>isNonCogs(r)&&supActive(r.supplier)&&r.date&&venueOk(r.venue));
+  const first={};
+  rows.forEach(r=>{ if(!first[r.supplier]||r.date<first[r.supplier]) first[r.supplier]=r.date; });
+  // A period counts at all only if we captured SOME invoice in it (any supplier) - before
+  // capture began there is no evidence either way.
+  const covered=P.list.map(p=>INV.some(r=>r.date&&r.date>=p.s&&r.date<=p.e&&venueOk(r.venue)));
+  const sums=P.list.map(()=>({}));
+  rows.forEach(r=>{ P.list.forEach((p,i)=>{ if(r.date>=p.s&&r.date<=p.e) sums[i][r.supplier]=(sums[i][r.supplier]||0)+r.total; }); });
+  const med=a=>{const x=a.slice().sort((p,q)=>p-q),m=x.length>>1;return x.length%2?x[m]:(x[m-1]+x[m])/2;};
+  const bySup={}; let totSeries=[];
+  Object.keys(first).forEach(s=>{
+    const ser=[];
+    P.list.forEach((p,i)=>{ if(covered[i]&&first[s]<=p.e) ser.push(sums[i][s]||0); });
+    if(ser.length>=OH_MIN_PERIODS) bySup[s]={usual:med(ser), lo:Math.min(...ser), hi:Math.max(...ser), n:ser.length};
+  });
+  P.list.forEach((p,i)=>{ if(covered[i]) totSeries.push(Object.values(sums[i]).reduce((a,b)=>a+b,0)); });
+  const total=totSeries.length>=OH_MIN_PERIODS?{usual:med(totSeries),lo:Math.min(...totSeries),hi:Math.max(...totSeries),n:totSeries.length}:null;
+  return {bySup,total,unit:P.unit};
+}
+/* ▲ red = costing more than usual, ▼ green = less, – = within 10% (or under $50 either way).
+   Same colours and 10% threshold as Avg/wk on the front page. Hover gives the numbers. */
+function ohArrow(now,u,unit,running){
+  if(!u) return `<span style="color:var(--dim)" title="Not enough history to compare (needs ${OH_MIN_PERIODS} previous ${unit}s)">·</span>`;
+  const d=now-u.usual;
+  const tip=`${money(now)} vs a usual ${money(u.usual)} per ${unit} (median of the last ${u.n}; range ${money(u.lo)}–${money(u.hi)})${running?" — this period isn't finished, so bills may still be to come":""}`;
+  const big=Math.abs(d)>=OH_MIN_ABS && (u.usual===0 || Math.abs(d)/Math.abs(u.usual)>OH_PCT);
+  if(!big) return `<span style="color:var(--dim)" title="${esc(tip)}">–</span>`;
+  return d>0?`<span class="up" title="${esc(tip)}">▲</span>`:`<span class="down" title="${esc(tip)}">▼</span>`;
+}
+
 /* Overheads card: every non-COGS bill in range, per supplier, whatever the toggle says - so
    rent, power and waste are always visible in Reports. Below it, the REGULAR bills that
    have nothing in this range, with when they were last billed. Energy and waste are
@@ -2004,7 +2074,12 @@ function overheadsCard(){
   const by={};
   rows.forEach(r=>{const o=by[r.supplier]||(by[r.supplier]={group:rowGroup(r),n:0,total:0,last:null});
     o.n++; o.total+=r.total; if(!o.last||r.date>o.last)o.last=r.date;});
-  const K={name:e=>e[0].toLowerCase(), group:e=>String(e[1].group).toLowerCase(), n:e=>e[1].n, total:e=>e[1].total, last:e=>e[1].last?+e[1].last:0};
+  const U=ohUsual();
+  const cmp=U&&!U.short;
+  const running=cmp&&toDate()&&toDate()>=fcMid(new Date());
+  Object.entries(by).forEach(([s,o])=>{ o.u=cmp?(U.bySup[s]||null):null; o.delta=o.u?o.total-o.u.usual:null; });
+  const K={name:e=>e[0].toLowerCase(), group:e=>String(e[1].group).toLowerCase(), n:e=>e[1].n, total:e=>e[1].total,
+           usual:e=>e[1].u?e[1].u.usual:-Infinity, delta:e=>e[1].delta==null?-Infinity:e[1].delta, last:e=>e[1].last?+e[1].last:0};
   const f=K[OH_SORT.key]||K.total;
   const list=Object.entries(by).sort((a,b)=>{const x=f(a),y=f(b);return (x<y?-1:x>y?1:0)*OH_SORT.dir||a[0].localeCompare(b[0]);});
   const tot=rows.reduce((s,r)=>s+r.total,0);
@@ -2018,12 +2093,22 @@ function overheadsCard(){
   const quiet=Object.entries(reg).filter(([s,o])=>o.n>=3&&!by[s]).sort((a,b)=>b[1].avg-a[1].avg);
   const head=(k,l,c)=>`<th class="${c||""}" style="cursor:pointer;user-select:none" onclick="sortOverheads('${k}')">${l}${OH_SORT.key===k?(OH_SORT.dir<0?" ↓":" ↑"):""}</th>`;
   const inc=nonCogsShown();
+  const usualCell=o=>cmp?`<td class="num hide-sm">${o.u?money(o.u.usual):'<span style="color:var(--dim)">—</span>'}</td>`:"";
+  const arrow=(now,u)=>cmp?" "+ohArrow(now,u,U.unit,running):"";
+  const quietTxt=([s,o])=>{
+    const u=cmp&&U.bySup[s];
+    return `<a style="cursor:pointer;text-decoration:underline" onclick="go('s::${encodeURIComponent(s)}')">${esc(s)}</a> (${esc(o.group)}, last ${fmtD(o.last)}${u&&u.usual>0?`, usually ${money(u.usual)} a ${U.unit}`:""})`;
+  };
+  const foot=cmp
+    ? `Arrows compare each supplier with its median over the previous ${U.unit}s it was billing in (up to ${OH_LOOKBACK}): <span class="up">▲</span> more than usual, <span class="down">▼</span> less, – within 10%. Hover for the numbers.${running?" This period isn't finished, so a bill still to come can read as ▼.":""}`
+    : (U&&U.short ? `No up/down arrows on a range this short — overhead bills are monthly, so pick Month or Quarter to compare.` : "");
   return `<div class="card"><div class="label">Overheads — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""} · ${inc?"included in the totals above":"not in the totals above"}</div>
-    ${list.length?`<table><thead><tr>${head("name","Supplier")}${head("group","Group","hide-sm")}${head("n","Invoices","num")}${head("total","Spend","num")}${head("last","Last bill","num hide-sm")}</tr></thead>
-      <tbody>${list.map(([s,o])=>`<tr class="click" onclick="go('s::${encodeURIComponent(s)}')"><td>${esc(s)}</td><td class="hide-sm">${esc(o.group)}</td><td class="num">${o.n}</td><td class="num"><b>${money(o.total)}</b></td><td class="num hide-sm">${fmtD(o.last)}</td></tr>`).join("")}</tbody>
-      <tfoot><tr><td><b>Total</b></td><td class="hide-sm"></td><td class="num">${rows.length}</td><td class="num"><b>${money(tot)}</b></td><td class="hide-sm"></td></tr></tfoot></table>`
+    ${list.length?`<table><thead><tr>${head("name","Supplier")}${head("group","Group","hide-sm")}${head("n","Invoices","num")}${head("total","Spend","num")}${cmp?head("usual","Usual","num hide-sm"):""}${head("last","Last bill","num hide-sm")}</tr></thead>
+      <tbody>${list.map(([s,o])=>`<tr class="click" onclick="go('s::${encodeURIComponent(s)}')"><td>${esc(s)}</td><td class="hide-sm">${esc(o.group)}</td><td class="num">${o.n}</td><td class="num"><b>${money(o.total)}</b>${arrow(o.total,o.u)}</td>${usualCell(o)}<td class="num hide-sm">${fmtD(o.last)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td><b>Total</b></td><td class="hide-sm"></td><td class="num">${rows.length}</td><td class="num"><b>${money(tot)}</b>${cmp?arrow(tot,U.total):""}</td>${cmp?`<td class="num hide-sm">${U.total?money(U.total.usual):""}</td>`:""}<td class="hide-sm"></td></tr></tfoot></table>`
       :`<div style="font-size:13px;color:var(--dim)">No overhead bills dated in this range.</div>`}
-    ${quiet.length?`<div style="font-size:11px;color:var(--dim);margin-top:8px">Regular bills with nothing in this range: ${quiet.map(([s,o])=>`<a style="cursor:pointer;text-decoration:underline" onclick="go('s::${encodeURIComponent(s)}')">${esc(s)}</a> (${esc(o.group)}, last ${fmtD(o.last)})`).join("; ")}. Bills are dated on the invoice date, so a monthly bill only shows in the week it's dated.</div>`:""}
+    ${quiet.length?`<div style="font-size:11px;color:var(--dim);margin-top:8px">Regular bills with nothing in this range: ${quiet.map(quietTxt).join("; ")}. Bills are dated on the invoice date, so a monthly bill only shows in the period it's dated.</div>`:""}
+    ${foot?`<div style="font-size:11px;color:var(--dim);margin-top:6px">${foot}</div>`:""}
   </div>`;
 }
 
