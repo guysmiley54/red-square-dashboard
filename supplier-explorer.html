@@ -51,6 +51,8 @@
   .tgl{display:inline-block;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;border:1.5px solid var(--line);background:#fff;color:var(--dim);cursor:pointer;text-transform:none;letter-spacing:0}
   .tgl.on{background:var(--ink);color:#fff;border-color:var(--ink)}
   svg text{font-family:var(--mono);font-size:10px;fill:var(--dim)}
+  /* Wide tables (Items purchased): drop secondary columns before the right-hand ones get cut off. */
+  @media (max-width:900px){ .hide-md{display:none} }
   @media (max-width:600px){ .hide-sm{display:none} td,th{padding:6px 5px} #filters{top:auto;position:static} }
   @media print { header,#filters,.back,.btn{display:none!important} body{background:#fff} .card{border:none;padding:0} }
 </style>
@@ -69,7 +71,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-051000"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-051730"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -2007,7 +2009,10 @@ function rangeItems(){
     p.buys.sort((a,b)=>a.date-b.date); p.before.sort((a,b)=>a.date-b.date);
     const last=p.buys[p.buys.length-1];
     p.desc=last.desc; p.unit=last.unit; p.code=last.code||p.code;
-    p.group=supGroup(p.supplier);
+    /* Group as the rest of the page sees it: rowGroup() on the INVOICE, which falls back to the
+       invoice's category when the supplier has no SupplierConfig group - most don't. supGroup()
+       alone left the column blank on the first live load (5 Oct 2026). */
+    { const iv=byNumber[norm(last.supplier)+"|"+norm(last.number)]; p.group=iv?rowGroup(iv):supGroup(p.supplier); }
     p.qty=p.buys.reduce((s,b)=>s+b.qty,0);
     p.spend=p.buys.reduce((s,b)=>s+b.total,0);
     p.n=p.buys.length;
@@ -2060,17 +2065,17 @@ function itemsCard(){
   return `<div class="card"><div class="label">Items purchased — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""} · <span id="itemCount">${list.length} items</span></div>
     ${list.length?`<input type="search" id="itemSearch" placeholder="Filter these items…" value="${esc(ITEM_Q)}" style="margin-bottom:10px">
     <div style="max-height:560px;overflow:auto">
-    <table><thead><tr>${head("desc","Product")}${head("supplier","Supplier","hide-sm")}${head("group","Group","hide-sm")}${head("n","Buys","num hide-sm")}${head("qty","Qty","num")}${head("spend","Spend","num")}${head("price","Last price","num")}${head("change","Change","num")}</tr></thead>
+    <table><thead><tr>${head("desc","Product")}${head("supplier","Supplier","hide-sm")}${head("group","Group","hide-md")}${head("n","Buys","num hide-md")}${head("qty","Qty","num")}${head("spend","Spend","num")}${head("price","Last price","num")}${head("change","Change","num")}</tr></thead>
     <tbody id="itemTbody">${list.map(p=>`<tr class="click" onclick="${itemHref(p)}">
       <td>${esc(p.desc)}${p.code?` <span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(p.code)}</span>`:""}</td>
       <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
-      <td class="hide-sm">${p.group!=="Ungrouped"?`<span class="pill vol">${esc(p.group)}</span>`:""}</td>
-      <td class="num hide-sm">${p.n}</td>
+      <td class="hide-md">${p.group!=="Ungrouped"?`<span class="pill vol">${esc(p.group)}</span>`:""}</td>
+      <td class="num hide-md">${p.n}</td>
       <td class="num">${itemQty(p.qty,p.unit)}</td>
       <td class="num"><b>${money(p.spend)}</b></td>
       <td class="num">${money(p.price)}</td>
       <td class="num">${creepChip(p)}</td></tr>`).join("")}</tbody>
-    <tfoot><tr><td><b>Total</b></td><td class="hide-sm"></td><td class="hide-sm"></td><td class="num hide-sm">${list.reduce((s,p)=>s+p.n,0)}</td><td></td><td class="num"><b>${money(tot)}</b></td><td></td><td></td></tr></tfoot></table></div>
+    <tfoot><tr><td><b>Total</b></td><td class="hide-sm"></td><td class="hide-md"></td><td class="num hide-md">${list.reduce((s,p)=>s+p.n,0)}</td><td></td><td class="num"><b>${money(tot)}</b></td><td></td><td></td></tr></tfoot></table></div>
     <div style="font-size:11px;color:var(--dim);margin-top:6px">Product lines from invoices, overhead suppliers left out. Delivery, freight and deposit lines are stripped and GST isn't in line totals, so this won't match the supplier totals above to the cent. Manual purchases have no line items, so they aren't here. Change compares the latest price with what that venue was paying before the range. Click a heading to sort, a row for its price history.</div>`
     :`<div style="font-size:13px;color:var(--dim)">No product lines dated in this range.</div>`}
   </div>`;
