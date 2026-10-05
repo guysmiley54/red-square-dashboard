@@ -69,7 +69,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-301500"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-051000"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -98,6 +98,7 @@ const WEEKLY_SOURCES = [
 const SIGNOFF = "Cheers,\nAdrian";
 
 /* ================= DATA & FILTER STATE ================= */
+let LINE_FIXES = [];
 let INV = [], LINES = [], byNumber = {}, CFG = {}, VENUE_LIST = [], SALES = [], INV_MIN_DATE = null, STAFF = [], SMAP = {}, SALES_SOURCE = null;
 /* Window for the product price-history chart and purchase list, in days (0 = all).
    Deliberately NOT tied to the top date filter: the stat cards, the 90-day average and
@@ -632,6 +633,18 @@ async function loadAll(){
         price:+r.unit_price||0, total:+r.line_total||0, date:inv?inv.date:null
       };
     }).filter(r=>r.supplier);
+
+    /* A line total wildly above qty x price is an extraction misread, not a purchase: PFD
+       LW331974 (25 Sep 2026) recorded 1 x $34.80 butter portions as $63,717. The invoice total
+       was right, so spend and COGS never saw it - but any view that sums LINE totals does, and
+       the Items purchased / Top 10 cards are exactly that. Same rule as Glenorchy HQ (ghq-v18):
+       more than 100x qty x price AND 100x the unit price AND over by $100+, then qty x price is
+       used instead. 100x because genuine lines disagree with qty x price by smaller factors all
+       the time (per-kg pricing on boxes, ALM's 0.1-carton bottles). Ported 5 Oct 2026. */
+    LINE_FIXES=[];
+    LINES.forEach(l=>{ const calc=l.qty*l.price;
+      if(calc>0&&l.total>calc*100&&l.total>l.price*100&&l.total-calc>100){ LINE_FIXES.push({supplier:l.supplier,number:l.number,desc:l.desc,was:l.total,now:calc}); l.total=calc; } });
+    if(LINE_FIXES.length) console.log("Line totals corrected (misread):",LINE_FIXES);
 
     // ProductMerge tab (optional): supplier | match | into  — folds spelling variants together
     PMERGE={};
@@ -1921,7 +1934,9 @@ function renderHome(){
         <tbody>${groupCards.map(([g,o])=>`<tr><td>${esc(g)}</td>${gVenues.map(v=>`<td class="num hide-sm">${o[v]?money(o[v]):'<span style="color:var(--dim)">—</span>'}</td>`).join("")}<td class="num"><b>${money(o.__t)}</b></td></tr>`).join("")}</tbody>
         ${gVenues.length>1?`<tfoot><tr><td><b>Total</b></td>${gTotals.map(t=>`<td class="num hide-sm"><b>${money(t)}</b></td>`).join("")}<td class="num"><b>${money(gGrand)}</b></td></tr></tfoot>`:""}
       </table>
-    </div>`:""}`;
+    </div>`:""}
+    ${itemsCard()}`;
+  wireItemSearch();
   document.getElementById("psearch").addEventListener("input",e=>{
     const q=e.target.value.trim().toLowerCase();
     const box=document.getElementById("presults");
@@ -1934,6 +1949,192 @@ function renderHome(){
         <td class="num">${p.change!=null?`<span class="${p.change>0?'up':'down'}">${pct(p.change)}</span>`:""}</td>
       </tr>`).join("")}</tbody></table>`:'<div style="padding:10px;color:var(--dim);font-size:13px">No products match.</div>';
   });
+}
+
+/* ================= ITEMS PURCHASED (5 Oct 2026) =================
+   Every product bought in the selected range, one row per product, from invoice LINES.
+   Feeds three cards: Items purchased on the home page, and Top 10 purchased + Price creep in
+   Reports (which replaced the By category table - it duplicated By group row for row, because
+   rowGroup() falls back to the category whenever a supplier has no group).
+
+   Rules, matching the rest of the page and Glenorchy HQ:
+   - venue + date scope from the filter bar; inactive suppliers out;
+   - overhead suppliers out (rent, energy, waste...) - these are purchases, not bills;
+   - delivery / freight / levy / deposit lines out (ITEM_FEE), so these won't add up to the
+     invoice totals on the supplier list - fees and GST live there;
+   - price > 0 and qty > 0, so credits and $0 lines don't count as buying.
+
+   Price creep is measured PER VENUE: each delivery is priced against the last price that same
+   venue paid before the range, in the same unit. Comparing across venues would turn a standing
+   Glenorchy/Cambridge price gap into a phantom rise whenever the latest buy came from the dearer
+   one. Where a venue bought nothing before the range, its first price inside the range is the
+   baseline - so a rise part-way through still shows and a steady price reads as no change.
+   A move by an exact whole multiple of 3x or more is a pack-size change, not a price change, and
+   is left out of creep (same guard as the supplier Products table). */
+const ITEM_FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|admin\s*fee|\bcartage\b/i;
+let ITEM_SORT={key:"spend",dir:-1}, ITEM_Q="", CREEP_DIR="up";
+function sortItems(k){
+  if(ITEM_SORT.key===k) ITEM_SORT.dir*=-1;
+  else ITEM_SORT={key:k, dir:(k==="desc"||k==="supplier"||k==="group")?1:-1};
+  route();
+}
+function setCreepDir(k){ CREEP_DIR=k; route(); }
+function itemPackRatio(a,b){
+  if(!(a>0)||!(b>0)) return null;
+  const r=Math.max(a,b)/Math.min(a,b), n=Math.round(r);
+  return (n>=3&&Math.abs(r-n)/n<0.015)?n:null;
+}
+function rangeItems(){
+  const f=fromDate();
+  const map={};
+  LINES.forEach(l=>{
+    if(!l.date||!(l.price>0)||!(l.qty>0)||ITEM_FEE.test(l.desc)||!supActive(l.supplier)) return;
+    /* Overhead or not is decided by the line's own INVOICE, through the same isNonCogs() the
+       rest of the page uses - not by the supplier's group alone. SPG Hobart and Elders carry no
+       group in SupplierConfig and are overheads only by their invoice category ("Rent"); a
+       supplier-group test let $28k of rent into the first live run (5 Oct 2026). */
+    { const iv=byNumber[norm(l.supplier)+"|"+norm(l.number)];
+      if(iv?isNonCogs(iv):NON_COGS.has(String(supGroup(l.supplier)).trim().toLowerCase())) return; }
+    if(!venueOk(l.venue)) return;
+    const k=prodKey(l.supplier,l.code,l.desc,l.unit);
+    const inR=inScope(l.venue,l.date);
+    const before=!!(f&&l.date<f);
+    if(!inR&&!before) return;
+    const p=map[k]||(map[k]={key:k,supplier:l.supplier,code:l.code,desc:l.desc,unit:l.unit,before:[],buys:[]});
+    if(inR){ p.buys.push(l); } else p.before.push(l);
+  });
+  return Object.values(map).filter(p=>p.buys.length).map(p=>{
+    p.buys.sort((a,b)=>a.date-b.date); p.before.sort((a,b)=>a.date-b.date);
+    const last=p.buys[p.buys.length-1];
+    p.desc=last.desc; p.unit=last.unit; p.code=last.code||p.code;
+    p.group=supGroup(p.supplier);
+    p.qty=p.buys.reduce((s,b)=>s+b.qty,0);
+    p.spend=p.buys.reduce((s,b)=>s+b.total,0);
+    p.n=p.buys.length;
+    p.price=last.price; p.lastDate=last.date;
+    const lu=unitNorm(last.unit||"");
+    const same=b=>unitNorm(b.unit||"")===lu;
+    /* Baseline per venue, same unit as the latest buy. */
+    const baseOf={};
+    const venues=[...new Set(p.buys.filter(same).map(b=>b.venue))];
+    venues.forEach(v=>{
+      const pre=p.before.filter(b=>b.venue===v&&same(b));
+      if(pre.length){ const b=pre[pre.length-1]; baseOf[v]={price:b.price,date:b.date,before:true}; }
+      else { const b=p.buys.find(x=>x.venue===v&&same(x)); baseOf[v]={price:b.price,date:b.date,before:false}; }
+    });
+    let extra=0, packed=false;
+    p.buys.forEach(b=>{
+      if(!same(b)) return;
+      const bs=baseOf[b.venue]; if(!bs) return;
+      if(itemPackRatio(b.price,bs.price)){ packed=true; return; }
+      extra+=b.qty*(b.price-bs.price);
+    });
+    const lb=baseOf[last.venue];
+    p.base=lb?lb.price:null; p.baseDate=lb?lb.date:null; p.baseFromBefore=!!(lb&&lb.before); p.baseVenue=last.venue;
+    p.pack=lb?itemPackRatio(p.price,lb.price):null;
+    p.change=(lb&&lb.price>0&&!p.pack)?(p.price-lb.price)/lb.price*100:null;
+    p.extra=extra; p.packed=packed;
+    return p;
+  });
+}
+function itemHref(p){ return `go('p::${encodeURIComponent(p.supplier)}::${encodeURIComponent((p.code||p.desc)+"@@"+(p.unit||""))}')`; }
+function creepChip(p){
+  if(p.pack) return `<span class="pill" title="Price moved by an exact multiple — a different pack size, not a price change">pack ×${p.pack}</span>`;
+  if(p.change==null||Math.abs(p.change)<0.05) return `<span style="color:var(--dim)">—</span>`;
+  const up=p.change>0;
+  return `<span class="${up?"up":"down"}" title="${esc(vShort(p.baseVenue))} was paying ${money(p.base)} ${p.baseFromBefore?"before this range ("+fmtD(p.baseDate)+")":"at the start of the range"}">${up?"▲":"▼"} ${Math.abs(Math.round(p.change*10)/10)}%</span>`;
+}
+const itemQty=(q,u)=>`${Math.round(q*100)/100}${u?` <span style="color:var(--dim);font-size:11px">${esc(u)}</span>`:""}`;
+
+/* Home page card: every item bought in range, every heading sortable. */
+function itemsCard(){
+  const items=rangeItems();
+  const K={ desc:p=>String(p.desc).toLowerCase(), supplier:p=>String(p.supplier).toLowerCase(),
+            group:p=>String(p.group).toLowerCase(), n:p=>p.n, qty:p=>p.qty, spend:p=>p.spend,
+            price:p=>p.price, change:p=>p.change==null?-Infinity:p.change };
+  const fn=K[ITEM_SORT.key]||K.spend;
+  const list=items.slice().sort((a,b)=>{ const x=fn(a), y=fn(b);
+    return (x<y?-1:x>y?1:0)*ITEM_SORT.dir || String(a.desc).localeCompare(String(b.desc)); });
+  const tot=list.reduce((s,p)=>s+p.spend,0);
+  const head=(k,l,c)=>`<th class="${c||""}" style="cursor:pointer;user-select:none;position:sticky;top:0;background:#fff" onclick="sortItems('${k}')">${l}${ITEM_SORT.key===k?(ITEM_SORT.dir<0?" ↓":" ↑"):""}</th>`;
+  return `<div class="card"><div class="label">Items purchased — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):""} · <span id="itemCount">${list.length} items</span></div>
+    ${list.length?`<input type="search" id="itemSearch" placeholder="Filter these items…" value="${esc(ITEM_Q)}" style="margin-bottom:10px">
+    <div style="max-height:560px;overflow:auto">
+    <table><thead><tr>${head("desc","Product")}${head("supplier","Supplier","hide-sm")}${head("group","Group","hide-sm")}${head("n","Buys","num hide-sm")}${head("qty","Qty","num")}${head("spend","Spend","num")}${head("price","Last price","num")}${head("change","Change","num")}</tr></thead>
+    <tbody id="itemTbody">${list.map(p=>`<tr class="click" onclick="${itemHref(p)}">
+      <td>${esc(p.desc)}${p.code?` <span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(p.code)}</span>`:""}</td>
+      <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
+      <td class="hide-sm">${p.group!=="Ungrouped"?`<span class="pill vol">${esc(p.group)}</span>`:""}</td>
+      <td class="num hide-sm">${p.n}</td>
+      <td class="num">${itemQty(p.qty,p.unit)}</td>
+      <td class="num"><b>${money(p.spend)}</b></td>
+      <td class="num">${money(p.price)}</td>
+      <td class="num">${creepChip(p)}</td></tr>`).join("")}</tbody>
+    <tfoot><tr><td><b>Total</b></td><td class="hide-sm"></td><td class="hide-sm"></td><td class="num hide-sm">${list.reduce((s,p)=>s+p.n,0)}</td><td></td><td class="num"><b>${money(tot)}</b></td><td></td><td></td></tr></tfoot></table></div>
+    <div style="font-size:11px;color:var(--dim);margin-top:6px">Product lines from invoices, overhead suppliers left out. Delivery, freight and deposit lines are stripped and GST isn't in line totals, so this won't match the supplier totals above to the cent. Manual purchases have no line items, so they aren't here. Change compares the latest price with what that venue was paying before the range. Click a heading to sort, a row for its price history.</div>`
+    :`<div style="font-size:13px;color:var(--dim)">No product lines dated in this range.</div>`}
+  </div>`;
+}
+/* Re-applies the typed filter after a re-render (sorting rebuilds the table). */
+function wireItemSearch(){
+  const input=document.getElementById("itemSearch"), tb=document.getElementById("itemTbody");
+  if(!input||!tb) return;
+  const total=tb.rows.length;
+  const apply=()=>{
+    const q=input.value.trim().toLowerCase(); ITEM_Q=input.value;
+    let shown=0;
+    Array.prototype.forEach.call(tb.rows,tr=>{ const hit=!q||tr.textContent.toLowerCase().indexOf(q)!==-1; tr.style.display=hit?"":"none"; if(hit)shown++; });
+    const c=document.getElementById("itemCount"); if(c) c.textContent=q?`${shown} of ${total} items`:`${total} items`;
+  };
+  input.addEventListener("input",apply);
+  if(ITEM_Q) apply();
+}
+
+/* Reports: Top 10 purchased by spend in range. */
+function topBoughtCard(items){
+  const list=items.slice().sort((a,b)=>b.spend-a.spend);
+  const tot=list.reduce((s,p)=>s+p.spend,0);
+  const top=list.slice(0,10);
+  return `<div class="card"><div class="label">Top 10 purchased — by spend in range</div>
+    ${top.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Supplier</th><th class="num">Qty</th>
+      <th class="num">Spend</th><th class="num hide-sm">%</th><th class="num">Price</th></tr></thead>
+      <tbody>${top.map(p=>`<tr class="click" onclick="${itemHref(p)}">
+        <td><b>${esc(p.desc)}</b></td>
+        <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
+        <td class="num">${itemQty(p.qty,p.unit)}</td>
+        <td class="num"><b>${money(p.spend)}</b></td>
+        <td class="num hide-sm" style="color:var(--dim)">${tot?(Math.round(p.spend/tot*1000)/10)+"%":""}</td>
+        <td class="num">${money(p.price)} ${creepChip(p)}</td></tr>`).join("")}</tbody></table>
+      <div style="font-size:11px;color:var(--dim);margin-top:6px">${list.length} products · ${money(tot)} on product lines in this range. % is share of that. Overhead suppliers, delivery and fee lines left out. Full list on the front page under Items purchased.</div>`
+      :`<div style="font-size:13px;color:var(--dim)">No product lines dated in this range.</div>`}</div>`;
+}
+
+/* Reports: Price creep - what price moves cost in the range, in dollars. */
+function creepCard(items){
+  const moved=items.filter(p=>Math.abs(p.extra)>=0.005);
+  const ups=moved.filter(p=>p.extra>0).sort((a,b)=>b.extra-a.extra);
+  const downs=moved.filter(p=>p.extra<0).sort((a,b)=>a.extra-b.extra);
+  const upTot=ups.reduce((s,p)=>s+p.extra,0), downTot=downs.reduce((s,p)=>s+p.extra,0);
+  const list=(CREEP_DIR==="up"?ups:downs).slice(0,10);
+  const net=upTot+downTot;
+  const head=`<div class="label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>Price creep — what price moves cost in range</span>
+    <span style="margin-left:auto;display:flex;gap:6px">
+      <a class="tgl ${CREEP_DIR==="up"?"on":""}" onclick="setCreepDir('up')">rises (${ups.length})</a>
+      <a class="tgl ${CREEP_DIR==="down"?"on":""}" onclick="setCreepDir('down')">falls (${downs.length})</a></span></div>`;
+  if(!moved.length) return `<div class="card">${head}<div style="font-size:13px;color:var(--dim)">Nothing bought in this range is priced differently from what each venue was paying before it.</div></div>`;
+  return `<div class="card">${head}
+    <div style="font-size:13px;margin-bottom:8px">Rises cost <b class="up">${money(upTot)}</b> · falls saved <b class="down">${money(-downTot)}</b> · net <b>${net<0?"−":""}${money(Math.abs(net))}</b>${net<0?" saved":" extra"}</div>
+    ${list.length?`<table><thead><tr><th>Product</th><th class="hide-sm">Supplier</th><th class="num hide-sm">Was → now</th>
+      <th class="num">Change</th><th class="num hide-sm">Qty</th><th class="num">${CREEP_DIR==="up"?"Extra paid":"Saved"}</th></tr></thead>
+      <tbody>${list.map(p=>`<tr class="click" onclick="${itemHref(p)}">
+        <td><b>${esc(p.desc)}</b></td>
+        <td class="hide-sm" style="color:var(--dim)">${esc(p.supplier)}</td>
+        <td class="num hide-sm">${p.base!=null?money(p.base)+" → "+money(p.price):""}</td>
+        <td class="num">${creepChip(p)}</td>
+        <td class="num hide-sm">${itemQty(p.qty,p.unit)}</td>
+        <td class="num"><b>${money(Math.abs(p.extra))}</b></td></tr>`).join("")}</tbody></table>`
+      :`<div style="font-size:13px;color:var(--dim)">No ${CREEP_DIR==="up"?"rises":"falls"} in this range.</div>`}
+    <div style="font-size:11px;color:var(--dim);margin-top:6px">Extra paid = units bought in the range × (price paid − what that venue was paying before the range), same unit only. Where a venue bought nothing before the range, its first price inside it is the baseline${FILTER.from?"":" — and with All time selected there is no \"before\", so only moves inside the history count"}. Pack-size changes are left out. A price that rose and came back inside the range still cost money, so it can show here at — on the latest price. Sorted by dollars, not percent — a 3% rise on milk outranks a 30% rise on saffron. Click a row for the price history.</div></div>`;
 }
 
 /* ================= REPORTS ================= */
@@ -2308,7 +2509,7 @@ function renderReports(){
     ${pnlCard}
     ${FILTER.venues.length===1?"":tbl(byVenue,"By venue",null,sDen?(k=>salesByV[k]||0):null)}
     ${tbl(byGroup,"By group",null,sDen?(()=>salesAll):null)}
-    ${tbl(byCat,"By category",null,sDen?(()=>salesAll):null)}
+    ${(()=>{ const it=rangeItems(); return topBoughtCard(it)+creepCard(it); })()}
     ${overheadsCard()}
     <div class="card"><div class="label">By month</div>
       <table><thead><tr><th>Month</th><th class="num">Invoices</th><th class="num">Spend</th><th class="num">Sales</th><th class="num">Spend % of sales</th></tr></thead>
