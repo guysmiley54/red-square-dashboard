@@ -117,6 +117,11 @@
 <div class="wrap"><div id="app"><div class="loading">Loading staff reports&hellip;</div></div></div>
 <script>
 const SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
+// BG POS Data - the ImPOS Cloud API feed. PosStaff there has each person's own sales, which
+// none of the weekly ImPOS reports carry, so discounts and voids can be read as a share of
+// what that person actually rang up.
+const POS_SHEET_ID = "1CAF0nQKiZ0z4bcZMY41OGZ76DlBsoWi_5eUrM_iNqz8";
+let POSST = [], POSST_OK = false;
 
 // The staff reports use ImPOS's own store names, which differ from the sales feed's.
 // The staff reports and the sales feed use DIFFERENT names for the same venues. Both are
@@ -244,7 +249,8 @@ const TAB_COLUMNS = {
                           "cash_var","float_total","flags"],
   "ReconTills":          ["date","venue","pos","staff","impos_cash","actual_cash","variance"],
   "DeputyShifts":        ["date","venue","kind","employee","hours"],
-  "StaffMap":            ["name_from","maps_to"]
+  "StaffMap":            ["name_from","maps_to"],
+  "PosStaff":            ["date","venue","employee","measure","count","amount"]
 };
 
 async function fetchTab(name){
@@ -270,6 +276,26 @@ async function fetchTab(name){
         }
       }
     }
+    return t;
+  }catch(e){ return null; }
+}
+/**
+ * PosStaff from BG POS Data, summed by gviz to one row per day, venue, person and measure.
+ * Columns are LABELLED in the query: gviz guesses headers, and the live PosSales header came
+ * back with a blank venue on 9 Oct. PosStaff is not the first tab, so a missing tab would be
+ * served as PosSales - the column check below catches that (PosSales has no "measure").
+ */
+async function fetchPosStaff(){
+  const tq="select A, B, C, D, sum(E), sum(F) where D = 'sales' group by A, B, C, D"+
+    " label A 'date', B 'venue', C 'employee', D 'measure', sum(E) 'count', sum(F) 'amount'";
+  const url="https://docs.google.com/spreadsheets/d/"+POS_SHEET_ID+"/gviz/tq?tqx=out:csv&headers=1&_="+Date.now()+
+    "&sheet=PosStaff&tq="+encodeURIComponent(tq);
+  try{
+    const res=await fetch(url); if(!res.ok) return null;
+    const t=await res.text();
+    if(!t || t.trim().charAt(0)==="<" || t.indexOf("google.visualization.Query.setResponse")>-1) return null;
+    const head=(parseCsv((t.split(/\r?\n/)[0]||""))[0]||[]).map(h=>String(h).trim().toLowerCase());
+    if(TAB_COLUMNS.PosStaff.some(c=>head.indexOf(c)<0)) return null;
     return t;
   }catch(e){ return null; }
 }
@@ -405,6 +431,26 @@ async function load(){
   STAFF_MAP=smap;
   applyNames();
 
+  // Each person's own sales, from the API. Kept OUT of D: D's dates decide which seven days
+  // "this week" is, and the API runs to today while the staff reports stop at last Sunday.
+  // Names go through the same folding as the reports so one person is one row.
+  let pst=[], pstOk=false;
+  const pTxt=await fetchPosStaff();
+  if(pTxt){
+    pstOk=true;
+    const pg=parseCsv(pTxt.trim());
+    const ph=(pg.shift()||[]).map(h=>String(h).trim().toLowerCase());
+    const px=n=>ph.indexOf(n);
+    pg.forEach(r=>{
+      const date=dkey(r[px("date")]), venue=vShort(String(r[px("venue")]||"").trim());
+      const raw=String(r[px("employee")]||"").trim();
+      if(!date||!raw) return;
+      pst.push({date:date, venue:venue, employee_raw:raw, employee:realName(raw,venue,date)||raw,
+                measure:String(r[px("measure")]||"").trim(), count:num(r[px("count")]), amount:num(r[px("amount")])});
+    });
+  }
+  POSST=pst; POSST_OK=pstOk;
+
   const n=Object.keys(D).reduce((a,k)=>a+D[k].length,0);
   document.getElementById("bld").textContent=n.toLocaleString()+" rows";
   renderFilters(); render();
@@ -492,6 +538,27 @@ async function copyOrder(){
   if(btn){ const was=btn.textContent; btn.textContent="Copied \u2713"; setTimeout(()=>{ btn.textContent=was; },1500); }
 }
 function setCashPerson(v,e){ F.cashPerson=(F.cashPerson&&F.cashPerson.employee===e&&F.cashPerson.venue===v)?null:{venue:v,employee:e}; render(); }
+/**
+ * Sales per person for the current week and filters, from PosStaff.
+ * Returns {by:{"venue|employee":$}, venue:{venue:$}, days:{venue:Set of dates with data}}.
+ * A venue with no API sales in the window (Luma until ImPOS syncs it, any week before
+ * 1 Apr 2026) is simply absent - callers show "–" rather than a 0% that isn't true.
+ */
+function salesByPerson(){
+  const w=window_(), out={by:{},venue:{}};
+  if(!w||!POSST_OK) return out;
+  POSST.forEach(r=>{
+    if(r.measure!=="sales"||r.date<w.from||r.date>w.to) return;
+    if(F.venues.length&&!venueOn(r.venue)) return;
+    if(F.day&&r.date!==F.day) return;
+    const k=r.venue+"|"+r.employee;
+    out.by[k]=(out.by[k]||0)+r.amount;
+    out.venue[r.venue]=(out.venue[r.venue]||0)+r.amount;
+  });
+  return out;
+}
+const pct1=(a,b)=>b>0?(a/b*100):null;
+const pctTxt=v=>v===null?'<span class="muted">\u2013</span>':(v<0.05&&v>0?"<0.1%":v.toFixed(1)+"%");
 function setPerson(v,e){ F.person=(F.person&&F.person.employee===e&&F.person.venue===v)?null:{venue:v,employee:e}; render(); }
 function setDiscType(t){ F.discType=(F.discType===t?"":t); render(); }
 function setDay(d){ F.day=(F.day===d?"":d); F.check=null; render(); }
@@ -926,19 +993,28 @@ function viewPeople(){
   const items=rows("item"), vs=rows("voids");
   const p={};
   const get=(v,e)=>{const k=v+"|"+e; return p[k]=p[k]||{venue:v,employee:e||"(unknown)",
-    wastage:0,wasteN:0,discounts:0,discN:0,voids:0,voidN:0};};
+    wastage:0,wasteN:0,discounts:0,discN:0,voids:0,voidN:0,sales:0};};
   waste.forEach(r=>{const o=get(r.venue,r.employee); o.wastage+=r.amount; o.wasteN++;});
   other.forEach(r=>{const o=get(r.venue,r.employee); o.discounts+=r.amount; o.discN++;});
   items.forEach(r=>{const o=get(r.venue,r.employee); o.discounts+=r.amount; o.discN++;});
   vs.forEach(r=>{const o=get(r.venue,r.employee); o.voids+=r.price_inc; o.voidN++;});
+  // Own sales from the API. Everyone who sold appears, not only those with an event - a
+  // person who rang $3,000 with no discounts is the comparison that makes the others mean
+  // something. Venues the API has nothing for this week keep "–" (null), never 0%.
+  const S=salesByPerson();
+  Object.keys(S.by).forEach(k=>{ const i=k.indexOf("|"); get(k.slice(0,i),k.slice(i+1)).sales=S.by[k]; });
+  Object.keys(p).forEach(k=>{ const r=p[k], has=S.venue[r.venue]>0;
+    r.discPct=has?pct1(r.discounts,r.sales):null; r.voidPct=has?pct1(r.voids,r.sales):null;
+    if(has&&!r.sales){ r.discPct=r.discounts?Infinity:null; r.voidPct=r.voids?Infinity:null; } });
   const list=Object.keys(p).map(k=>p[k]);
   if(!list.length) return '<div class="card">Nothing recorded against anyone this week.</div>';
   const sorted=sortRows(list,"discounts");
   const T=k=>list.reduce((a,r)=>a+r[k],0);
   return '<div class="card"><div class="label">By person</div><table><thead><tr>'+
     th("employee","Person")+th("venue","Venue","hide-sm")+
-    th("discounts","Discounts","num")+th("discN","#","num hide-sm")+
-    th("voids","Voids","num")+th("voidN","#","num hide-sm")+
+    th("sales","Sales","num")+
+    th("discounts","Discounts","num")+th("discN","#","num hide-sm")+th("discPct","% of sales","num")+
+    th("voids","Voids","num")+th("voidN","#","num hide-sm")+th("voidPct","% of sales","num")+
     th("wastage","Wastage","num")+th("wasteN","#","num hide-sm")+
     '</tr></thead><tbody>'+
     sorted.map(r=>'<tr class="click'+(F.person&&F.person.employee===r.employee&&F.person.venue===r.venue?" selrow":"")+
@@ -946,20 +1022,51 @@ function viewPeople(){
       JSON.stringify(r.employee).replace(/"/g,"&quot;")+')">'+
       '<td><b>'+esc(r.employee)+'</b></td>'+
       '<td class="hide-sm muted">'+esc(r.venue)+'</td>'+
+      '<td class="num">'+(r.sales?money0(r.sales):'<span class="muted">\u2013</span>')+'</td>'+
       '<td class="num">'+(r.discounts?money(r.discounts):'<span class="muted">\u2013</span>')+'</td>'+
       '<td class="num hide-sm muted">'+(r.discN||"")+'</td>'+
+      '<td class="num">'+rateCell(r.discPct,venueRate(S,list,r.venue,"discounts"),r.discounts)+'</td>'+
       '<td class="num">'+(r.voids?money(r.voids):'<span class="muted">\u2013</span>')+'</td>'+
       '<td class="num hide-sm muted">'+(r.voidN||"")+'</td>'+
+      '<td class="num">'+rateCell(r.voidPct,venueRate(S,list,r.venue,"voids"),r.voids)+'</td>'+
       '<td class="num" style="color:var(--amber)">'+(r.wastage?money(r.wastage):'<span class="muted">\u2013</span>')+'</td>'+
       '<td class="num hide-sm muted">'+(r.wasteN||"")+'</td></tr>').join("")+
     '</tbody><tfoot><tr><td>'+sorted.length+' people</td><td class="hide-sm"></td>'+
+    '<td class="num">'+(T("sales")?money0(T("sales")):"")+'</td>'+
     '<td class="num">'+money(T("discounts"))+'</td><td class="num hide-sm"></td>'+
+    '<td class="num">'+pctTxt(salesCovered(S,list,"discounts"))+'</td>'+
     '<td class="num">'+money(T("voids"))+'</td><td class="num hide-sm"></td>'+
+    '<td class="num">'+pctTxt(salesCovered(S,list,"voids"))+'</td>'+
     '<td class="num">'+money(T("wastage"))+'</td><td class="num hide-sm"></td></tr></tfoot></table>'+
+    (POSST_OK?'<div class="note"><b>% of sales</b> is each person\u2019s discounts or voids against what they rang up themselves '+
+      '(ImPOS Cloud). <b style="color:var(--red)">Red</b> is at least double their venue\u2019s rate, with $20 or more at stake. '+
+      'Sales are by who rang the item, discounts by who applied them \u2014 so someone who discounts other people\u2019s '+
+      'orders, or rings nothing, reads high. \u2013 means no ImPOS Cloud sales for that venue in this week.</div>':'')+
     '<div class="note"><b>Read this by column, not by row total.</b> Wastage lands on whoever closes, '+
     'so the person at the top of that column is the one who shuts the venue \u2014 every day, at every site. '+
     'The useful comparison is a person against others who work the same shift, and against their own '+
     'previous weeks. A single week\u2019s ranking says almost nothing.</div></div>';
+}
+
+/** A venue's own rate (discounts or voids as % of sales) over people it has sales for. */
+function venueRate(S,list,venue,key){
+  const sales=S.venue[venue]||0; if(!sales) return null;
+  const amt=list.filter(r=>r.venue===venue).reduce((a,r)=>a+r[key],0);
+  return amt/sales*100;
+}
+/** Overall rate across venues that have API sales this week - the others can't be judged. */
+function salesCovered(S,list,key){
+  const vs=Object.keys(S.venue).filter(v=>S.venue[v]>0); if(!vs.length) return null;
+  const sales=vs.reduce((a,v)=>a+S.venue[v],0);
+  const amt=list.filter(r=>vs.indexOf(r.venue)>-1).reduce((a,r)=>a+r[key],0);
+  return amt/sales*100;
+}
+/** A rate cell, red when it is at least double the venue's and the money is worth a look. */
+function rateCell(v,venue,amt){
+  if(v===null||v===undefined) return '<span class="muted">\u2013</span>';
+  if(v===Infinity) return '<span style="color:var(--red)" title="no sales of their own this week">no sales</span>';
+  const hot=venue!==null&&venue>0&&v>=venue*2&&(amt===undefined||amt>=20);
+  return hot?'<b style="color:var(--red)">'+pctTxt(v)+'</b>':pctTxt(v);
 }
 
 /**
@@ -997,6 +1104,23 @@ function personCard(){
   const days={}; myW.concat(myD,myV).forEach(r=>days[r.date]=1);
   const events=myW.concat(myD,myV).length;
 
+  // Rates against their OWN sales, when ImPOS Cloud has this venue for the week.
+  const S=salesByPerson(), mySales=S.by[venue+"|"+employee]||0, vSales=S.venue[venue]||0;
+  const rate=(mineAmt,venueAmt,label)=>{
+    if(!vSales) return "";
+    if(!mySales) return metric(label+" % of sales", mineAmt?"no sales":"\u2013", "venue "+pctTxt(venueAmt/vSales*100));
+    const m=mineAmt/mySales*100, v=venueAmt/vSales*100;
+    const x=v>0?m/v:0, hot=v>0&&x>=2&&mineAmt>=20;
+    return metric(label+" % of sales", pctTxt(m),
+      "venue "+pctTxt(v)+(v>0?' \u00b7 <b style="color:'+(hot?"var(--red)":x<=0.5?"#1a7f37":"var(--dim)")+'">'+x.toFixed(1)+'\u00d7</b>':""),
+      hot?"var(--red)":"");
+  };
+  const rates=vSales?('<div class="metrics">'+
+      metric("Sales", money0(mySales), pctTxt(mySales/vSales*100)+" of the venue\u2019s "+money0(vSales))+
+      rate(sum(myD,"amount"), sum(vD,"amount"), "Discounts")+
+      rate(sum(myV,"price_inc"), sum(vV,"price_inc"), "Voids")+
+    '</div>'):"";
+
   let html='<div class="card focus" id="person-detail" style="border-color:var(--ink);border-width:2px">'+
     '<div class="label">'+esc(employee)+
       '<span class="legend">'+esc(venue)+' \u00b7 '+events+' event(s) over '+
@@ -1008,11 +1132,12 @@ function personCard(){
       cmp(sum(myV,"price_inc"), sum(vV,"price_inc"), "Voids", money0)+
       cmp(sum(myW,"amount"), sum(vW,"amount"), "Wastage", money0)+
       metric("Clearance checks", String(myW.length), myW.length?"they close":"they do not close")+
-    '</div>'+
-    '<div class="note">Compared against the average of everyone with activity at this venue this week. '+
-    'That average is not shift-adjusted \u2014 someone on five shifts will out-total someone on two. '+
-    '<b>To compare discounts against a person\u2019s own sales, MIR280 needs adding to the weekly '+
-    'broadcast;</b> it is the only report with sales per employee.</div>';
+    '</div>'+rates+
+    '<div class="note">The top row compares totals with the average of everyone with activity at this venue this week, '+
+    'which is not shift-adjusted \u2014 someone on five shifts will out-total someone on two. '+
+    (vSales?'<b>The % of sales row is the fair comparison:</b> their discounts and voids against what they rang up '+
+      'themselves (ImPOS Cloud), next to the venue\u2019s own rate. 2\u00d7 or more with $20 at stake shows red.'
+     :'<b>No ImPOS Cloud sales for this venue this week</b>, so there is no % of sales row.')+'</div>';
 
   // Each event lists the items on its check inline, so you can see what a $240 clearance
   // actually was without leaving the person's report. The row still opens the full check.
@@ -1560,8 +1685,12 @@ function exportCsv(){
     other.forEach(r=>{const o=get(r.venue,r.employee);o.d+=r.amount;o.dn++;});
     rows("item").forEach(r=>{const o=get(r.venue,r.employee);o.d+=r.amount;o.dn++;});
     rows("voids").forEach(r=>{const o=get(r.venue,r.employee);o.v+=r.price_inc;o.vn++;});
-    Object.keys(p).forEach(k=>{const o=p[k];
-      body.push([o.venue,o.employee,o.d.toFixed(2),o.dn,o.v.toFixed(2),o.vn,o.w.toFixed(2),o.wn]);});
+    const S=salesByPerson();
+    Object.keys(S.by).forEach(k=>{const i=k.indexOf("|");get(k.slice(0,i),k.slice(i+1));});
+    head=head.concat(["sales","discount_pct_of_sales","void_pct_of_sales"]);
+    Object.keys(p).forEach(k=>{const o=p[k], sl=S.by[o.venue+"|"+o.employee]||0, has=S.venue[o.venue]>0;
+      const pc=x=>has&&sl?(x/sl*100).toFixed(2):"";
+      body.push([o.venue,o.employee,o.d.toFixed(2),o.dn,o.v.toFixed(2),o.vn,o.w.toFixed(2),o.wn,has?sl.toFixed(2):"",pc(o.d),pc(o.v)]);});
   } else if(F.view==="par"){
     name="par-levels";
     head=["venue","product","sold","binned","days_binned","making_per_day","suggested_par","weekly_saving"];
