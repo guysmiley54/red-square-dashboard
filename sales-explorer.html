@@ -18,6 +18,11 @@
   header .dot{width:14px;height:14px;background:var(--red);border-radius:3px;flex:none}
   header h1{font-size:16px;margin:0;font-weight:600}
   header .bld{font-size:11px;color:#8d8b86;font-family:ui-monospace,monospace}
+  /* Which feed is on screen. Always visible, because two sources that look identical are the
+     whole risk of a parallel run. Tapping it switches source. */
+  header .srcbadge{font-size:11px;font-weight:700;padding:4px 9px;border-radius:99px;text-decoration:none;
+    white-space:nowrap;background:#3a3936;color:#fff}
+  header .srcbadge.api{background:#2d6a6f}
   header .sp{margin-left:auto;display:flex;gap:8px}
   header button{background:#fff;color:var(--ink);border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer}
   #filters{background:#fff;border-bottom:1px solid var(--line);padding:10px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:52px;z-index:9}
@@ -127,6 +132,7 @@
   <div class="dot"></div>
   <h1>Sales Explorer</h1>
   <span class="bld" id="bld"></span>
+  <a class="srcbadge" id="srcbadge" href="#"></a>
   <div class="sp">
     <button onclick="togglePriv()" id="privbtn">&#128274; private</button>
     <button onclick="toggleReport()">&#9744; report</button>
@@ -140,9 +146,33 @@
 /* Build marker. supplier-explorer.html has carried one for a while and sales-explorer has
    not, which made "is the deployed file the one we edited?" a diff rather than a glance.
    Logged on load and hung off window so it can be read from the console. */
-const BUILD = "build-291300";
+const BUILD = "build-091600";
 console.log("sales-explorer " + BUILD);
 const SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
+/* Feed source switch (9 Oct 2026). ?src=api reads PosSales in BG POS Data, written by the POS Feed
+   Apps Script straight from the ImPOS Cloud API; without it the page reads SalesFeed (the Yellowfin
+   email feed) exactly as before. ItemMap, Overrides and DeputyShifts ALWAYS come from BG Sales Data,
+   so both sources are grouped by the same rules: any difference on screen is a difference in the data.
+   PosSales uses SalesFeed's columns (plus "kind"), voided lines already removed, wastage and loyalty
+   as $0 lines - so everything below reads it unchanged. */
+const POS_SHEET_ID = "1CAF0nQKiZ0z4bcZMY41OGZ76DlBsoWi_5eUrM_iNqz8"; // BG POS Data
+const QS = new URLSearchParams(location.search);
+const SRC = QS.get("src")==="api" ? "api" : "feed";
+const FEED = SRC==="api"
+  ? {id:POS_SHEET_ID, tab:"PosSales",  label:"ImPOS API",      book:"BG POS Data"}
+  : {id:SHEET_ID,     tab:"SalesFeed", label:"Yellowfin feed", book:"BG Sales Data"};
+// Columns the feed MUST answer with. gviz serves the first sheet in the workbook when a tab name
+// is missing - HTTP 200, no error - so the header is the only reliable test (handover, Naming traps).
+const FEED_COLS = ["timestamp","date","venue","item","qty","sales"];
+/* PosSales holds every venue back to 1 Apr 2026 - far more rows than the browser should parse on
+   every load. API mode fetches from the 1st of the month four months back; ?from=YYYY-MM-DD
+   overrides. Column B is plain text "yyyy-mm-dd" in PosSales, so a string compare filters it. */
+function apiFrom(){
+  const f=QS.get("from");
+  if(/^\d{4}-\d{2}-\d{2}$/.test(f||"")) return f;
+  const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-4);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";
+}
 // Display order is deliberate: Cambridge, Luma, Glenorchy.
 const VENUES = ["Red Square Cambridge","Luma Kitchen","Red Square Glenorchy"];
 // Tab in the same spreadsheet holding the item name map. Missing tab = no mapping.
@@ -373,14 +403,43 @@ function parseCsv(text){
   return rows;
 }
 
+function renderSource(){
+  const b=document.getElementById("srcbadge");
+  if(!b) return;
+  b.className="srcbadge"+(SRC==="api"?" api":"");
+  b.textContent=FEED.label+(SRC==="api"?" \u00b7 from "+fmtShort(apiFrom()):"");
+  b.title="Showing "+FEED.tab+" from "+FEED.book+". Tap to switch to the "+(SRC==="api"?"Yellowfin feed":"ImPOS API")+".";
+  b.href=SRC==="api"?location.pathname:location.pathname+"?src=api";
+}
+
+/* A gviz answer that is an error rather than CSV: an HTML page, or the JS error callback. */
+function gvizFailed(t){
+  return !t || t.trim().charAt(0)==="<" || t.indexOf("google.visualization.Query.setResponse")>-1 ||
+         /"status"\s*:\s*"error"/.test(t);
+}
+
 async function load(force){
-  document.getElementById("app").innerHTML='<div class="loading">Loading sales feed&hellip;</div>';
+  renderSource();
+  document.getElementById("app").innerHTML='<div class="loading">Loading '+esc(FEED.label)+'&hellip;</div>';
   const bust=force?("&_="+Date.now()):"";
-  const url="https://docs.google.com/spreadsheets/d/"+SHEET_ID+"/gviz/tq?tqx=out:csv&headers=1&sheet=SalesFeed"+bust;
-  let text;
-  try{ text=await (await fetch(url)).text(); }
-  catch(e){
-    document.getElementById("app").innerHTML='<div class="card"><b>Couldn\'t load the feed.</b><div class="muted" style="margin-top:6px">Check BG Sales Data is shared as "Anyone with the link can view".</div></div>';
+  const base="https://docs.google.com/spreadsheets/d/"+FEED.id+"/gviz/tq?tqx=out:csv&headers=1&sheet="+FEED.tab;
+  // API mode asks gviz for the date window only. If gviz types column B in a way the string
+  // compare can't use, it answers with an error - fall back to the whole tab rather than nothing.
+  // The columns are LABELLED in the query: on 9 Oct the live PosSales header came back with
+  // " " for venue, which would have failed the column check below. PosSales is the first tab
+  // of BG POS Data by design, so pinning names here can't dress another tab up as it.
+  const LBL=" label A 'timestamp', B 'date', C 'venue', D 'category', E 'department', F 'item', G 'qty', H 'sales', I 'kind'";
+  const urls=SRC==="api"
+    ? [base+"&tq="+encodeURIComponent("select * where B >= '"+apiFrom()+"'"+LBL)+bust,
+       base+"&tq="+encodeURIComponent("select *"+LBL)+bust, base+bust]
+    : [base+bust];
+  let text=null;
+  for(const u of urls){
+    try{ const t=await (await fetch(u)).text(); if(!gvizFailed(t)){ text=t; break; } }
+    catch(e){ /* try the next form */ }
+  }
+  if(text===null){
+    document.getElementById("app").innerHTML='<div class="card"><b>Couldn\'t load the '+esc(FEED.label)+'.</b><div class="muted" style="margin-top:6px">Check '+esc(FEED.book)+' is shared as "Anyone with the link can view".</div></div>';
     return;
   }
 
@@ -523,6 +582,15 @@ async function load(force){
   const grid=parseCsv(text.trim());
   const head=(grid.shift()||[]).map(h=>h.trim().toLowerCase());
   const ix=n=>head.indexOf(n);
+  const missingCols=FEED_COLS.filter(c=>head.indexOf(c)<0);
+  if(missingCols.length){
+    console.warn("feed: "+FEED.tab+" answered with ["+head.join(", ")+"]");
+    document.getElementById("app").innerHTML='<div class="card"><b>'+esc(FEED.tab)+' in '+esc(FEED.book)+
+      ' did not answer with its own columns</b> (missing: '+esc(missingCols.join(", "))+').'+
+      '<div class="muted" style="margin-top:6px">Google serves the first tab in the workbook when the one asked for '+
+      'is missing, so this is almost always a missing or renamed tab. Nothing below would have been right.</div></div>';
+    return;
+  }
   ROWS=grid.map(r=>{
     const ts=parseTs(r[ix("timestamp")]);
     let day=String(r[ix("date")]||"").trim();
