@@ -54,6 +54,10 @@
   /* Wide tables (Items purchased): drop secondary columns before the right-hand ones get cut off. */
   @media (max-width:900px){ .hide-md{display:none} }
   @media (max-width:600px){ .hide-sm{display:none} td,th{padding:6px 5px} #filters{top:auto;position:static} }
+  /* Five header buttons overran a 375px screen by 245px (four already overran by 165px). Wrap the
+     header on narrow screens; the breadcrumb goes, the title and buttons stay. 640 rather than 600
+     because the five buttons need 620px on one line. */
+  @media (max-width:640px){ header{flex-wrap:wrap;row-gap:6px;position:static} header .crumb{display:none} }
   @media print { header,#filters,.back,.btn{display:none!important} body{background:#fff} .card{border:none;padding:0} }
 </style>
 </head>
@@ -63,6 +67,7 @@
   <div class="crumb" id="crumb"></div>
   <button onclick="loadAll()">↻ refresh</button>
   <a class="hbtn" onclick="go('r')" style="cursor:pointer">Reports</a>
+  <a class="hbtn" onclick="go('oo')" style="cursor:pointer" title="Deliveries well above what that venue usually takes of an item">Over-ordering</a>
   <a class="hbtn" onclick="go('rec')" style="cursor:pointer" title="Cross-check staff-entered invoices against the pipeline">Reconcile</a>
   <a class="hbtn" id="aibtn" onclick="analyseScreen()" style="cursor:pointer">✨ Analyse</a>
 </header>
@@ -71,7 +76,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-051730"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-131015"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -100,7 +105,7 @@ const WEEKLY_SOURCES = [
 const SIGNOFF = "Cheers,\nAdrian";
 
 /* ================= DATA & FILTER STATE ================= */
-let LINE_FIXES = [];
+let LINE_FIXES = [], CODE_FIXES = [];
 let INV = [], LINES = [], byNumber = {}, CFG = {}, VENUE_LIST = [], SALES = [], INV_MIN_DATE = null, STAFF = [], SMAP = {}, SALES_SOURCE = null;
 /* Window for the product price-history chart and purchase list, in days (0 = all).
    Deliberately NOT tied to the top date filter: the stat cards, the 90-day average and
@@ -129,7 +134,7 @@ let SUPP_SORT = { key: "total", dir: -1 };
 let PROD_SORT = { key: "change", dir: -1 };
 let SELECTED = {}, SEL_SUPPLIER = "", CURR_PRODS = [];
 
-const UNIT_ALIAS={each:"ea",ea:"ea",unit:"ea",units:"ea",pack:"ea",pk:"ea","6pack":"ea",carton:"ctn",cartons:"ctn",ctn:"ctn",ct:"ctn",cs:"ctn",case:"ctn",box:"box",bx:"box",pkt:"pkt",packet:"pkt",pk:"pkt",sleeve:"slv",slv:"slv",bottle:"btl",btl:"btl",kg:"kg",g:"g",l:"l",ltr:"l",litre:"l",tray:"tray",bag:"bag",tub:"tub",doz:"doz",dozen:"doz"};
+const UNIT_ALIAS={each:"ea",ea:"ea",unit:"ea",units:"ea",kilogram:"kg",kilograms:"kg",kilo:"kg",kgs:"kg",pack:"ea",pk:"ea","6pack":"ea",carton:"ctn",cartons:"ctn",ctn:"ctn",ct:"ctn",cs:"ctn",case:"ctn",box:"box",bx:"box",pkt:"pkt",packet:"pkt",pk:"pkt",sleeve:"slv",slv:"slv",bottle:"btl",btl:"btl",kg:"kg",g:"g",l:"l",ltr:"l",litre:"l",tray:"tray",bag:"bag",tub:"tub",doz:"doz",dozen:"doz"};
 function unitNorm(u){ const n=norm(u); return UNIT_ALIAS[n]||n; }
 let PMERGE={}, VDIFF={};
 // Codeless identity is the description, so cosmetic tails must not split a product.
@@ -636,6 +641,26 @@ async function loadAll(){
       };
     }).filter(r=>r.supplier);
 
+    /* Item-code recovery (13 Oct 2026). The extractor sometimes leaves item_code blank and
+       prints the supplier's code as the first word of the description instead - Onepac
+       INV302524 (11 Oct) did it on every line, so two cartons of 12oz cups keyed as a
+       brand-new product with no history to compare against, and the Items card listed
+       twenty "new" products with no price history. Where a code-less line's first word is a
+       code this supplier has used on its coded lines, it is that code: the word moves to
+       item_code and comes off the description. Guard: the matched code is 4+ characters
+       with no lowercase letters, so an ordinary word that once landed in item_code ("Luma",
+       "Memo") can never take over an item. */
+    CODE_FIXES=[];
+    { const known={};
+      LINES.forEach(l=>{ const c=String(l.code||"").trim(); if(c.length>=4&&!/[a-z]/.test(c)) (known[norm(l.supplier)]=known[norm(l.supplier)]||{})[norm(c)]=c; });
+      LINES.forEach(l=>{ if(norm(l.code)) return;
+        const m=/^(\S+)\s+(\S.*)$/.exec(String(l.desc||"").trim()); if(!m) return;
+        const c=known[norm(l.supplier)]&&known[norm(l.supplier)][norm(m[1])];
+        if(!c) return;
+        CODE_FIXES.push({supplier:l.supplier,number:l.number,code:c,was:l.desc});
+        l.code=c; l.desc=m[2]; });
+      if(CODE_FIXES.length) console.log("Item codes recovered from descriptions:",CODE_FIXES.length,CODE_FIXES); }
+
     /* A line total wildly above qty x price is an extraction misread, not a purchase: PFD
        LW331974 (25 Sep 2026) recorded 1 x $34.80 butter portions as $63,717. The invoice total
        was right, so spend and COGS never saw it - but any view that sums LINE totals does, and
@@ -732,6 +757,20 @@ async function loadAll(){
 /* ================= FILTER BAR ================= */
 function renderFilters(){
   const f=document.getElementById("filters");
+  /* Over-ordering is a rolling check, not a calendar report: it looks at the last N days
+     whatever Week/Month says, so the date chips would be dead weight there. Venue chips
+     still apply; the window chips take the date chips' place. */
+  if(onOverOrder()){
+    const d=ooDays();
+    f.innerHTML=`
+    <span class="chip ${FILTER.venues.length===0?"on":""}" onclick="allVenues()">All venues</span>
+    ${VENUE_LIST.map(v=>`<span class="chip ${FILTER.venues.indexOf(v)>=0?"on":""}" onclick="toggleVenue('${encodeURIComponent(v)}')">${esc(v.replace("Red Square ","RS "))}</span>`).join("")}
+    <span style="color:var(--line)">|</span>
+    ${[7,14,28,90].map(n=>`<span class="chip ${d===n?"on":""}" onclick="setOoDays(${n})">Last ${n} days</span>`).join("")}
+    ${FILTER.venues.length?`<span class="clear" onclick="allVenues()">clear</span>`:""}
+  `;
+    return;
+  }
   const hasRange=FILTER.from&&FILTER.to;
   const steppable=hasRange||["week","month","quarter"].includes(FILTER.presetKind);
   f.innerHTML=`
@@ -940,6 +979,12 @@ function screenContext(){
     if(r) return {title:"Invoice "+b+" — "+a, data:{scope,
       header:{date:fmtD(r.date),venue:r.venue,subtotal:r.subtotal,gst:r.gst,freight:r.freight,cdl:r.cdl||0,total:r.total,type:r.type,status:r.status,duplicateFlag:r.dup||false},
       lines:lines.map(l=>({desc:l.desc,qty:l.qty,unit:l.unit,price:l.price,total:l.total}))}};
+  }
+  if(view==="oo"){
+    const R=ooCheck(ooDays(),ooFactor());
+    return {title:"Over-ordering - last "+ooDays()+" days", data:{scope:`Filters: venue=${venueLabel()||"all"}, window=last ${ooDays()} days, flag at ${ooFactor()}x usual. Each row is one delivery of one item at one venue that was well above what THAT venue usually takes of it, judged against its own previous deliveries.`,
+      checked:R.stats.checked, itemsChecked:R.stats.items, tooLittleHistory:R.stats.thin,
+      flagged:lim(R.rows,40).map(x=>({item:x.desc,supplier:x.supplier,venue:x.venue,date:fmtD(x.date),invoice:x.number,ordered:x.qty,unit:x.unit,usualPerDelivery:x.usual,previousDeliveries:x.n,previousRange:[x.lo,x.hi],last4Weeks:x.actual,usual4Weeks:x.expected,reason:x.big?"single delivery well above usual":"usual quantity but ordered too often",extraDollars:Math.round(x.extra*100)/100}))}};
   }
   // home / reports: portfolio view - same rows the screen is showing
   const inv=view==="r"?scopedInvReports():scopedInvHome();
@@ -1816,6 +1861,7 @@ function route(){
   if(view==="o") return renderOrder(a);
   if(view==="r") return renderReports();
   if(view==="rec") return renderReconcile();
+  if(view==="oo") return renderOverOrder();
   renderHome();
 }
 window.addEventListener("hashchange",route);
@@ -1973,7 +2019,7 @@ function renderHome(){
    baseline - so a rise part-way through still shows and a steady price reads as no change.
    A move by an exact whole multiple of 3x or more is a pack-size change, not a price change, and
    is left out of creep (same guard as the supplier Products table). */
-const ITEM_FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|admin\s*fee|\bcartage\b/i;
+const ITEM_FEE=/deliver|freight|fuel|levy|surcharge|cdl|container\s*deposit|rounding|admin\s*fee|(admin|service|distribution|dist|account)\s+(service\s+)?fees?\b|\bcartage\b/i;
 let ITEM_SORT={key:"spend",dir:-1}, ITEM_Q="", CREEP_DIR="up";
 function sortItems(k){
   if(ITEM_SORT.key===k) ITEM_SORT.dir*=-1;
@@ -2140,6 +2186,220 @@ function creepCard(items){
         <td class="num"><b>${money(Math.abs(p.extra))}</b></td></tr>`).join("")}</tbody></table>`
       :`<div style="font-size:13px;color:var(--dim)">No ${CREEP_DIR==="up"?"rises":"falls"} in this range.</div>`}
     <div style="font-size:11px;color:var(--dim);margin-top:6px">Extra paid = units bought in the range × (price paid − what that venue was paying before the range), same unit only. Where a venue bought nothing before the range, its first price inside it is the baseline${FILTER.from?"":" — and with All time selected there is no \"before\", so only moves inside the history count"}. Pack-size changes are left out. A price that rose and came back inside the range still cost money, so it can show here at — on the latest price. Sorted by dollars, not percent — a 3% rise on milk outranks a 30% rise on saffron. Click a row for the price history.</div></div>`;
+}
+
+/* ================= OVER-ORDERING (13 Oct 2026) =================
+   Deliveries where a venue took a lot more of an item than it usually does, so a double
+   order (two cartons of 12oz cups where Cambridge takes one a fortnight) is on screen the day
+   the invoice lands, with the invoice a click away.
+
+   Two tests, each against the SAME venue's own history of the SAME item in the same pack
+   (see ooKey / ooSamePack), over the 6 months before the delivery:
+
+     big  - this delivery against the usual delivery. Flagged when it is at least FACTOR x the
+            median of the previous deliveries, at least one whole unit more, and more than the
+            venue has taken on all but one previous delivery. The whole-unit floor is what
+            stops a carton flagging when the average is a fraction of one: a carton is usually
+            the minimum order, so the usual delivery of a carton item is one carton and one
+            carton is never more than that. The "all but one" test keeps normal variation quiet
+            (chicken at 2, 3, 2, 2, 3, 2 is not over-ordered at 3) without letting a single past
+            over-order raise the bar for good. Needs 3+ previous deliveries.
+
+     pace - the last 4 weeks, ending at the venue's latest delivery in the window, against a
+            typical 4 weeks before. Same factor and floor, and more than all but one earlier
+            4-week block. Catches the usual quantity ordered too often - a carton every week on a
+            fortnightly item - which no single delivery shows. Only for items the venue orders
+            no more than weekly, and only at 2x or worse: produce ordered three times a week
+            moves with trade, and that is not over-ordering. Typical = the larger of the median
+            and the mean of the earlier blocks, because a three-weekly item lands twice in some
+            4-week blocks and once in others, and the median alone (1) would flag the twos. Needs
+            12+ weeks of well-captured history (see the coverage guard in ooCheck); stays quiet
+            where a typical 4 weeks holds nothing, since one carton of a rarely bought item is
+            not a pace problem; and is not raised where a delivery in the same 4 weeks is
+            already flagged big - that would be the same over-order twice.
+
+   Extra $ = units over usual x the price actually paid per unit on that delivery (line total
+   / qty, so per-kg pricing on a box still gives the box price). Rows sort by it.
+   Lines are the Items purchased set: product lines only - overhead invoices, fee lines, credits
+   and $0 lines out. A delivery is judged only against earlier deliveries of the same item at a
+   comparable unit price (within 2x), so a carton is never measured against sleeves. Luma and Cambridge are judged
+   separately: the invoice's venue is who ordered. */
+const OO={LOOKBACK:182, MIN_PREV:3, WIN:28, MIN_BLOCKS:3, MAX_BLOCKS:6, MIN_EXTRA:1, COVER:0.5, PACE_GAP:7, PACE_MIN:2};
+const OO_DAYS_KEY="se_oo_days", OO_FACTOR_KEY="se_oo_factor";
+function ooDays(){ try{ const v=+localStorage.getItem(OO_DAYS_KEY); return [7,14,28,90].indexOf(v)>=0?v:28; }catch(e){ return 28; } }
+function ooFactor(){ try{ const v=+localStorage.getItem(OO_FACTOR_KEY); return [1.5,2,3].indexOf(v)>=0?v:2; }catch(e){ return 2; } }
+function setOoDays(n){ try{ localStorage.setItem(OO_DAYS_KEY,String(n)); }catch(e){} renderFilters(); route(); }
+function setOoFactor(n){ try{ localStorage.setItem(OO_FACTOR_KEY,String(n)); }catch(e){} route(); }
+let OO_SORT={key:"extra",dir:-1}, OO_OPEN="";
+function sortOo(k){ if(OO_SORT.key===k) OO_SORT.dir*=-1; else OO_SORT={key:k,dir:(k==="desc"||k==="venue")?1:-1}; route(); }
+function ooToggle(id){ OO_OPEN=(OO_OPEN===id)?"":id; route(); }
+function onOverOrder(){ return decodeURIComponent(location.hash.slice(1)).split("::")[0]==="oo"; }
+/* Identity is the page's own product key (SKU, else description, merge map applied). The unit
+   label is NOT part of it: on live data the same carton arrives as ea / ctn / carton / case / cs /
+   ca, a 1kg pack as 1KGPK and Case, and kg as Kilogram - keying on the label split 199 coded
+   products' histories (13 Oct 2026). Pack size is judged by what was PAID per unit instead, see
+   ooSamePack: a sleeve against a carton is 20x apart, kg against Kilogram is identical. */
+function ooKey(l){ return prodKey(l.supplier,l.code,l.desc,l.unit); }
+/* Same pack if the unit price is within a factor of 2 either way - wide enough for six months of
+   price rises, far too narrow for a different pack size. */
+function ooSamePack(a,b){ return a>0&&b>0&&a/b<=2&&b/a<=2; }
+const ooMed=a=>{ const x=a.slice().sort((p,q)=>p-q), m=x.length>>1; return x.length%2?x[m]:(x[m-1]+x[m])/2; };
+const ooHi2=a=>{ const x=a.slice().sort((p,q)=>q-p); return x.length>1?x[1]:x[0]; };   // second-highest
+
+/* Every delivery of a product line: one per item x venue x invoice, qty summed across lines.
+   Not date-scoped - the window is applied by ooCheck so each delivery's history is whole. */
+function ooDeliveries(){
+  const map={};
+  LINES.forEach(l=>{
+    if(!l.date||!(l.price>0)||!(l.qty>0)||ITEM_FEE.test(l.desc)||!supActive(l.supplier)) return;
+    const iv=byNumber[norm(l.supplier)+"|"+norm(l.number)];
+    if(iv?isNonCogs(iv):NON_COGS.has(String(supGroup(l.supplier)).trim().toLowerCase())) return;
+    const pk=ooKey(l), k=pk+"|"+norm(l.venue)+"|"+norm(l.number);
+    const d=map[k]||(map[k]={pk, venue:l.venue, number:l.number, supplier:l.supplier, date:l.date, qty:0, total:0,
+                               desc:l.desc, unit:l.unit, code:l.code, pdf:iv?iv.pdf:"", dup:!!(iv&&iv.dup), group:iv?rowGroup(iv):supGroup(l.supplier)});
+    d.qty+=l.qty; d.total+=l.total; if(l.unit) d.unit=l.unit;
+  });
+  return Object.values(map);
+}
+
+/* Judge every delivery dated in the last `days` days. Returns the flagged rows plus counts
+   of what was looked at, so "nothing flagged" can be told apart from "nothing checked". */
+function ooCheck(days, factor){
+  const DAY=864e5, all=ooDeliveries(), groups={};
+  all.forEach(d=>{ const g=d.pk+"|"+norm(d.venue); (groups[g]=groups[g]||[]).push(d); });
+  const now=fcMid(new Date()), from=+fcAdd(now,-(days-1));
+  const out=[], stats={checked:0, items:0, flagged:0, thin:0};
+  Object.values(groups).forEach(series=>{
+    series.sort((a,b)=>a.date-b.date);
+    if(!venueOk(series[0].venue)) return;
+    const inWin=series.filter(d=>+fcMid(d.date)>=from);
+    if(!inWin.length) return;
+    stats.items++;
+    const judged=[];
+    inWin.forEach(d=>{
+      stats.checked++;
+      const t=+fcMid(d.date), lb=t-OO.LOOKBACK*DAY;
+      const eff=d.total/d.qty;
+      const comp=series.filter(x=>ooSamePack(x.total/x.qty,eff));   // same item, same pack
+      const prev=comp.filter(x=>x!==d&&+fcMid(x.date)<t&&+fcMid(x.date)>=lb);
+      if(prev.length<OO.MIN_PREV){ stats.thin++; return; }
+      const qtys=prev.map(x=>x.qty), usual=ooMed(qtys);
+      const r={d, prev, comp, usual, lo:Math.min.apply(null,qtys), hi:Math.max.apply(null,qtys), hi2:ooHi2(qtys), n:prev.length, eff, big:false, pace:false,
+               actual:null, expected:null, nBlocks:0, recent:[]};
+      r.big = d.qty-usual>=OO.MIN_EXTRA && d.qty>=usual*factor && d.qty>r.hi2;
+      judged.push(r);
+    });
+    const last=judged.length?judged[judged.length-1]:null;
+    if(last){
+      const t=+fcMid(last.d.date), w0=t-OO.WIN*DAY;
+      const recent=last.comp.filter(x=>+fcMid(x.date)>w0&&+fcMid(x.date)<=t);
+      const actual=recent.reduce((s,x)=>s+x.qty,0);
+      /* Coverage guard. Invoice capture ramped up through mid-2026 and has had gaps (Southern's
+         PDFs stopped for five weeks), so an earlier 4-week block with few deliveries is usually
+         an under-CAPTURED block, not a quiet one - and a quiet baseline flags everything after it.
+         First live run (13 Oct 2026): Glenorchy mushrooms read 152 kg against a "typical" 76
+         because the July block held 4 captured deliveries and June none. The item can't tell the
+         two apart, but the supplier's invoice count can: a block only counts if this supplier
+         sent this venue at least half as many invoices in it as in the window being judged. An
+         item ordered more OFTEN still shows, because it rides on the same weekly invoices; a
+         month where half the invoices never reached the inbox does not. Older than the first
+         failing block is older than the gap, so the walk stops there. */
+      const supInv=INV.filter(r=>r.supplier===last.d.supplier&&r.venue===last.d.venue&&r.date&&supActive(r.supplier));
+      const invIn=(a,b)=>supInv.filter(r=>+fcMid(r.date)>a&&+fcMid(r.date)<=b).length;
+      const recentCov=invIn(w0,t);
+      const first=+fcMid(last.prev[0].date), blocks=[];
+      for(let k=1;k<=OO.MAX_BLOCKS;k++){
+        const b0=t-OO.WIN*(k+1)*DAY, b1=t-OO.WIN*k*DAY;
+        if(b0<first) break;   // a block the history doesn't fully cover is not a quiet block
+        if(invIn(b0,b1)<Math.max(1,recentCov*OO.COVER)) break;   // under-captured, not quiet
+        blocks.push(last.comp.filter(x=>+fcMid(x.date)>b0&&+fcMid(x.date)<=b1).reduce((s,x)=>s+x.qty,0));
+      }
+      let expected=null;
+      if(blocks.length>=OO.MIN_BLOCKS) expected=Math.max(ooMed(blocks), blocks.reduce((s,v)=>s+v,0)/blocks.length);
+      last.actual=actual; last.expected=expected; last.nBlocks=blocks.length; last.recent=recent;
+      const bigInWin=judged.some(j=>j!==last&&j.big&&+fcMid(j.d.date)>w0);
+      /* Perishables ordered to demand (cucumbers three times a week) rise and fall with trade, and
+         a 4-week total that moved with trade is not over-ordering. Pace is judged only on items
+         the venue orders no more than weekly - stock that sits on a shelf - and only at 2x or
+         worse, whatever the sensitivity chip says. First live run: 57 pace rows, mostly produce
+         and bread running 1.5x; with these two rules the list is cups, towels, straws, sauces. */
+      const gaps=last.prev.slice(1).map((x,i)=>(+fcMid(x.date)-+fcMid(last.prev[i].date))/DAY);
+      const slow=gaps.length? ooMed(gaps)>=OO.PACE_GAP : false;
+      const pf=Math.max(OO.PACE_MIN,factor);
+      last.pace = slow && expected!=null && expected>0 && !bigInWin && actual-expected>=OO.MIN_EXTRA && actual>=expected*pf && actual>ooHi2(blocks);
+    }
+    judged.forEach(r=>{
+      if(!r.big&&!r.pace) return;
+      stats.flagged++;
+      const extraQty=r.big?r.d.qty-r.usual:r.actual-r.expected;
+      out.push(Object.assign({}, r.d, {usual:r.usual, lo:r.lo, hi:r.hi, n:r.n, eff:r.eff, big:r.big, pace:r.pace, actual:r.actual, expected:r.expected,
+        nBlocks:r.nBlocks, extraQty, extra:extraQty*r.eff, ratio:r.big?r.d.qty/r.usual:r.actual/r.expected, series:r.comp, prev:r.prev, recent:r.recent}));
+    });
+  });
+  out.sort((a,b)=>b.extra-a.extra);
+  return {rows:out, stats, from:new Date(from), to:now};
+}
+
+function renderOverOrder(){
+  crumb("over-ordering");
+  const days=ooDays(), factor=ooFactor();
+  const R=ooCheck(days,factor), st=R.stats;
+  const K={desc:x=>String(x.desc).toLowerCase(), venue:x=>String(x.venue).toLowerCase(), date:x=>+x.date, qty:x=>x.qty, usual:x=>x.usual, ratio:x=>x.ratio, extra:x=>x.extra};
+  const fn=K[OO_SORT.key]||K.extra;
+  const rows=R.rows.slice().sort((a,b)=>{ const x=fn(a), y=fn(b); return (x<y?-1:x>y?1:0)*OO_SORT.dir || b.extra-a.extra; });
+  const tot=rows.reduce((s,r)=>s+r.extra,0);
+  const head=(k,l,c)=>`<th class="${c||""}" style="cursor:pointer;user-select:none" onclick="sortOo('${k}')">${l}${OO_SORT.key===k?(OO_SORT.dir<0?" ↓":" ↑"):""}</th>`;
+  const q=(v,u)=>itemQty(v,u);
+  const x1=v=>Math.round(v*10)/10;
+  const rowId=r=>norm(r.supplier)+"|"+norm(r.number)+"|"+r.pk;
+  const invLink=(r,x)=>`<a onclick="event.stopPropagation();go('i::${encodeURIComponent(r.supplier)}::${encodeURIComponent(x.number)}')" style="color:var(--red);text-decoration:underline;cursor:pointer" title="Open this invoice">${esc(x.number)}</a>${x.pdf?` <a href="${esc(x.pdf)}" target="_blank" onclick="event.stopPropagation()" style="color:var(--dim);font-size:11px" title="Open the original PDF">PDF ↗</a>`:""}`;
+  const detail=r=>{
+    const t=+fcMid(r.date), hist=r.series.filter(x=>+fcMid(x.date)<=t&&+fcMid(x.date)>=t-OO.LOOKBACK*864e5).slice().reverse();
+    const w0=t-OO.WIN*864e5;
+    return `<tr><td colspan="8" style="background:#faf9f6;padding:8px 12px 10px">
+      <div style="font-size:12px;margin-bottom:6px;line-height:1.5">${esc(vShort(r.venue))} · ${esc(r.desc)}: ${r.n} earlier deliveries in the 6 months before ${fmtD(r.date)}, usually <b>${q(r.usual,r.unit)}</b> each (range ${q(r.lo)}–${q(r.hi)}).${r.expected!=null?` Last 4 weeks <b>${q(r.actual,r.unit)}</b> against a typical <b>${q(x1(r.expected),r.unit)}</b> (from ${r.nBlocks} earlier 4-week blocks).`:" Under 12 weeks of well-captured history, so no 4-week comparison."}</div>
+      <table style="font-size:12px"><thead><tr><th>Date</th><th>Invoice</th><th class="num">Qty</th><th class="num hide-sm">Unit $</th><th class="num">Total</th></tr></thead>
+      <tbody>${hist.map(x=>{ const me=x.number===r.number, inW=+fcMid(x.date)>w0;
+        return `<tr${me?' style="font-weight:700"':""}><td>${fmtD(x.date)}${inW&&!me&&r.pace?' <span style="color:var(--dim);font-size:10px">4 wks</span>':""}</td><td>${invLink(r,x)}</td><td class="num">${q(x.qty,x.unit)}</td><td class="num hide-sm">${money(x.total/x.qty)}</td><td class="num">${money(x.total)}</td></tr>`; }).join("")}</tbody></table>
+    </td></tr>`;
+  };
+  const line=r=>{
+    const id=rowId(r), open=OO_OPEN===id;
+    const why=r.big
+      ? `<span class="up" title="${esc(`${q(r.qty,r.unit)} against a usual ${q(r.usual,r.unit)} — more than ${r.n===1?"the":"all but one of the"} ${r.n} earlier deliveries (${q(r.lo)}–${q(r.hi)})`)}">${x1(r.ratio)}×</span>`
+      : `<span class="up" title="${esc(`${q(r.actual,r.unit)} in the 4 weeks to ${fmtD(r.date)}, against a typical ${q(x1(r.expected),r.unit)} — the usual quantity, ordered too often`)}">${q(r.actual)} in 4 wks</span> <span style="color:var(--dim);font-size:11px">usual ${q(x1(r.expected))}</span>`;
+    return `<tr class="click" onclick="ooToggle('${id}')">
+      <td>${esc(r.desc)}${r.code?` <span style="color:var(--dim);font-family:var(--mono);font-size:11px">${esc(r.code)}</span>`:""}${r.dup?' <span class="pill check" title="Two invoice rows share this number, so the lines are probably doubled — check the sheet before blaming the order">dup</span>':""}${r.pace&&!r.big?' <span class="pill vol" title="Each delivery was a normal size; there were too many of them">pace</span>':""}<div style="color:var(--dim);font-size:11px">${esc(r.supplier)}</div></td>
+      <td>${esc(vShort(r.venue))}</td>
+      <td class="num hide-md">${fmtD(r.date)}</td>
+      <td class="num" style="white-space:normal"><b>${q(r.qty,r.unit)}</b></td>
+      <td class="num hide-md" style="white-space:normal" title="${esc(`median of ${r.n} earlier deliveries, range ${q(r.lo)}–${q(r.hi)}`)}">${q(r.usual,r.unit)}</td>
+      <td class="num" style="white-space:normal">${why}</td>
+      <td class="num"><b>${money(r.extra)}</b></td>
+      <td style="font-family:var(--mono);white-space:normal">${invLink(r,r)}</td>
+    </tr>${open?detail(r):""}`;
+  };
+  const fchips=[1.5,2,3].map(f=>`<a class="tgl ${factor===f?"on":""}" onclick="setOoFactor(${f})" title="Flag a delivery at ${f}× the usual one (and at least a whole unit more)">${f}×</a>`).join("");
+  document.getElementById("app").innerHTML=`
+    <a class="back" onclick="go('')">All suppliers</a>
+    <div class="statgrid" style="margin-bottom:12px">
+      <div class="stat"><div class="v" style="color:${rows.length?"var(--red)":"inherit"}">${rows.length}</div><div class="k">Flagged deliveries</div></div>
+      <div class="stat"><div class="v">${money(tot)}</div><div class="k">Over usual, at cost</div></div>
+      <div class="stat"><div class="v">${st.checked}</div><div class="k">Deliveries checked</div></div>
+      <div class="stat"><div class="v">${st.items}</div><div class="k">Items at a venue</div></div>
+    </div>
+    <div class="card">
+      <div class="label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span>Over-ordering — last ${days} days${venueLabel()?" · "+esc(venueLabel()):" · all venues"}</span>
+        <span style="margin-left:auto;display:flex;gap:6px;align-items:center"><span style="text-transform:none;letter-spacing:0;font-weight:400">flag at</span>${fchips}<span style="text-transform:none;letter-spacing:0;font-weight:400">usual</span></span>
+      </div>
+      ${rows.length?`<div style="overflow:auto"><table><thead><tr>${head("desc","Item")}${head("venue","Venue")}${head("date","Date","num hide-md")}${head("qty","Ordered","num")}${head("usual","Usual","num hide-md")}${head("ratio","vs usual","num")}${head("extra","Extra","num")}<th>Invoice</th></tr></thead>
+      <tbody>${rows.map(line).join("")}</tbody>
+      <tfoot><tr><td><b>Total</b></td><td></td><td class="hide-md"></td><td></td><td class="hide-md"></td><td></td><td class="num"><b>${money(tot)}</b></td><td></td></tr></tfoot></table></div>`
+      :`<div style="font-size:13px;color:var(--dim)">Nothing flagged in the last ${days} days at ${factor}× — every delivery checked was within ${factor}× of what that venue usually takes of the item, or under a whole unit over it.</div>`}
+      <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.5">Checked ${st.checked} deliver${st.checked===1?"y":"ies"} of ${st.items} item${st.items===1?"":"s"} across the venues shown${st.thin?`; ${st.thin} had fewer than ${OO.MIN_PREV} earlier deliveries at that venue to judge against`:""}.
+        Each delivery is measured against the <b>same venue's</b> own deliveries of the <b>same item</b> in the same pack (judged by unit price, since suppliers label a carton ea, ctn, case or cs as the mood takes them) over the previous 6 months. <b>Usual</b> is the middle value of those. A delivery is flagged when it is at least ${factor}× usual, at least one whole unit more, and more than the venue has taken on all but one earlier delivery — so a full carton never flags just because the average is a fraction of one. <span class="pill vol">pace</span> rows are the usual quantity ordered too often: the last 4 weeks at least double a typical 4 weeks before, judged only on items ordered no more than weekly (produce ordered to demand moves with trade). Extra is the units over usual at the price paid on that delivery. Click a row for the venue's history of the item, the invoice number for the invoice, PDF for the original. Overhead suppliers, delivery and fee lines, credits and manual purchases are left out.</div>
+    </div>`;
 }
 
 /* ================= REPORTS ================= */
