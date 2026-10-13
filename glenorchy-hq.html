@@ -150,7 +150,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v18-1545"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v19-1615"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -185,6 +185,10 @@ const FILL_MIN = 0;
 /* ================= STATE ================= */
 let INV=[],LINES=[],CFG={},PMERGE={},ORDERS=[],SSET={},FAVS=[],COVER={},HIDDEN={},SALES=[],LOAD_WARN=[];
 let SALES_OK=false, LINE_FIXES=[];
+/* Every invoice and line for this ledger BEFORE the COGS filter. Only the supplier statement and the
+   invoice list read these (13 Oct 2026): a statement is reconciled against the supplier's own, so it
+   needs every bill they sent, cleaning included. Spend, COGS %, reports and ordering stay on INV/LINES. */
+let INV_ALL=[], LINES_ALL=[];
 let TAG=TAGS[0], WEEK_OFF=0, SUPPLIER="", CATFILT="", SEARCH="", HIDE_PORTAL=true;
 let SHOW_HIDDEN=false, PICKED={};      // PICKED: item_key -> true, for bulk category edits
 /* Typing re-renders the page, which destroys the search box and rebuilds it — so focus and
@@ -617,6 +621,7 @@ async function loadAll(){
     /* COGS only, by instruction. Dropping rent, energy, waste and repairs HERE rather than
        filtering in each view means no total, group, catalogue or countdown can pick them up
        later by accident. */
+    INV_ALL=INV.slice();
     const beforeCogs=INV.length;
     INV=INV.filter(isCogs);
     console.log("COGS filter kept "+INV.length+" of "+beforeCogs+" invoice rows");
@@ -635,7 +640,7 @@ async function loadAll(){
     });
 
     const byNumber={};
-    INV.forEach(r=>byNumber[norm(r.supplier)+"|"+norm(r.number)]=r);
+    INV_ALL.forEach(r=>byNumber[norm(r.supplier)+"|"+norm(r.number)]=r);
     PMERGE={};
     const unwrap=v=>String(v==null?"":v).replace(/^="?|"?$/g,"").trim();
     pmRows.forEach(r=>{const s=unwrap(r.supplier),m=unwrap(r.match),i=unwrap(r.into);
@@ -650,6 +655,7 @@ async function loadAll(){
               invCategory:iv?iv.category:""};
     }).filter(r=>r.supplier&&r.date&&LEDGER_VENUES.indexOf(r.venue)>=0);
 
+    LINES_ALL=LINES;   // before the COGS cut, for the invoice list's line view only
     /* A line whose invoice is gone (dropped by the COGS filter) goes with it. */
     const keptInv={};
     INV.forEach(r=>keptInv[norm(r.supplier)+"|"+norm(r.number)]=true);
@@ -2257,9 +2263,11 @@ function statementCard(name,range){
                    const [y,m]=k.split("-"); return new Date(+y,+m-1,1).toLocaleDateString("en-AU",{month:"long",year:"numeric"}); };
   const keys=new Set(); for(let d=mid(range.start); +d<=+range.end; d=addD(d,1)) keys.add(pKey(d));
   const per={};
-  INV.forEach(r=>{ if(r.supplier!==name||!r.date) return; const k=pKey(r.date); if(!keys.has(k)) return;
+  let ncN=0, ncT=0;
+  INV_ALL.forEach(r=>{ if(r.supplier!==name||!r.date) return; const k=pKey(r.date); if(!keys.has(k)) return;
     const m=per[k]||(per[k]={n:0,sub:0,gst:0,freight:0,credits:0,total:0});
-    m.n++; m.sub+=r.subtotal; m.gst+=r.gst; m.freight+=r.freight||0; m.total+=r.total; if(r.type==="credit_note") m.credits+=r.total; });
+    m.n++; m.sub+=r.subtotal; m.gst+=r.gst; m.freight+=r.freight||0; m.total+=r.total; if(r.type==="credit_note") m.credits+=r.total;
+    if(!isCogs(r)){ ncN++; ncT+=r.total; } });
   const mkeys=Object.keys(per).sort().reverse().slice(0,wk?16:12);
   const tot=mkeys.reduce((a,k)=>a+per[k].total,0), anyFreight=mkeys.some(k=>per[k].freight);
   const email=supplierEmail(name);
@@ -2278,7 +2286,9 @@ function statementCard(name,range){
         <td class="num hide-sm"></td>${anyFreight?'<td class="num hide-sm"></td>':""}<td class="num hide-sm"></td><td class="num"><b>${money(tot)}</b></td></tr>
       </tbody></table>`:`<div class="note">No invoices from ${esc(name)} in ${esc(range.label)}.</div>`}
     <div class="note">Reconcile these totals against the supplier's own statement — differences mean a missing invoice or a
-      billing error. Whole ${wk?"weeks":"months"} covering ${esc(range.label)}, not the range itself.</div></div>`;
+      billing error. Whole ${wk?"weeks":"months"} covering ${esc(range.label)}, not the range itself. Every bill and credit
+      from them is here${ncN?`, including ${ncN} filed outside cost of goods (${money(ncT)}) — cleaning and the like, which
+      the spend figures above leave out`:""}.</div></div>`;
 }
 /* The supplier's usual on PRODUCT LINES — fees stripped, the AVG_WEEKS complete weeks before
    the range, scaled and pro-rated like every other usual. Computed over every line, not just
@@ -2927,7 +2937,7 @@ function invoicePanel(supplier,venue,limit,range){
     ${invoiceTable(supplier,venue,limit,range)}</div>`;
 }
 function invoiceTable(supplier,venue,limit,range){
-  const rows=INV.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)&&r.date
+  const rows=INV_ALL.filter(r=>r.supplier===supplier&&(!venue||r.venue===venue)&&r.date
                          &&(!range||(r.date>=range.start&&r.date<=range.end)))
                 .sort((a,b)=>b.date-a.date).slice(0,limit||40);
   if(!rows.length) return `<div class="note">No invoices for this supplier${venue?" at "+esc(venue):""}${range?" in "+esc(range.label):" in the data"}.</div>`;
@@ -2938,11 +2948,11 @@ function invoiceTable(supplier,venue,limit,range){
     <tbody>${rows.map(r=>{
       const k=norm(r.supplier)+"|"+norm(r.number)+"|"+fmtISO(r.date);
       const open=OPEN_INV===k;
-      const lines=open?LINES.filter(l=>l.supplier===r.supplier&&norm(l.number)===norm(r.number)
+      const lines=open?LINES_ALL.filter(l=>l.supplier===r.supplier&&norm(l.number)===norm(r.number)
                                        &&(!venue||l.venue===venue)):[];
       return `<tr class="click ${open?"picked":""}" onclick="toggleInv('${esc(k)}')">
           <td>${open?"▾ ":"▸ "}${fmtD(r.date)}</td>
-          <td class="hide-sm" style="font-family:var(--mono);font-size:11px">${esc(r.number)||"—"}</td>
+          <td class="hide-sm" style="font-family:var(--mono);font-size:11px">${esc(r.number)||"—"}${r.type==="credit_note"?' <span class="pill">credit</span>':""}${isCogs(r)?"":' <span class="pill" title="Filed outside cost of goods — not in the spend figures">not COGS</span>'}</td>
           <td class="hide-sm">${esc(vShort(r.venue))}</td>
           <td class="num">${money(r.subtotal)}</td><td class="num hide-sm">${money(r.gst)}</td>
           <td class="num"><b>${money(r.total)}</b></td></tr>`
@@ -2955,7 +2965,8 @@ function invoiceTable(supplier,venue,limit,range){
               :`<div class="note">No itemised lines captured for this invoice — it arrived as a total only.</div>`}
           </td></tr>`:"");
     }).join("")}</tbody></table>
-    <div class="note">Most recent first, capped at ${limit||40}. Click any invoice for its lines.</div>`;
+    <div class="note">Most recent first, capped at ${limit||40}. Click any invoice for its lines. Every bill is listed;
+      ones marked <b>not COGS</b> (cleaning and the like) are left out of the spend figures.</div>`;
 }
 
 /* ================= PLACED ORDERS ================= */
