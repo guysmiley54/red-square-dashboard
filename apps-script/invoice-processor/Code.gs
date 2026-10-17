@@ -66,6 +66,16 @@ var CONFIG = {
     "kennedy": "Red Square Cambridge"
   },
   DEFAULT_VENUE: "Red Square Glenorchy",
+  // Suppliers that bill every venue to one address and say which café the goods are for in a
+  // Reference / Notes field instead (extracted as venue_ref). For these the address is
+  // ignored: the venue comes from venue_ref, and with no venue named there, from fallback.
+  // Valhalla (17 Oct 2026): every invoice is billed to Red Square Cafe, Kennedy Drive,
+  // Cambridge; Glenorchy deliveries say "Reference: Glenorchy" or "Notes: Deliver to
+  // Glenorchy". Address matching had put 8 of 19 invoices at the wrong café.
+  // match is tested against the supplier name the model read AND the sender's address.
+  VENUE_BY_REFERENCE: [
+    { match: /valhalla/i, fallback: "Red Square Cambridge" }
+  ],
   SAVE_PDFS: true,
   DRIVE_FOLDER: "Invoice PDFs",
   // Email address to notify if any invoice FAILS in a run (leave "" to disable).
@@ -80,7 +90,7 @@ var EXTRACT_PROMPT = [
   "",
   "Extract the invoice data and respond with ONLY minified JSON on a single line - no markdown fences, no explanation, no line breaks. Use this exact structure:",
   "",
-  '{"doc_type":"invoice or credit_note","supplier":"string","invoice_number":"string","invoice_date":"YYYY-MM-DD","subtotal":number,"gst":number,"total":number,"freight":number,"cdl":number,"deliver_to":"string or null","order_ref":"string or null","category_guess":"Food|Beverage|Coffee|Packaging|Cleaning|Equipment|Other","items":[["description",qty,"unit",unit_price,line_total,"item_code or null",line_cdl]]}',
+  '{"doc_type":"invoice or credit_note","supplier":"string","invoice_number":"string","invoice_date":"YYYY-MM-DD","subtotal":number,"gst":number,"total":number,"freight":number,"cdl":number,"deliver_to":"string or null","venue_ref":"string or null","order_ref":"string or null","category_guess":"Food|Beverage|Coffee|Packaging|Cleaning|Equipment|Other","items":[["description",qty,"unit",unit_price,line_total,"item_code or null",line_cdl]]}',
   "",
   "Each item is a 7-element array: [description, qty, unit, unit_price, line_total, item_code, line_cdl]. item_code is the supplier's product/SKU code from the invoice line (e.g. \"018050\", \"LAC-MOZ-MLSK\") - null if the invoice doesn't show codes. line_cdl is that line's container deposit amount - 0 if the invoice has no per-line deposit column.",
   "",
@@ -89,6 +99,8 @@ var EXTRACT_PROMPT = [
   'doc_type: use "credit_note" if the document is a credit note / adjustment note / credit adjustment (returned or credited goods); otherwise "invoice". For credit notes, report all amounts as POSITIVE numbers as printed - the system applies the sign. Use the credit note number as invoice_number.',
   "",
   'order_ref: the CUSTOMER order number / order reference printed on the invoice, if it shows one. Southern Foodservice tax invoices print the Pepper order code (6 alphanumeric characters, e.g. RXUUDE, 6WCGX5), usually labelled Order, Order No, Customer Order or Your Order. This is NOT the invoice number and NOT a delivery docket number. Return null if no such reference appears.',
+  "",
+  'venue_ref: copy word for word any Reference, Ref, Notes or delivery-instruction text printed on the invoice that names a site, branch or delivery location (e.g. "Reference: GLENORCHY", "Notes: Deliver to Glenorchy"). This is NOT the bill-to or ship-to address - report that in deliver_to as usual. Return null if the invoice has no such text.',
   "",
   "Rules:",
   "- Amounts in dollars as plain numbers (no $ signs, no strings, no thousands separators).",
@@ -546,7 +558,7 @@ function writeInvoice_(sheets, j, fromEmail, fileName, pdfUrl, emailDate, route)
   // venue_override: set by Overheads.gs from the supplier's own site ID. Address matching
   // cannot do this job - Cambridge and Luma share a building on Kennedy Drive, and each
   // supplier numbers its units differently.
-  var venue = j.venue_override || detectVenue_(j.deliver_to);
+  var venue = resolveVenue_(j, fromEmail);
   var isCredit = j.doc_type === "credit_note";
   // The prompt asks for credit notes as POSITIVE amounts and the sign is applied here. The
   // model does not always comply: on 11 Sep 2026, 7 of 53 credit notes in the live tab had
@@ -655,6 +667,31 @@ function savePdf_(att, j) {
   } catch (e) {
     return "";
   }
+}
+
+/**
+ * Which café an invoice belongs to. In order: Overheads.gs's venue_override (supplier site
+ * IDs); a VENUE_BY_REFERENCE supplier's Reference/Notes text, else its fallback; otherwise the
+ * deliver_to address as before.
+ */
+function resolveVenue_(j, fromEmail) {
+  if (j.venue_override) return j.venue_override;
+  var who = String(j.supplier || "") + " " + String(fromEmail || "");
+  var rules = CONFIG.VENUE_BY_REFERENCE || [];
+  for (var i = 0; i < rules.length; i++) {
+    if (rules[i].match.test(who)) return venueFromText_(j.venue_ref) || rules[i].fallback;
+  }
+  return detectVenue_(j.deliver_to);
+}
+
+/** The venue a piece of text names, or null if it names none. */
+function venueFromText_(text) {
+  var hint = String(text || "").toLowerCase();
+  if (!hint) return null;
+  for (var k in CONFIG.VENUES) {
+    if (hint.indexOf(k) !== -1) return CONFIG.VENUES[k];
+  }
+  return null;
 }
 
 function detectVenue_(deliverTo) {
@@ -965,4 +1002,31 @@ function dedupeInvoices() {
   lineRowsToDelete.sort(function (a, b) { return b - a; }).forEach(function (row) { lin.deleteRow(row); });
   invRowsToDelete.sort(function (a, b) { return b - a; }).forEach(function (row) { inv.deleteRow(row); });
   Logger.log("Deleted " + invRowsToDelete.length + " duplicate invoice rows and " + lineRowsToDelete.length + " duplicate line rows.");
+}
+
+/**
+ * READ-ONLY check of the Reference-based venue rule against real invoice PDFs in Drive: runs
+ * the normal extraction on each and logs venue_ref and the venue it resolves to. Writes no
+ * sheet. Costs one model call per file. Edit the list to test other invoices.
+ */
+function testVenueRef() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty("ANTHROPIC_API_KEY");
+  var files = [
+    ["19177755", "1lHBRODWFMuDJdBiAdxZ3YJw5p8PS-_-O", "Red Square Cambridge"],   // no reference
+    ["19177028", "1qie4bN5h3k4C3YOdTKOJr9PthNoS4cEs", "Red Square Glenorchy"],   // Ref + Notes: Glenorchy
+    ["19176976", "1WB7GtAAG8X22LqPr8Bwi7nuJpYBoxtUz", "Red Square Cambridge"],   // Ref: Cambridge
+    ["19177424", "1biu6kljS1vhDOz-diOSVc-l7UBcmDr2U", "Red Square Glenorchy"],   // Notes only: Glenorchy
+    ["19176617", "1wNI8WqZSMztKDWbZQlGeO-DL6-qwrcMk", "Red Square Glenorchy"]    // Ref: Glenorchy
+  ];
+  var ok = 0;
+  files.forEach(function (f) {
+    var blob = DriveApp.getFileById(f[1]).getBlob();
+    var block = { type: "document", source: { type: "base64", media_type: "application/pdf", data: Utilities.base64Encode(blob.getBytes()) } };
+    var j = extractFromContent_(apiKey, [block], CONFIG.MODEL, "");
+    var v = resolveVenue_(j, "Valhalla Ice Cream <enquiries@valhallaicecream.com.au>");
+    if (v === f[2]) ok++;
+    Logger.log((v === f[2] ? "OK   " : "FAIL ") + f[0] + "  venue_ref=" + JSON.stringify(j.venue_ref) +
+      "  deliver_to=" + JSON.stringify(j.deliver_to) + "  -> " + v + "  (expected " + f[2] + ")");
+  });
+  Logger.log(ok + " of " + files.length + " correct");
 }
