@@ -76,7 +76,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-220500"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-221800"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -2851,13 +2851,46 @@ function renderReports(){
                 }).join("");
           }).join("");
     }).join("");
+    /* Wages > venue > staff member > shift, from the same Deputy rows and the same shiftCost()
+       that wagesInScope() totals - so the drill adds back to the Wages line exactly. Only when
+       the figure IS Deputy's; the weekly form sheets have no per-person detail. */
+    let wagesDrill="", wVenues=0;
+    if(wageSrc==="deputy"){
+      const wd={};
+      SHIFTS.forEach(x=>{
+        if(!inScope(x.venue,x.date)) return;
+        const c=shiftCost(x,WAGE_RATE); if(!(c.cost>0)) return;
+        const V=wd[x.venue]=wd[x.venue]||{}; (V[x.who||"(no name)"]=V[x.who||"(no name)"]||[]).push({x,c});
+      });
+      const sum=l=>l.reduce((a,y)=>a+y.c.cost,0), hrs=l=>l.reduce((a,y)=>a+(y.x.hours||0),0);
+      const hTxt=h=>(Math.round(h*10)/10)+"h";
+      const venues=Object.entries(wd).map(([v,P])=>[v,P,Object.values(P).reduce((a,l)=>a+sum(l),0)]).sort((a,b)=>b[2]-a[2]);
+      wVenues=venues.length;
+      wagesDrill=venues.map(([v,P,vt])=>{
+        const vk="wages"+PNL_KSEP+v;
+        const people=Object.entries(P).map(([w,l])=>[w,l,sum(l),hrs(l)]).sort((a,b)=>b[2]-a[2]);
+        const vh=people.reduce((a,p)=>a+p[3],0);
+        return line(esc(v)+` <span style="color:var(--dim);font-size:11px">${hTxt(vh)}</span>`,vt,{indent:1,anc:["wages"],head:vk,count:people.length})
+          + people.map(([w,l,wt,wh])=>{
+              const pk=vk+PNL_KSEP+w;
+              const estAny=l.some(y=>y.c.est);
+              return line(esc(w)+` <span style="color:var(--dim);font-size:11px">${hTxt(wh)}${estAny?" · part estimated":""}</span>`,wt,{indent:2,anc:["wages",vk],head:pk,count:l.length})
+                + l.slice().sort((a,b)=>(b.x.date||0)-(a.x.date||0)).map(({x,c})=>{
+                    const kind=x.kind&&x.kind!=="shift"?" · "+esc(x.kind):"";
+                    const est=c.est?` <span style="color:var(--red);font-size:11px" title="Not yet exported to payroll - hours x recent rate">est</span>`:"";
+                    return line(`${fmtD(x.date)} · ${hTxt(x.hours||0)}${kind}${est}`,c.cost,{indent:3,anc:["wages",vk,pk]});
+                  }).join("");
+            }).join("");
+      }).join("");
+    }
     const pcls=profit<0?"up":"down";
     pnlCard=`<div class="card"><div class="label">Profit &amp; loss — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):" · all venues"}</div>
       <table><thead><tr><th></th><th class="num">$ ex GST</th><th class="num">% of sales</th></tr></thead><tbody>
         ${line("Sales",salesEx,{bold:true})}
         ${line("Cost of goods",cogsEx,cogsList.length?{top:true,head:"cogs",count:cogsList.length}:{top:true})}
         ${drill("cogs",cogsList)}
-        ${line(wagesP>0?"Wages":"Wages — no labour data",wagesP)}
+        ${line(wagesP>0?"Wages":"Wages — no labour data",wagesP,wVenues?{head:"wages",count:wVenues}:{})}
+        ${wagesDrill}
         ${line("Overheads",ohTot,ohList.length?{head:"oh",count:ohList.length}:{})}
         ${drill("oh",ohList)}
         ${fx.rows.length?line("Estimated costs",fx.total,{head:"est",count:fx.rows.length})+fx.rows.map(r=>line(esc(r.name)+fxTag(r),r.amount,{indent:true,group:"est"})).join(""):""}
