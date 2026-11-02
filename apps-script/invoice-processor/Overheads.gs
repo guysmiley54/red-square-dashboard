@@ -42,7 +42,7 @@
  */
 
 var OH = {
-  VERSION: "overheads-111930",
+  VERSION: "overheads-022135",
   USAGE_SHEET: "EnergyUsage",
   AUDIT_SHEET: "OverheadAudit",
   REPROCESS_TAG: "overhead reprocess",
@@ -220,6 +220,86 @@ var OH_PROFILES = [
     // an Invoices row - see ohStatementLines_.
     statementLines: true,
     auditQuery: "subject:\"Peter Brown\" has:attachment newer_than:150d"
+  },
+
+  /* 2 Nov 2026: subscriptions, telco, advertising and newspapers. All of these were
+     reaching the processor and being thrown away by the base prompt as "utility bill",
+     "statement" or "remittance advice", so their cost only existed as a FixedCosts
+     estimate. Senders and subjects read off real messages on 2 Nov 2026. Business-wide
+     services carry fixedVenue Glenorchy (where Bentleys and Anthropic already land) so they
+     never write CHECK for want of an address. 'receipt' adds OH_RECEIPT_RULES: these bill
+     by direct debit or card and their email often says "receipt" or "not an invoice". */
+  {
+    id: "iinet", supplier: "iiNet Limited", category: "Subscriptions",
+    senders: ["accounts@iinet.net.au"],
+    supplierRe: /\biinet\b/i,
+    fixedVenue: "Red Square Glenorchy",
+    prompt: "telco",
+    auditQuery: "from:accounts@iinet.net.au subject:invoice after:2026/07/31"
+  },
+  {
+    id: "aapt", supplier: "Vocus (AAPT)", category: "Subscriptions",
+    // Two accounts, 2000098112 and 2000099609: the Cambridge broadband and the vPBX.
+    // Outage and change-management notices come from other aapt.com.au addresses.
+    senders: ["billnotify_noreply@aapt.com.au"],
+    supplierRe: /\bAAPT\b|\bvocus\b|pipe\s+networks/i,
+    fixedVenue: "Red Square Cambridge",
+    prompt: "telco",
+    // 2 Nov 21:40: the default model contradicted itself on 4 of 9 AAPT bills (called them
+    // remittances, then "home service" for a cafe service). Sonnet, as for Supagas.
+    model: "claude-sonnet-4-6",
+    auditQuery: "from:billnotify_noreply@aapt.com.au after:2026/07/31"
+  },
+  {
+    id: "xero", supplier: "Xero Australia Pty Ltd", category: "Subscriptions",
+    // Subject only: the same address bills Joe Goc's entities to this inbox
+    // ("Your Xero Invoice for Goc Holdings Pty Ltd" etc), and those are not ours.
+    senders: [],
+    subjectRe: /Your Xero Invoice for B\s*(&|\+|and)\s*G Fitness/i,
+    supplierRe: /^xero\b/i,
+    fixedVenue: "Red Square Glenorchy",
+    receipt: true,
+    auditQuery: "subject:\"Your Xero Invoice for B & G Fitness\" after:2026/07/31"
+  },
+  {
+    id: "meta", supplier: "Meta Platforms Ireland Limited", category: "Overheads",
+    // Subject only: the same sender sends "Your ad was approved", reach reports and policy
+    // mail. Meta bills in thresholds, so several receipts a month is normal.
+    senders: [],
+    subjectRe: /Your Meta ads receipt/i,
+    supplierRe: /^meta\s+platforms|^facebook/i,
+    fixedVenue: "Red Square Glenorchy",
+    receipt: true,
+    auditQuery: "subject:\"Your Meta ads receipt\" after:2026/07/31"
+  },
+  {
+    id: "news", supplier: "News Limited", category: "Overheads",
+    // Weekly "Circulation Statement and Invoice" for the newspapers delivered to the cafe.
+    senders: ["circulation.news.com.au"],
+    supplierRe: /^news\s+(limited|ltd|corp)|nationwide\s+news/i,
+    fixedVenue: "Red Square Glenorchy",
+    auditQuery: "from:circulation.news.com.au after:2026/07/31"
+  },
+  {
+    id: "nowbookit", supplier: "Now Book It Pty Ltd", category: "Subscriptions",
+    // Collected by Ezypay; the receipt PDF is the only document. Subject only, so other
+    // merchants who use Ezypay are never caught.
+    senders: [],
+    subjectRe: /payment to Now Book It/i,
+    supplierRe: /now\s*book\s*it/i,
+    fixedVenue: "Red Square Glenorchy",
+    receipt: true,
+    auditQuery: "subject:\"payment to Now Book It\" after:2026/07/31"
+  },
+  {
+    id: "impos", supplier: "IMPOS Pty Ltd", category: "Subscriptions",
+    senders: ["accounts@impos.com.au"],
+    // support@impos.com.au sends the daily sales reports - not this sender. accounts@ also
+    // sends account statements and suspension notices.
+    skipRe: /statement|suspension|reminder|overdue/i,
+    supplierRe: /^impos\b/i,
+    fixedVenue: "Red Square Glenorchy",
+    auditQuery: "from:accounts@impos.com.au subject:invoice after:2026/07/31"
   }
 ];
 
@@ -230,7 +310,7 @@ var OH_PROFILES = [
    MultiSite.gs work, which was built and tested but never deployed. */
 var OH_HYBRID_RULES = [
   "",
-  "ADDITIONAL RULES - THIS DOCUMENT IS FROM AN OVERHEAD SUPPLIER (utility, gas, energy, waste, landlord or repairs).",
+  "ADDITIONAL RULES - THIS DOCUMENT IS FROM AN OVERHEAD SUPPLIER (utility, gas, energy, waste, landlord, repairs, telco or internet, software subscription, advertising or newspaper delivery).",
   "",
   'A document titled "TAX INVOICE / STATEMENT", "INVOICE STATEMENT", "Tenant Tax Invoice", "Tenant Invoice", "Direct Charge Invoice", "Lease Invoice" or similar IS an invoice - extract it. These bill a period of service and often also show an opening or brought-forward balance and payments received. Do not reject them as statements.',
   "",
@@ -243,7 +323,22 @@ var OH_HYBRID_RULES = [
   "",
   'A tenant invoice or utility bill often ends with a detachable REMITTANCE SLIP or "payment advice" tear-off for you to return with payment. That slip does NOT make the document a remittance advice - if the document charges rent, outgoings, energy, waste or service for a period, it is an invoice. An electricity, gas or water bill is an invoice even though the supplier is a utility.',
   "",
-  'A notice, letter, reminder, rent review, or a pure statement that only lists other invoice numbers with amounts and has NO current-period charges of its own is not an invoice: respond with {"not_invoice":true,"reason":"statement"} or a brief reason.'
+  'A notice, letter, reminder, rent review, or a pure statement that only lists other invoice numbers with amounts and has NO current-period charges of its own is not an invoice: respond with {"not_invoice":true,"reason":"statement"} or a brief reason.',
+  "",
+  'A telco, internet or phone bill, a newspaper "Circulation Statement and Invoice", and a software subscription invoice are invoices for a service to this business - extract them like a utility bill.'
+].join("\n");
+
+/* For profiles with receipt:true - suppliers who charge by direct debit or card and email
+   a receipt or debit notice instead of a classic invoice. Without this the base prompt
+   calls a Meta receipt or a Xero debit notice a "remittance advice". */
+var OH_RECEIPT_RULES = [
+  "",
+  "THIS SUPPLIER CHARGES BY DIRECT DEBIT OR CARD.",
+  'A subscription invoice, a notice that a subscription amount "will be debited", an advertising spend receipt (even one that says "This is not an invoice"), or a receipt saying a payment for a service plan was collected, IS the bill for this business. Extract it as doc_type "invoice". It is NOT a remittance advice: a remittance advice is this business telling a supplier it paid THEIR invoices.',
+  "total = the amount billed, debited or collected for this charge. Never return 0 when an amount is shown.",
+  "gst: use the GST printed. If none is printed and the supplier is Australian, gst = total / 11 rounded to cents; if the supplier is overseas (e.g. Meta Platforms Ireland) and no tax is shown, gst = 0. subtotal = total - gst.",
+  "invoice_number: the invoice, receipt, reference or transaction number printed. If none is printed, use the supplier name in capitals without spaces, a dash, and the invoice_date as YYYYMMDD (e.g. XERO-20261016).",
+  "items: one line describing the charge, e.g. [\"Meta ads spend 1-16 Oct 2026\",1,\"ea\",528.15,528.15,null,0]."
 ].join("\n");
 
 /* Supplier-specific layout notes. Written from the 31 Aug 2026 Supagas statement. */
@@ -278,11 +373,27 @@ var OH_ELDERS_RULES = [
   'Ignore the remittance advice block and the EFT payment details at the foot of the page - they repeat the total, they are not charges.'
 ].join("\n");
 
+/* iiNet and AAPT. First run on 2 Nov 2026 skipped 6 of 6 AAPT bills ("remittance advice",
+   "telco service bill, not goods") and 2 of 4 iiNet bills ("personal residential") even with
+   the hybrid rules - the base prompt's goods-supplier framing won. Adrian, 2 Nov 21:34: iiNet
+   and Vocus are business bills unless the service is at 10 Eurella Ave (home). */
+var OH_TELCO_RULES = [
+  "",
+  "TELCO / INTERNET BILL - THIS ACCOUNT IS PAID BY THIS BUSINESS.",
+  'This document is a bill: doc_type "invoice". Do NOT skip it as "not goods", "service statement", "utility bill", "usage detail", "personal" or "residential" - the business pays this account and wants it recorded.',
+  'The ONE exception: if the SERVICE address (the premises the internet or phone service is connected at) is 10 Eurella Avenue, Sandy Bay - the owner\'s home - respond with exactly {"not_invoice":true,"reason":"home service at 10 Eurella Ave"}. A bill merely MAILED to that address but for a service at a cafe is still an invoice. If no service address is printed, it is an invoice.',
+  'It is NOT a remittance advice. Telco bills carry a payment slip, "How to pay", BPAY or direct-debit details and an account summary - none of that makes it a remittance.',
+  'total = the total of THIS bill (new charges for this period, GST inclusive), not "balance carried forward", "previous balance" or "total amount due" if that includes an earlier bill. gst = the GST on this bill. subtotal = total - gst.',
+  'invoice_number = the invoice or bill number printed (AAPT prints it as "Inv" or "Invoice number", e.g. 24467447; iiNet as "Invoice number", e.g. 147713922). invoice_date = the invoice or issue date.',
+  'items: one line per service charged if they are listed, otherwise one line for the bill.'
+].join("\n");
+
 function ohPromptFor_(prof) {
   if (!prof) return "";
   var extra = prof.prompt === "supagas" ? OH_SUPAGAS_RULES
-            : prof.prompt === "elders" ? OH_ELDERS_RULES : "";
-  return OH_HYBRID_RULES + (extra ? "\n" + extra : "");
+            : prof.prompt === "elders" ? OH_ELDERS_RULES
+            : prof.prompt === "telco" ? OH_TELCO_RULES : "";
+  return OH_HYBRID_RULES + (prof.receipt ? "\n" + OH_RECEIPT_RULES : "") + (extra ? "\n" + extra : "");
 }
 
 /* ---------------------------------------------------------------- matching */
@@ -760,7 +871,14 @@ function ohReprocessMessage_(id) {
   }
   var notes = [], status = "OK";
   try {
-    processAttachments_(apiKey, sheets, existing, msg, notes, 1);
+    // Body-only bills (Xero, Meta) have no PDF: they go through the same body path the
+    // hourly lane 2 uses. Anything with a PDF goes through the attachment path as before.
+    var hasPdf = msg.getAttachments().some(isPdfAtt_);
+    if (!hasPdf && typeof processBody_ === "function") {
+      if (processBody_(apiKey, sheets, existing, msg, notes) === "SKIPPED") status = "SKIPPED";
+    } else {
+      processAttachments_(apiKey, sheets, existing, msg, notes, 1);
+    }
     if (!notes.length) notes.push("no PDF or image attachment");
   } catch (e) {
     status = "FAILED";
@@ -983,7 +1101,7 @@ function ohContext_(msg, att, lane) {
   var body = "";
   try { body = msg.getPlainBody() || msg.getBody() || ""; } catch (e) {}
   return { from: msg.getFrom(), subject: msg.getSubject(), body: body, emailDate: msg.getDate(),
-           fileName: att.getName(), msgId: msg.getId(), route: route_(msg, lane || 1), savePdf: null };
+           fileName: att ? att.getName() : "email body", msgId: msg.getId(), route: route_(msg, lane || 1), savePdf: null };
 }
 
 function ohRefFromBody_(prof, body) {
