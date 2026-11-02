@@ -76,7 +76,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-021600"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-155500"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -1859,6 +1859,16 @@ function wagesByDay(shifts, rates){
    name contains this text, the row is left out - the real bill has arrived, don't estimate it
    on top. Rows in group "Finance" are returned separately (shown after operating profit).
    Returns {rows:[{name,group,amount,note}], total, finance:[...], financeTotal, suppressed:[...]}. */
+/* Small dim tag after a FixedCosts row name: the basis for percentage rows, and the end
+   date for rows with a `to` (a finance contract's last instalment, a policy's expiry), so the
+   card says when a cost drops off without anyone opening the sheet. */
+function fxTag(r){
+  const parts=[];
+  if(r.basis==="pct_wages") parts.push("% of wages"); else if(r.basis==="pct_sales") parts.push("% of sales");
+  if(r.to) parts.push("to "+r.to.toLocaleDateString("en-AU",{month:"short",year:"numeric"}));
+  if(r.note&&/^(for|covers)\b/i.test(r.note)) parts.push(esc(r.note.split(/[;(]/)[0].trim()));
+  return parts.length?' <span style="color:var(--dim);font-size:11px">('+parts.join("; ")+')</span>':"";
+}
 function fixedCostsFor(from,to,wages,salesIncScoped){
   const out={rows:[],total:0,finance:[],financeTotal:0,suppressed:[]};
   if(!FIXED.length||!from||!to) return out;
@@ -1888,7 +1898,7 @@ function fixedCostsFor(from,to,wages,salesIncScoped){
       else amt*=scopeShare();
     }
     if(!(amt>0)) return;
-    const row={name:r.name,group:r.group,amount:amt,note:r.note,basis:r.basis};
+    const row={name:r.name,group:r.group,amount:amt,note:r.note,basis:r.basis,to:r.to||null};
     if(/^finance$/i.test(r.group)){ out.finance.push(row); out.financeTotal+=amt; }
     else { out.rows.push(row); out.total+=amt; }
   });
@@ -2784,10 +2794,10 @@ function renderReports(){
         ${line(wagesP>0?"Wages":"Wages — no labour data",wagesP)}
         ${line("Overheads",ohTot)}
         ${ohList.map(([g,v])=>line(esc(g),v,{indent:true})).join("")}
-        ${fx.rows.length?line("Estimated costs",fx.total)+fx.rows.map(r=>line(esc(r.name)+(r.basis==="pct_wages"?" <span style=\"color:var(--dim);font-size:11px\">(% of wages)</span>":r.basis==="pct_sales"?" <span style=\"color:var(--dim);font-size:11px\">(% of sales)</span>":""),r.amount,{indent:true})).join(""):""}
+        ${fx.rows.length?line("Estimated costs",fx.total)+fx.rows.map(r=>line(esc(r.name)+fxTag(r),r.amount,{indent:true})).join(""):""}
         ${line("Total expenses",exp,{bold:true,top:true})}
         <tr style="border-top:2px solid var(--ink)"><td><b>${fx.finance.length?"Operating profit":"Profit"}</b></td><td class="num"><b class="${pcls}">${profit<0?"−":""}${money(Math.abs(profit))}</b></td><td class="num"><b class="${pcls}">${pc(profit)}</b></td></tr>
-        ${fx.finance.length?fx.finance.map(r=>line(esc(r.name),r.amount,{indent:true})).join("")+`<tr style="border-top:2px solid var(--ink)"><td><b>After finance</b></td><td class="num"><b class="${afterFin<0?"up":"down"}">${afterFin<0?"−":""}${money(Math.abs(afterFin))}</b></td><td class="num"><b class="${afterFin<0?"up":"down"}">${pc(afterFin)}</b></td></tr>`:""}
+        ${fx.finance.length?fx.finance.map(r=>line(esc(r.name)+fxTag(r),r.amount,{indent:true})).join("")+`<tr style="border-top:2px solid var(--ink)"><td><b>After finance</b></td><td class="num"><b class="${afterFin<0?"up":"down"}">${afterFin<0?"−":""}${money(Math.abs(afterFin))}</b></td><td class="num"><b class="${afterFin<0?"up":"down"}">${pc(afterFin)}</b></td></tr>`:""}
       </tbody></table>
       <div style="font-size:11px;color:var(--dim);margin-top:6px">Sales less every bill captured in this range, the wages above${fx.rows.length||fx.finance.length?", and the estimated costs from the FixedCosts tab (rounded monthly figures pro-rated by day; super and payroll tax as a percentage of wages, card fees of sales; split across venues by sales share unless a row names a venue"+(fx.suppressed.length?"; left out because a real bill is in range: "+esc(fx.suppressed.join(", ")):"")+")":""}. ${fx.finance.length?"Finance repayments are mostly principal, so they sit below operating profit; \"After finance\" is the cash view. ":""}${!FIXED.length?"Not a full P&amp;L: anything that never arrives as an invoice or a manual purchase (bank and card fees, loan repayments, insurance paid by direct debit, super and payroll tax) isn't here, so the real profit is lower. ":""}Bills land on their invoice date — a quarterly bill or rent paid in advance falls wholly in one period, so a week can swing hard; a month or quarter reads truer. All figures ex GST: sales are the feed's GST-inclusive takings ÷ 1.1, bills are less their own GST, wages have none. So these won't match the GST-inclusive KPI tiles above.</div>
     </div>`;
