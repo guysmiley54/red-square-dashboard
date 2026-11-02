@@ -76,7 +76,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-215900"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-220500"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -1865,11 +1865,24 @@ function wagesByDay(shifts, rates){
 const PNL_KEY = "se_pnl_open";
 let PNL_OPEN = (()=>{ try{ return JSON.parse(localStorage.getItem(PNL_KEY)||"{}")||{}; }catch(e){ return {}; } })();
 function pnlIsOpen(k){ return PNL_OPEN[k]===true; }
+/* Rows carry data-pnlanc = every heading above them, joined by PNL_SEP. A row shows only
+   when ALL of those are open, so closing "Overheads" also hides an open Rent > Elders below
+   it, and reopening Overheads brings back exactly what was open before. Keys are the
+   section / group / supplier names, so the open state survives a re-render or a reload. */
+const PNL_SEP = "\u001f";   // between ancestors in data-pnlanc
+const PNL_KSEP = "\u001e";  // inside one key: section / group / supplier (names can hold "|")
 function pnlToggle(k){
   PNL_OPEN[k]=!pnlIsOpen(k);
   try{ localStorage.setItem(PNL_KEY, JSON.stringify(PNL_OPEN)); }catch(e){}
-  document.querySelectorAll('tr[data-pnlg="'+k+'"]').forEach(tr=>{ tr.style.display=PNL_OPEN[k]?"":"none"; });
-  document.querySelectorAll('tr[data-pnlh="'+k+'"] .pnl-caret').forEach(c=>{ c.textContent=PNL_OPEN[k]?"\u25be":"\u25b8"; });
+  pnlApply();
+}
+function pnlApply(){
+  document.querySelectorAll('tr[data-pnlanc]').forEach(tr=>{
+    tr.style.display = tr.dataset.pnlanc.split(PNL_SEP).every(pnlIsOpen) ? "" : "none";
+  });
+  document.querySelectorAll('tr[data-pnlh]').forEach(tr=>{
+    const c=tr.querySelector('.pnl-caret'); if(c) c.textContent = pnlIsOpen(tr.dataset.pnlh) ? "\u25be" : "\u25b8";
+  });
 }
 
 /* Small dim tag after a FixedCosts row name: the basis for percentage rows, and the end
@@ -2784,9 +2797,15 @@ function renderReports(){
        field, because fresh food carries none and a flat 1/11 would overstate the saving.
        Wages carry no GST. Manual purchases have no GST split and stay at their full amount. */
     const salesEx=salesAll/1.1;
-    let cogsEx=0; const ohGroups={};
+    let cogsEx=0; const ohGroups={}, cogsGroups={};
+    /* det[section][group][supplier] = [{r, ex}] - the drill-down behind Cost of goods and
+       Overheads: section > group > supplier > invoice. */
+    const det={cogs:{}, oh:{}};
     scopedInv().forEach(r=>{ const ex=(+r.total||0)-(+r.gst||0);
-      if(isNonCogs(r)){ const g=rowGroup(r)||"Other"; ohGroups[g]=(ohGroups[g]||0)+ex; } else cogsEx+=ex; });
+      const sec=isNonCogs(r)?"oh":"cogs", g=rowGroup(r)||"Other";
+      if(sec==="oh") ohGroups[g]=(ohGroups[g]||0)+ex; else { cogsEx+=ex; cogsGroups[g]=(cogsGroups[g]||0)+ex; }
+      const G=det[sec][g]=det[sec][g]||{}; (G[r.supplier]=G[r.supplier]||[]).push({r,ex}); });
+    const cogsList=Object.entries(cogsGroups).sort((a,b)=>b[1]-a[1]);
     const ohList=Object.entries(ohGroups).sort((a,b)=>b[1]-a[1]);
     const ohTot=ohList.reduce((a,[,v])=>a+v,0);
     const wagesP=wages||0;
@@ -2805,23 +2824,42 @@ function renderReports(){
       opts=opts||{};
       const st=[];
       if(opts.top) st.push("border-top:2px solid var(--ink)");
-      if(opts.group&&!pnlIsOpen(opts.group)) st.push("display:none");
+      const anc=opts.anc||(opts.group?[opts.group]:null);
+      if(anc&&!anc.every(pnlIsOpen)) st.push("display:none");
       const attrs=(st.length?` style="${st.join(";")}"`:"")
-        +(opts.group?` data-pnlg="${opts.group}"`:"")
-        +(opts.head?` data-pnlh="${opts.head}" class="click" onclick="pnlToggle('${opts.head}')" title="Show or hide the breakdown"`:"");
+        +(anc?` data-pnlg="${esc(anc[anc.length-1])}" data-pnlanc="${esc(anc.join(PNL_SEP))}"`:"")
+        +(opts.head?` data-pnlh="${esc(opts.head)}" class="click" onclick="pnlToggle(this.dataset.pnlh)" title="Show or hide the breakdown"`:"")
+        +(opts.inv?` class="click" data-inv-s="${esc(opts.inv.supplier)}" data-inv-n="${esc(opts.inv.number)}" onclick="go('i::'+encodeURIComponent(this.dataset.invS)+'::'+encodeURIComponent(this.dataset.invN))" title="Open this invoice"`:"");
       const lab=opts.head
         ?`<span class="pnl-caret" style="display:inline-block;width:14px;color:var(--dim)">${pnlIsOpen(opts.head)?"▾":"▸"}</span>${label}${opts.count?` <span style="color:var(--dim);font-size:11px">(${opts.count})</span>`:""}`
         :label;
-      return `<tr${attrs}><td${opts.indent?' style="padding-left:22px;color:var(--dim)"':""}>${opts.bold?"<b>"+lab+"</b>":lab}</td><td class="num">${opts.bold?"<b>"+money(v)+"</b>":money(v)}</td><td class="num">${pc(v)}</td></tr>`;
+      const pad=opts.indent===true?1:(+opts.indent||0);
+      return `<tr${attrs}><td${pad?` style="padding-left:${4+pad*18}px;color:var(--dim)${pad>2?";font-size:12px":""}"`:""}>${opts.bold?"<b>"+lab+"</b>":lab}</td><td class="num">${opts.bold?"<b>"+money(v)+"</b>":money(v)}</td><td class="num">${pc(v)}</td></tr>`;
     };
+    /* Group > supplier > invoice rows under a section heading. Invoice rows open the invoice
+       page; manual purchases have no invoice page, so they are listed but not linked. */
+    const drill=(sec,list)=>list.map(([g,v])=>{
+      const gk=sec+PNL_KSEP+g;
+      const sups=Object.entries(det[sec][g]||{}).map(([s,l])=>[s,l.reduce((a,x)=>a+x.ex,0),l]).sort((a,b)=>b[1]-a[1]);
+      return line(esc(g),v,{indent:1,anc:[sec],head:gk,count:sups.length})
+        + sups.map(([s,sv,l])=>{
+            const sk=gk+PNL_KSEP+s;
+            return line(esc(s),sv,{indent:2,anc:[sec,gk],head:sk,count:l.length})
+              + l.slice().sort((a,b)=>(b.r.date||0)-(a.r.date||0)).map(({r,ex})=>{
+                  const lab=`${fmtD(r.date)} · ${r.type==="manual"?"manual purchase":esc(r.number||"(no number)")}${r.type==="credit_note"?" <span style=\"color:var(--red)\">credit</span>":""} <span style="font-size:11px">${esc(vShort(r.venue))}</span>`;
+                  return line(lab,ex,{indent:3,anc:[sec,gk,sk],inv:r.type==="manual"||!r.number?null:r});
+                }).join("");
+          }).join("");
+    }).join("");
     const pcls=profit<0?"up":"down";
     pnlCard=`<div class="card"><div class="label">Profit &amp; loss — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):" · all venues"}</div>
       <table><thead><tr><th></th><th class="num">$ ex GST</th><th class="num">% of sales</th></tr></thead><tbody>
         ${line("Sales",salesEx,{bold:true})}
-        ${line("Cost of goods",cogsEx,{top:true})}
+        ${line("Cost of goods",cogsEx,cogsList.length?{top:true,head:"cogs",count:cogsList.length}:{top:true})}
+        ${drill("cogs",cogsList)}
         ${line(wagesP>0?"Wages":"Wages — no labour data",wagesP)}
         ${line("Overheads",ohTot,ohList.length?{head:"oh",count:ohList.length}:{})}
-        ${ohList.map(([g,v])=>line(esc(g),v,{indent:true,group:"oh"})).join("")}
+        ${drill("oh",ohList)}
         ${fx.rows.length?line("Estimated costs",fx.total,{head:"est",count:fx.rows.length})+fx.rows.map(r=>line(esc(r.name)+fxTag(r),r.amount,{indent:true,group:"est"})).join(""):""}
         ${line("Total expenses",exp,{bold:true,top:true})}
         <tr style="border-top:2px solid var(--ink)"><td><b>${fx.finance.length?"Operating profit":"Profit"}</b></td><td class="num"><b class="${pcls}">${profit<0?"−":""}${money(Math.abs(profit))}</b></td><td class="num"><b class="${pcls}">${pc(profit)}</b></td></tr>
