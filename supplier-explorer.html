@@ -76,7 +76,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-155500"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-215900"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -1859,6 +1859,19 @@ function wagesByDay(shifts, rates){
    name contains this text, the row is left out - the real bill has arrived, don't estimate it
    on top. Rows in group "Finance" are returned separately (shown after operating profit).
    Returns {rows:[{name,group,amount,note}], total, finance:[...], financeTotal, suppressed:[...]}. */
+/* P&L card: which breakdowns (Overheads "oh", Estimated costs "est") are open. Closed by
+   default. Kept in memory so a toggle survives the card being re-rendered, and in
+   localStorage (try/catch - Safari private mode throws) so it survives a reload. */
+const PNL_KEY = "se_pnl_open";
+let PNL_OPEN = (()=>{ try{ return JSON.parse(localStorage.getItem(PNL_KEY)||"{}")||{}; }catch(e){ return {}; } })();
+function pnlIsOpen(k){ return PNL_OPEN[k]===true; }
+function pnlToggle(k){
+  PNL_OPEN[k]=!pnlIsOpen(k);
+  try{ localStorage.setItem(PNL_KEY, JSON.stringify(PNL_OPEN)); }catch(e){}
+  document.querySelectorAll('tr[data-pnlg="'+k+'"]').forEach(tr=>{ tr.style.display=PNL_OPEN[k]?"":"none"; });
+  document.querySelectorAll('tr[data-pnlh="'+k+'"] .pnl-caret').forEach(c=>{ c.textContent=PNL_OPEN[k]?"\u25be":"\u25b8"; });
+}
+
 /* Small dim tag after a FixedCosts row name: the basis for percentage rows, and the end
    date for rows with a `to` (a finance contract's last instalment, a policy's expiry), so the
    card says when a cost drops off without anyone opening the sheet. */
@@ -2785,16 +2798,31 @@ function renderReports(){
     const exp=cogsEx+wagesP+ohTot+fx.total, profit=salesEx-exp;
     const afterFin=profit-fx.financeTotal;
     const pc=v=>(Math.round(v/salesEx*1000)/10)+"%";
-    const line=(label,v,opts)=>`<tr${opts&&opts.top?' style="border-top:2px solid var(--ink)"':""}><td${opts&&opts.indent?' style="padding-left:22px;color:var(--dim)"':""}>${opts&&opts.bold?"<b>"+label+"</b>":label}</td><td class="num">${opts&&opts.bold?"<b>"+money(v)+"</b>":money(v)}</td><td class="num">${pc(v)}</td></tr>`;
+    /* opts.head = group key: a clickable heading with a caret and a row count.
+       opts.group = group key: a breakdown row, hidden while its heading is collapsed.
+       Collapsed by default - the card reads as headings, sums and totals until you open one. */
+    const line=(label,v,opts)=>{
+      opts=opts||{};
+      const st=[];
+      if(opts.top) st.push("border-top:2px solid var(--ink)");
+      if(opts.group&&!pnlIsOpen(opts.group)) st.push("display:none");
+      const attrs=(st.length?` style="${st.join(";")}"`:"")
+        +(opts.group?` data-pnlg="${opts.group}"`:"")
+        +(opts.head?` data-pnlh="${opts.head}" class="click" onclick="pnlToggle('${opts.head}')" title="Show or hide the breakdown"`:"");
+      const lab=opts.head
+        ?`<span class="pnl-caret" style="display:inline-block;width:14px;color:var(--dim)">${pnlIsOpen(opts.head)?"▾":"▸"}</span>${label}${opts.count?` <span style="color:var(--dim);font-size:11px">(${opts.count})</span>`:""}`
+        :label;
+      return `<tr${attrs}><td${opts.indent?' style="padding-left:22px;color:var(--dim)"':""}>${opts.bold?"<b>"+lab+"</b>":lab}</td><td class="num">${opts.bold?"<b>"+money(v)+"</b>":money(v)}</td><td class="num">${pc(v)}</td></tr>`;
+    };
     const pcls=profit<0?"up":"down";
     pnlCard=`<div class="card"><div class="label">Profit &amp; loss — ${esc(periodLabel())}${venueLabel()?" · "+esc(venueLabel()):" · all venues"}</div>
       <table><thead><tr><th></th><th class="num">$ ex GST</th><th class="num">% of sales</th></tr></thead><tbody>
         ${line("Sales",salesEx,{bold:true})}
         ${line("Cost of goods",cogsEx,{top:true})}
         ${line(wagesP>0?"Wages":"Wages — no labour data",wagesP)}
-        ${line("Overheads",ohTot)}
-        ${ohList.map(([g,v])=>line(esc(g),v,{indent:true})).join("")}
-        ${fx.rows.length?line("Estimated costs",fx.total)+fx.rows.map(r=>line(esc(r.name)+fxTag(r),r.amount,{indent:true})).join(""):""}
+        ${line("Overheads",ohTot,ohList.length?{head:"oh",count:ohList.length}:{})}
+        ${ohList.map(([g,v])=>line(esc(g),v,{indent:true,group:"oh"})).join("")}
+        ${fx.rows.length?line("Estimated costs",fx.total,{head:"est",count:fx.rows.length})+fx.rows.map(r=>line(esc(r.name)+fxTag(r),r.amount,{indent:true,group:"est"})).join(""):""}
         ${line("Total expenses",exp,{bold:true,top:true})}
         <tr style="border-top:2px solid var(--ink)"><td><b>${fx.finance.length?"Operating profit":"Profit"}</b></td><td class="num"><b class="${pcls}">${profit<0?"−":""}${money(Math.abs(profit))}</b></td><td class="num"><b class="${pcls}">${pc(profit)}</b></td></tr>
         ${fx.finance.length?fx.finance.map(r=>line(esc(r.name)+fxTag(r),r.amount,{indent:true})).join("")+`<tr style="border-top:2px solid var(--ink)"><td><b>After finance</b></td><td class="num"><b class="${afterFin<0?"up":"down"}">${afterFin<0?"−":""}${money(Math.abs(afterFin))}</b></td><td class="num"><b class="${afterFin<0?"up":"down"}">${pc(afterFin)}</b></td></tr>`:""}
