@@ -188,39 +188,11 @@ function processInvoices() {
         if (hasPdf) {
           processAttachments_(apiKey, sheets, existing, msg, notes, 2);
         } else {
-          // Lane 2 has no filename to test, so the subject carries the same guard.
-          // looksLikeInvoiceBody_ below would pass a remittance happily - it has money
-          // figures and the word "invoice" all over it, because it lists the invoices
-          // being paid.
-          if (looksLikeRemittance_(msg.getSubject())) {
-            logProcessed_(sheets.log, msg, "SKIPPED", "remittance advice, not a bill");
+          // Body-only mail. processBody_ is shared with Overheads.gs's reprocess, so a
+          // re-read takes exactly the path the hourly run does.
+          if (processBody_(apiKey, sheets, existing, msg, notes) === "SKIPPED") {
+            logProcessed_(sheets.log, msg, "SKIPPED", notes.join("; "));
             return;
-          }
-          var html = msg.getBody() || msg.getPlainBody() || "";
-          html = html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<script[\s\S]*?<\/script>/gi, "");
-          if (!looksLikeInvoiceBody_(msg, html)) {
-            logProcessed_(sheets.log, msg, "SKIPPED", "body has no invoice signals");
-            return;
-          }
-          if (html.length > 150000) html = html.slice(0, 150000);
-          var result = extractFromContent_(apiKey, [
-            { type: "text", text: "Below is the HTML body of a supplier email with no PDF attached. It is a priced order/delivery confirmation that serves as the invoice. Determine the supplier from the email content, sender, or letterhead; if it is clearly a Southern Foodservice order confirmation, use supplier \"Southern Foodservice Pty Ltd\". Use the order code as invoice_number. IMPORTANT: these order confirmations write dates in US MONTH/DAY/YEAR format (e.g. 6/12/26 means 12 June 2026, 7/15/26 means 15 July 2026), NOT Australian day/month. The delivery date shown next to a weekday (e.g. \"for Friday, 6/12/26\") is the invoice_date - convert it from M/D/Y and keep it even if it is in the near future.\n\n" + html }
-          ], modelForSender_(msg.getFrom()));
-          if (result.not_invoice) {
-            notes.push("skipped (" + (result.reason || "not an invoice") + ")");
-          } else if (billToNotOurs_(result, msg.getFrom())) {
-            notes.push("skipped (" + billToNotOurs_(result, msg.getFrom()) + ")");
-          } else if (isDupInvoice_(existing, result)) {
-            notes.push("duplicate " + result.invoice_number + ", skipped");
-          } else {
-            if (!result.supplier || !String(result.supplier).trim()) {
-              var frm = String(msg.getFrom() || "").toLowerCase();
-              if (frm.indexOf("southernfood") !== -1) result.supplier = "Southern Foodservice Pty Ltd";
-            }
-            fixInvoiceDate_(result, msg.getDate(), notes);
-            markInvoice_(existing, result);
-            writeInvoice_(sheets, result, msg.getFrom(), "email body", "", msg.getDate(), route_(msg, 2));
-            notes.push("added " + result.invoice_number + " (from email body)");
           }
         }
       } catch (e) {
@@ -293,6 +265,74 @@ function runLane_(query, PAGE, state, handleMsg, processedIds) {
     }
     start += PAGE;
   }
+}
+
+/**
+ * One body-only email (no PDF): an HTML order confirmation that serves as the invoice, or -
+ * since 2 Nov 2026 - an overhead supplier whose email IS the bill (Xero subscription, Meta
+ * ads receipt). Overhead mail is recognised by Overheads.gs's profiles and written through
+ * ohWriteInvoice_, so it gets the profile's supplier name, category and venue.
+ * Pushes its outcome onto notes. Returns "SKIPPED" when the caller should log it skipped
+ * without an API call, else "OK". Throws on API failure, like processAttachments_.
+ */
+function processBody_(apiKey, sheets, existing, msg, notes) {
+  var OHX = typeof ohProfileForMessage_ === "function";
+  var prof = OHX ? ohProfileForMessage_(msg.getFrom(), msg.getSubject()) : null;
+  if (prof && ohSkipMessage_(prof, msg.getSubject(), "")) {
+    notes.push(prof.id + " notice, not a bill");
+    return "SKIPPED";
+  }
+  // Lane 2 has no filename to test, so the subject carries the same guard.
+  // looksLikeInvoiceBody_ below would pass a remittance happily - it has money
+  // figures and the word "invoice" all over it, because it lists the invoices
+  // being paid.
+  if (looksLikeRemittance_(msg.getSubject())) {
+    notes.push("remittance advice, not a bill");
+    return "SKIPPED";
+  }
+  var html = msg.getBody() || msg.getPlainBody() || "";
+  html = html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<script[\s\S]*?<\/script>/gi, "");
+  // A profiled sender is a known biller, so the cheap signal test is not needed - and a
+  // Meta receipt opens with "This is not an invoice", which is exactly what it would trip on.
+  if (!prof && !looksLikeInvoiceBody_(msg, html)) {
+    notes.push("body has no invoice signals");
+    return "SKIPPED";
+  }
+  if (html.length > 150000) html = html.slice(0, 150000);
+  var lead = prof
+    ? "Below is the HTML body of an email from " + prof.supplier + ". There is no PDF: this email is itself the bill, subscription invoice or charge receipt for this business. Extract it as one invoice. If no invoice date is printed, use the billing, debit or payment date shown; for a charge covering a date range, use the last day of the range.\n\n"
+    : "Below is the HTML body of a supplier email with no PDF attached. It is a priced order/delivery confirmation that serves as the invoice. Determine the supplier from the email content, sender, or letterhead; if it is clearly a Southern Foodservice order confirmation, use supplier \"Southern Foodservice Pty Ltd\". Use the order code as invoice_number. IMPORTANT: these order confirmations write dates in US MONTH/DAY/YEAR format (e.g. 6/12/26 means 12 June 2026, 7/15/26 means 15 July 2026), NOT Australian day/month. The delivery date shown next to a weekday (e.g. \"for Friday, 6/12/26\") is the invoice_date - convert it from M/D/Y and keep it even if it is in the near future.\n\n";
+  var result = extractFromContent_(apiKey, [{ type: "text", text: lead + html }],
+    (prof && prof.model) || modelForSender_(msg.getFrom()), prof ? ohPromptFor_(prof) : "");
+  if (result.not_invoice) {
+    notes.push("skipped (" + (result.reason || "not an invoice") + ")");
+    return "OK";
+  }
+  var notOurs = billToNotOurs_(result, msg.getFrom());
+  if (notOurs) {
+    notes.push("skipped (" + notOurs + ")");
+    return "OK";
+  }
+  var prof2 = prof || (OHX ? ohProfileForSupplier_(result.supplier) : null);
+  if (prof2) {
+    fixInvoiceDate_(result, msg.getDate(), notes);
+    var ow = ohWriteInvoice_(sheets, result, prof2, existing, ohContext_(msg, null, 2));
+    notes.push(ow.note + " (from email body)");
+    return "OK";
+  }
+  if (isDupInvoice_(existing, result)) {
+    notes.push("duplicate " + result.invoice_number + ", skipped");
+    return "OK";
+  }
+  if (!result.supplier || !String(result.supplier).trim()) {
+    var frm = String(msg.getFrom() || "").toLowerCase();
+    if (frm.indexOf("southernfood") !== -1) result.supplier = "Southern Foodservice Pty Ltd";
+  }
+  fixInvoiceDate_(result, msg.getDate(), notes);
+  markInvoice_(existing, result);
+  writeInvoice_(sheets, result, msg.getFrom(), "email body", "", msg.getDate(), route_(msg, 2));
+  notes.push("added " + result.invoice_number + " (from email body)");
+  return "OK";
 }
 
 function processAttachments_(apiKey, sheets, existing, msg, notes, lane) {
