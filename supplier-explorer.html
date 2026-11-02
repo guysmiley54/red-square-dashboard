@@ -76,7 +76,7 @@
 
 <script>
 /* ================= CONFIG ================= */
-const BUILD_ID = "build-131015"; console.log("Supplier Explorer " + BUILD_ID);
+const BUILD_ID = "build-021600"; console.log("Supplier Explorer " + BUILD_ID);
 /* The header badge is filled from BUILD_ID, never typed twice. It used to be a second
    hardcoded copy of this string and silently fell six builds behind, which made a paste that
    had landed indistinguishable from one that had not. */
@@ -106,7 +106,7 @@ const SIGNOFF = "Cheers,\nAdrian";
 
 /* ================= DATA & FILTER STATE ================= */
 let LINE_FIXES = [], CODE_FIXES = [];
-let INV = [], LINES = [], byNumber = {}, CFG = {}, VENUE_LIST = [], SALES = [], INV_MIN_DATE = null, STAFF = [], SMAP = {}, SALES_SOURCE = null;
+let INV = [], LINES = [], byNumber = {}, CFG = {}, VENUE_LIST = [], SALES = [], INV_MIN_DATE = null, STAFF = [], SMAP = {}, SALES_SOURCE = null, FIXED = [];
 /* Window for the product price-history chart and purchase list, in days (0 = all).
    Deliberately NOT tied to the top date filter: the stat cards, the 90-day average and
    the volatile flag all read full history, so a chart scoped to the filter disagreed
@@ -378,7 +378,8 @@ const TAB_COLUMNS = {
   "ProductMerge":     ["supplier","match","into"],
   "StaffInvoices":    ["date","venue","supplier","amount"],
   "StaffSupplierMap": ["staff_name","pipeline_name"],
-  "ManualPurchases":  ["date","shop","venue","amount"]
+  "ManualPurchases":  ["date","shop","venue","amount"],
+  "FixedCosts":       ["name","basis","amount"]
 };
 
 async function fetchTab(name){
@@ -502,7 +503,7 @@ async function loadAll(){
   const app=document.getElementById("app");
   app.innerHTML='<div id="status">Loading data…</div>';
   try{
-    const [inv,lines,cfgRows,salesRows,pmRows,staffRows,staffMapRows,manualRows,feedDaily,shiftRows,weeklyRows]=await Promise.all([
+    const [inv,lines,cfgRows,salesRows,pmRows,staffRows,staffMapRows,manualRows,feedDaily,shiftRows,weeklyRows,fixedRows]=await Promise.all([
       fetchTab("Invoices"),
       fetchTab("InvoiceLines"),
       fetchTab("SupplierConfig").catch(()=>[]),
@@ -513,8 +514,20 @@ async function loadAll(){
       fetchTab("ManualPurchases").catch(()=>[]),
       fetchSalesDaily().catch(()=>null),
       fetchShifts().catch(()=>null),
-      fetchWeekly().catch(()=>[])
+      fetchWeekly().catch(()=>[]),
+      fetchTab("FixedCosts").catch(()=>[])
     ]);
+    /* FixedCosts (BG Ops Data): the costs that never arrive as an invoice - super, payroll
+       tax, card fees, equipment finance, software, telco, insurance, linen, the supermarket
+       runs. One row each. Optional: a missing tab just leaves the P&L as it was. See
+       fixedCostsFor() for how a row is costed. */
+    FIXED=(Array.isArray(fixedRows)?fixedRows:[]).map(r=>({
+      name:String(r.name||"").trim(), group:String(r.group||"").trim()||"Other",
+      venue:String(r.venue||"").trim(), basis:String(r.basis||"monthly").trim().toLowerCase(),
+      amount:+String(r.amount||"").replace(/[^0-9.\-]/g,"")||0,
+      from:gvizDate(r.from), to:gvizDate(r.to),
+      match:String(r.supplier_match||"").trim(), note:String(r.note||"").trim()
+    })).filter(r=>r.name&&r.amount);
     /* Deputy timesheets. Optional: a missing tab just leaves wages coming from the
        weekly form sheets as before, so nothing breaks if processDeputy has not run. */
     SHIFTS = Array.isArray(shiftRows) ? shiftRows : [];
@@ -1834,6 +1847,55 @@ function wagesByDay(shifts, rates){
 }
 
 /* Totals for the current filter, so the KPI card can show a live wage figure. */
+/* ================= FIXED COSTS ================= */
+/* Cost each FixedCosts row for the range [from,to] (Date, inclusive days), ex GST:
+     basis "monthly"   - amount is $/month; pro-rated by day (x12/365) over the days the row
+                         is live inside the range (from/to on the row, blank = always)
+     basis "pct_wages" - amount is a percentage of the wages figure passed in (super, payroll tax)
+     basis "pct_sales" - amount is a percentage of GST-inclusive sales in the range (card fees)
+   venue: a venue name pins the whole amount to it (counted only when that venue is in scope);
+   blank splits it across venues by their share of sales in the range, so a venue filter gets
+   its share. supplier_match: if any invoice in scope in the range comes from a supplier whose
+   name contains this text, the row is left out - the real bill has arrived, don't estimate it
+   on top. Rows in group "Finance" are returned separately (shown after operating profit).
+   Returns {rows:[{name,group,amount,note}], total, finance:[...], financeTotal, suppressed:[...]}. */
+function fixedCostsFor(from,to,wages,salesIncScoped){
+  const out={rows:[],total:0,finance:[],financeTotal:0,suppressed:[]};
+  if(!FIXED.length||!from||!to) return out;
+  const day=864e5, d0=fcMid(from), d1=fcMid(to);
+  /* Venue shares come from SALES for EVERY venue in the range, not the scoped set - with a
+     venue filter on, scopedSales() only holds that venue and its share would read 100%. */
+  const byV={}; let allSales=0;
+  SALES.forEach(r=>{ if(r.date&&r.date>=from&&r.date<=to){ byV[r.venue]=(byV[r.venue]||0)+r.sales; allSales+=r.sales; } });
+  const scopeShare=()=>{
+    if(!FILTER.venues.length) return 1;
+    if(!(allSales>0)) return FILTER.venues.length/Math.max(1,VENUE_LIST.length||3);
+    return FILTER.venues.reduce((a,v)=>a+((byV[v]||0)/allSales),0);
+  };
+  const invSups=scopedInv().map(r=>String(r.supplier||"").toLowerCase());
+  FIXED.forEach(r=>{
+    const a=r.from?fcMid(r.from):null, b=r.to?fcMid(r.to):null;
+    const s=a&&a>d0?a:d0, e=b&&b<d1?b:d1;
+    if(e<s) return;
+    const days=Math.round((e-s)/day)+1;
+    if(r.match&&invSups.some(n=>n.indexOf(r.match.toLowerCase())!==-1)){ out.suppressed.push(r.name); return; }
+    let amt=0;
+    if(r.basis==="pct_wages") amt=(wages||0)*r.amount/100;
+    else if(r.basis==="pct_sales") amt=(salesIncScoped||0)*r.amount/100;
+    else amt=r.amount*12/365*days;
+    if(r.basis==="monthly"||r.basis===""){
+      if(r.venue){ if(!venueOk(r.venue)) return; }
+      else amt*=scopeShare();
+    }
+    if(!(amt>0)) return;
+    const row={name:r.name,group:r.group,amount:amt,note:r.note,basis:r.basis};
+    if(/^finance$/i.test(r.group)){ out.finance.push(row); out.financeTotal+=amt; }
+    else { out.rows.push(row); out.total+=amt; }
+  });
+  out.rows.sort((x,y)=>y.amount-x.amount); out.finance.sort((x,y)=>y.amount-x.amount);
+  return out;
+}
+
 function wagesInScope(before){
   if(!SHIFTS_OK) return null;
   let cost=0, est=0, hours=0, leave=0, training=0;
@@ -2705,7 +2767,13 @@ function renderReports(){
     const ohList=Object.entries(ohGroups).sort((a,b)=>b[1]-a[1]);
     const ohTot=ohList.reduce((a,[,v])=>a+v,0);
     const wagesP=wages||0;
-    const exp=cogsEx+wagesP+ohTot, profit=salesEx-exp;
+    /* Estimated costs: the FixedCosts tab, costed for this range. Super and payroll tax ride
+       on the wages above; card fees on GST-inclusive sales; everything else is a monthly
+       figure pro-rated by day. Finance (equipment repayments) sits below operating profit -
+       it is mostly principal, not an expense, but it is the cash that leaves. */
+    const fx=fixedCostsFor(fromDate(),toDate(),wagesP,salesAll);
+    const exp=cogsEx+wagesP+ohTot+fx.total, profit=salesEx-exp;
+    const afterFin=profit-fx.financeTotal;
     const pc=v=>(Math.round(v/salesEx*1000)/10)+"%";
     const line=(label,v,opts)=>`<tr${opts&&opts.top?' style="border-top:2px solid var(--ink)"':""}><td${opts&&opts.indent?' style="padding-left:22px;color:var(--dim)"':""}>${opts&&opts.bold?"<b>"+label+"</b>":label}</td><td class="num">${opts&&opts.bold?"<b>"+money(v)+"</b>":money(v)}</td><td class="num">${pc(v)}</td></tr>`;
     const pcls=profit<0?"up":"down";
@@ -2716,10 +2784,12 @@ function renderReports(){
         ${line(wagesP>0?"Wages":"Wages — no labour data",wagesP)}
         ${line("Overheads",ohTot)}
         ${ohList.map(([g,v])=>line(esc(g),v,{indent:true})).join("")}
+        ${fx.rows.length?line("Estimated costs",fx.total)+fx.rows.map(r=>line(esc(r.name)+(r.basis==="pct_wages"?" <span style=\"color:var(--dim);font-size:11px\">(% of wages)</span>":r.basis==="pct_sales"?" <span style=\"color:var(--dim);font-size:11px\">(% of sales)</span>":""),r.amount,{indent:true})).join(""):""}
         ${line("Total expenses",exp,{bold:true,top:true})}
-        <tr style="border-top:2px solid var(--ink)"><td><b>Profit</b></td><td class="num"><b class="${pcls}">${profit<0?"−":""}${money(Math.abs(profit))}</b></td><td class="num"><b class="${pcls}">${pc(profit)}</b></td></tr>
+        <tr style="border-top:2px solid var(--ink)"><td><b>${fx.finance.length?"Operating profit":"Profit"}</b></td><td class="num"><b class="${pcls}">${profit<0?"−":""}${money(Math.abs(profit))}</b></td><td class="num"><b class="${pcls}">${pc(profit)}</b></td></tr>
+        ${fx.finance.length?fx.finance.map(r=>line(esc(r.name),r.amount,{indent:true})).join("")+`<tr style="border-top:2px solid var(--ink)"><td><b>After finance</b></td><td class="num"><b class="${afterFin<0?"up":"down"}">${afterFin<0?"−":""}${money(Math.abs(afterFin))}</b></td><td class="num"><b class="${afterFin<0?"up":"down"}">${pc(afterFin)}</b></td></tr>`:""}
       </tbody></table>
-      <div style="font-size:11px;color:var(--dim);margin-top:6px">Sales less every bill captured in this range and the wages above. Not a full P&amp;L: anything that never arrives as an invoice or a manual purchase (bank and card fees, loan repayments, insurance paid by direct debit, super and payroll tax if Deputy's cost leaves them out) isn't here, so the real profit is lower. Bills land on their invoice date — a quarterly bill or rent paid in advance falls wholly in one period, so a week can swing hard; a month or quarter reads truer. All figures ex GST: sales are the feed's GST-inclusive takings ÷ 1.1, bills are less their own GST, wages have none. So these won't match the GST-inclusive KPI tiles above.</div>
+      <div style="font-size:11px;color:var(--dim);margin-top:6px">Sales less every bill captured in this range, the wages above${fx.rows.length||fx.finance.length?", and the estimated costs from the FixedCosts tab (rounded monthly figures pro-rated by day; super and payroll tax as a percentage of wages, card fees of sales; split across venues by sales share unless a row names a venue"+(fx.suppressed.length?"; left out because a real bill is in range: "+esc(fx.suppressed.join(", ")):"")+")":""}. ${fx.finance.length?"Finance repayments are mostly principal, so they sit below operating profit; \"After finance\" is the cash view. ":""}${!FIXED.length?"Not a full P&amp;L: anything that never arrives as an invoice or a manual purchase (bank and card fees, loan repayments, insurance paid by direct debit, super and payroll tax) isn't here, so the real profit is lower. ":""}Bills land on their invoice date — a quarterly bill or rent paid in advance falls wholly in one period, so a week can swing hard; a month or quarter reads truer. All figures ex GST: sales are the feed's GST-inclusive takings ÷ 1.1, bills are less their own GST, wages have none. So these won't match the GST-inclusive KPI tiles above.</div>
     </div>`;
   } else if(kRunning){
     pnlCard=`<div class="card"><div class="label">Profit &amp; loss</div><div style="font-size:13px;color:var(--dim)">Shown once this period is finished. Step back a period (‹) for the last complete one.</div></div>`;
