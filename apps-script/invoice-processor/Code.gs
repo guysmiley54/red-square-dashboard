@@ -76,6 +76,15 @@ var CONFIG = {
   VENUE_BY_REFERENCE: [
     { match: /valhalla/i, fallback: "Red Square Cambridge" }
   ],
+  // Senders that bill OTHER people's companies to this inbox as well as ours (2 Nov 2026:
+  // Bentleys sent 9 invoices since August, 6 of them for Joe Goc's entities; Allan Hall
+  // does his electrical work too). For these senders only, the bill-to name the model
+  // reads (bill_to) must match one of OURS or the document is skipped. Not applied to
+  // anyone else: plenty of legitimate bills carry an odd or missing bill-to, and a
+  // missing bill_to never skips. match is tested against the sender address AND the
+  // supplier name the model read, lower-cased.
+  BILL_TO_CHECK: [/bentleys/i, /allan\s*hall/i, /apps\.myob\.com/i],
+  OUR_NAMES: [/b\s*(&|and)\s*g\s*fitness/i, /red\s*square/i, /luma/i, /glenorchy/i, /cambridge/i],
   SAVE_PDFS: true,
   DRIVE_FOLDER: "Invoice PDFs",
   // Email address to notify if any invoice FAILS in a run (leave "" to disable).
@@ -90,7 +99,7 @@ var EXTRACT_PROMPT = [
   "",
   "Extract the invoice data and respond with ONLY minified JSON on a single line - no markdown fences, no explanation, no line breaks. Use this exact structure:",
   "",
-  '{"doc_type":"invoice or credit_note","supplier":"string","invoice_number":"string","invoice_date":"YYYY-MM-DD","subtotal":number,"gst":number,"total":number,"freight":number,"cdl":number,"deliver_to":"string or null","venue_ref":"string or null","order_ref":"string or null","category_guess":"Food|Beverage|Coffee|Packaging|Cleaning|Equipment|Other","items":[["description",qty,"unit",unit_price,line_total,"item_code or null",line_cdl]]}',
+  '{"doc_type":"invoice or credit_note","supplier":"string","invoice_number":"string","invoice_date":"YYYY-MM-DD","subtotal":number,"gst":number,"total":number,"freight":number,"cdl":number,"deliver_to":"string or null","bill_to":"string or null","venue_ref":"string or null","order_ref":"string or null","category_guess":"Food|Beverage|Coffee|Packaging|Cleaning|Equipment|Other","items":[["description",qty,"unit",unit_price,line_total,"item_code or null",line_cdl]]}',
   "",
   "Each item is a 7-element array: [description, qty, unit, unit_price, line_total, item_code, line_cdl]. item_code is the supplier's product/SKU code from the invoice line (e.g. \"018050\", \"LAC-MOZ-MLSK\") - null if the invoice doesn't show codes. line_cdl is that line's container deposit amount - 0 if the invoice has no per-line deposit column.",
   "",
@@ -101,6 +110,8 @@ var EXTRACT_PROMPT = [
   'order_ref: the CUSTOMER order number / order reference printed on the invoice, if it shows one. Southern Foodservice tax invoices print the Pepper order code (6 alphanumeric characters, e.g. RXUUDE, 6WCGX5), usually labelled Order, Order No, Customer Order or Your Order. This is NOT the invoice number and NOT a delivery docket number. Return null if no such reference appears.',
   "",
   'venue_ref: copy word for word any Reference, Ref, Notes or delivery-instruction text printed on the invoice that names a site, branch or delivery location (e.g. "Reference: GLENORCHY", "Notes: Deliver to Glenorchy"). This is NOT the bill-to or ship-to address - report that in deliver_to as usual. Return null if the invoice has no such text.',
+  "",
+  'bill_to: the CUSTOMER name the invoice is addressed to - the company or person under "Bill To", "Invoice To", "To", "Customer" or at the top of the address block (e.g. "B & G Fitness Pty Ltd", "Goc Holdings Pty Ltd"). Word for word, the name only, no address. This is the customer, never the supplier issuing the invoice. Return null if no customer name is printed.',
   "",
   "Rules:",
   "- Amounts in dollars as plain numbers (no $ signs, no strings, no thousands separators).",
@@ -135,9 +146,14 @@ function processInvoices() {
   var existing = existingInvoiceKeys_(sheets.inv);
   var PAGE = 50;
   var runStart = new Date();
+  // Set when a call fails for a reason that is not the email's fault (Google's daily UrlFetch
+  // quota, API overload). The email is NOT logged, so the next run tries it again, and the
+  // rest of this run is skipped - every further call would fail the same way.
+  var deferred = { hit: false, count: 0, why: "" };
 
   // ---- Lane 1: PDF attachments (own budget) ----
   runLane_(CONFIG.SEARCH_QUERY, PAGE, { handled: 0 }, function (msg) {
+    if (deferred.hit) return;
     if (givenUp_(failedCounts, msg, sheets.log)) return;
     var atts = msg.getAttachments();
     var hasCandidate = atts.some(function (a) {
@@ -152,6 +168,7 @@ function processInvoices() {
     try {
       processAttachments_(apiKey, sheets, existing, msg, notes, 1);
     } catch (e) {
+      if (deferTransient_(e, deferred)) return;
       status = "FAILED";
       notes.push(String(e && e.message ? e.message : e));
     }
@@ -161,6 +178,7 @@ function processInvoices() {
   // ---- Lane 2: body-only invoice senders (own budget) ----
   if (CONFIG.BODY_QUERY) {
     runLane_(CONFIG.BODY_QUERY, PAGE, { handled: 0 }, function (msg) {
+      if (deferred.hit) return;
       if (givenUp_(failedCounts, msg, sheets.log)) return;
       var notes = [];
       var status = "OK";
@@ -190,6 +208,8 @@ function processInvoices() {
           ], modelForSender_(msg.getFrom()));
           if (result.not_invoice) {
             notes.push("skipped (" + (result.reason || "not an invoice") + ")");
+          } else if (billToNotOurs_(result, msg.getFrom())) {
+            notes.push("skipped (" + billToNotOurs_(result, msg.getFrom()) + ")");
           } else if (isDupInvoice_(existing, result)) {
             notes.push("duplicate " + result.invoice_number + ", skipped");
           } else {
@@ -204,6 +224,7 @@ function processInvoices() {
           }
         }
       } catch (e) {
+        if (deferTransient_(e, deferred)) return;
         status = "FAILED";
         notes.push(String(e && e.message ? e.message : e));
       }
@@ -211,7 +232,24 @@ function processInvoices() {
     }, processedIds);
   }
 
+  if (deferred.hit) Logger.log("Stopped early, nothing logged for the email that hit it - retried next run: " + deferred.why);
   notifyFailures_(sheets.log, runStart);
+}
+
+/**
+ * Errors that say nothing about the email itself: Google's daily UrlFetch quota (shared by every
+ * Apps Script project on the account - the POS Feed exhausted it on 16-18 Oct and 6 emails were
+ * logged FAILED, which stops them ever being retried), and the model API being rate-limited,
+ * overloaded or down. For these the email is left unlogged so the next run picks it up again.
+ * Returns true if the error was one of these.
+ */
+function deferTransient_(e, deferred) {
+  var m = String(e && e.message ? e.message : e);
+  if (!/Service invoked too many times|Bandwidth quota exceeded|API (429|5\d\d)\b|overloaded|Address unavailable|timed out|Timeout/i.test(m)) return false;
+  deferred.hit = true;
+  deferred.count++;
+  if (!deferred.why) deferred.why = m.slice(0, 200);
+  return true;
 }
 
 /**
@@ -310,6 +348,8 @@ function processAttachments_(apiKey, sheets, existing, msg, notes, lane) {
         (e && e.message ? e.message : e));
     }
     if (result.not_invoice) { notes.push(att.getName() + ": skipped (" + (result.reason || "not an invoice") + ")"); return; }
+    var notOurs = billToNotOurs_(result, msg.getFrom());
+    if (notOurs) { notes.push(att.getName() + ": skipped (" + notOurs + ")"); return; }
 
     fixInvoiceDate_(result, msg.getDate(), notes);
 
@@ -331,6 +371,22 @@ function processAttachments_(apiKey, sheets, existing, msg, notes, lane) {
     writeInvoice_(sheets, result, msg.getFrom(), att.getName(), pdfUrl, msg.getDate(), route_(msg, lane || 1));
     notes.push(att.getName() + ": added " + result.invoice_number);
   });
+}
+
+// ---------------------------------------------------------------- bill-to guard
+
+// For CONFIG.BILL_TO_CHECK senders only: "" if the document is ours (or names no customer),
+// else a short reason to log. See the CONFIG comment.
+function billToNotOurs_(result, fromEmail) {
+  var who = (String(fromEmail || "") + " " + String(result.supplier || "")).toLowerCase();
+  var checks = CONFIG.BILL_TO_CHECK || [], ours = CONFIG.OUR_NAMES || [];
+  var applies = false;
+  for (var i = 0; i < checks.length; i++) if (checks[i].test(who)) { applies = true; break; }
+  if (!applies) return "";
+  var bt = String(result.bill_to || "").trim();
+  if (!bt) return "";
+  for (var k = 0; k < ours.length; k++) if (ours[k].test(bt)) return "";
+  return "billed to " + bt + ", not ours";
 }
 
 // ---------------------------------------------------------------- claude
