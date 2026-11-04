@@ -156,7 +156,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v27-2230-preview"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v28-2300-preview"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1107,6 +1107,29 @@ function stableCat(p){
    buy from fortnightly really does average half as much. `before` is a week start, so the
    current (partial) week never dilutes its own benchmark. Same row filter as spendRows. */
 const AVG_WEEKS=4;
+/* BUDGET, NOT HABIT (Adrian, 4 Nov 2026). Usual/wk measured a supplier against its own last four
+   weeks, so creep became the benchmark: four heavy weeks and the arrows went green. The supplier
+   benchmark is now a BUDGET anchored to income:
+
+     budget = the supplier's share of COGS spend over the BUDGET_WEEKS complete weeks before the range
+              × 30% of the range's income (forecast while the week is live, actual once it is done).
+
+   The shares add to 100%, so every supplier's budget adds to the 30% target — the total can't drift
+   with habit, and when income falls every budget falls with it. Twelve weeks rather than four so one
+   odd week can't move a share much. A supplier with no spend in those weeks has no budget (shown —).
+   The projected COGS % in the header still uses the usual: that is a forecast of what will happen,
+   and it should look bad when habits are bad. */
+const BUDGET_WEEKS=12;
+function budgetShares(before,keyOf,venue){
+  const end=mid(before), start=addD(end,-7*BUDGET_WEEKS), m={}; let tot=0;
+  INV.forEach(r=>{ if(!r.date||r.date<start||r.date>=end||!supActive(r.supplier)) return;
+    tot+=r.total; if(venue&&r.venue!==venue) return; const k=keyOf(r); m[k]=(m[k]||0)+r.total; });
+  if(tot>0) Object.keys(m).forEach(k=>m[k]/=tot); else Object.keys(m).forEach(k=>m[k]=0);
+  return m;
+}
+/* 30% of the income for a period — the forecast while the week is running, actual otherwise. Never
+   the catch-up tally: that is a whole-ledger adjustment, not something to share out by supplier. */
+function budgetPot(period){ const m=periodModel(period,new Date(),{}); return (m.sales.forecast||0)*TARGET_COGS_PCT/100; }
 function usualWeek(before,keyOf){
   const end=mid(before), start=addD(end,-7*AVG_WEEKS), m={};
   INV.forEach(r=>{ if(!r.date||r.date<start||r.date>=end||!supActive(r.supplier)) return;
@@ -1126,12 +1149,13 @@ function supplierList(now,opts){
   INV.forEach(r=>{
     if(r.type==="manual"||!r.date||+r.date<from||!supActive(r.supplier)) return;
     if(venue&&r.venue!==venue) return;
-    const s=m[r.supplier]||(m[r.supplier]={name:r.supplier,spend:0,week:0,n:0,last:null,priorToDate:[]});
+    const s=m[r.supplier]||(m[r.supplier]={name:r.supplier,spend:0,week:0,n:0,last:null,priorToDate:[],priorFull:[]});
     s.spend+=r.total; s.n++;
     if(r.date>=wk.start&&r.date<=wk.end) s.week+=r.total;
     for(let w=1;w<=WEEKS_BACK;w++){
       const ws=addD(wk.start,-7*w), we=addD(ws,dayOfWeek);
       we.setHours(23,59,59,999);
+      if(r.date>=ws&&r.date<addD(ws,7)) s.priorFull[w]=(s.priorFull[w]||0)+r.total;
       if(r.date>=ws&&r.date<=we){ s.priorToDate[w]=(s.priorToDate[w]||0)+r.total; break; }
     }
     if(!s.last||r.date>s.last) s.last=r.date;
@@ -1147,6 +1171,8 @@ function supplierList(now,opts){
     let sum=0, seen=0;
     for(let w=1;w<=WEEKS_BACK;w++){ if(+addD(wk.start,-7*w)>=from){ sum+=s.priorToDate[w]||0; seen++; } }
     s.usualToDate=seen?sum/seen:null;
+    let full=0; for(let w=1;w<=WEEKS_BACK;w++){ if(+addD(wk.start,-7*w)>=from) full+=s.priorFull[w]||0; }
+    s.usualFrac=full>0?Math.min(1,sum/full):null;
     s.vsUsual=(s.usualToDate!=null&&s.usualToDate>0)?(s.week-s.usualToDate)/s.usualToDate*100:null;
     s.daysSince=Math.round((t-+s.last)/864e5);
     s.lines=LINES.some(l=>l.supplier===s.name&&(!venue||l.venue===venue));
@@ -1356,6 +1382,12 @@ function orderTabs(cur){
 }
 function renderOrderHome(){
   const m=weekModel(), all=supplierList();
+  /* Budget per supplier for this tag: its share of the whole ledger's spend × 30% of income, so the
+     two tags' budgets add to the ledger's (see budgetShares). */
+  const bPot=(m.sales.forecast||0)*TARGET_COGS_PCT/100, bShare=budgetShares(m.wk.start,r=>r.supplier,TAG.name);
+  const dayFrac=m.live?Math.min(1,(Math.round((mid(new Date())-m.wk.start)/864e5)+1)/7):1;
+  all.forEach(s=>{ s.budgetWk=(bShare[s.name]||0)*bPot;
+    s.budgetToDate=s.budgetWk*(!m.live?1:s.usualFrac!=null?s.usualFrac:dayFrac); });
   const shown=all.filter(s=>s.orderable);
   const portalCount=0;
   document.getElementById("app").innerHTML=`
@@ -1366,12 +1398,12 @@ function renderOrderHome(){
       <table><thead><tr>
         <th style="width:30px"></th>
         <th>Supplier</th><th class="num">Spend so far</th>
-        <th class="num hide-sm" title="Average per week over the ${AVG_WEEKS} full weeks before this one">Usual/wk</th>
+        <th class="num hide-sm" title="Share of spend over the last ${BUDGET_WEEKS} weeks × ${TARGET_COGS_PCT}% of this week's income">Budget/wk</th>
         <th class="num hide-sm">Last delivery</th><th class="num">Draft</th>
       </tr></thead><tbody>
       ${shown.map(s=>{
         const d=DRAFTS[draftId(s.name,TAG.name)], n=d?Object.keys(d.qty||{}).length:0;
-        const v=s.vsUsual;
+        const v=s.budgetToDate>0?1:null;
         const openHere=HOME_INV===s.name;
         /* The name opens the order builder; the chevron drops the invoices in place. Two
            different jobs on one row, so they get two different targets rather than one
@@ -1381,8 +1413,8 @@ function renderOrderHome(){
               title="Show invoices">${openHere?"▾":"▸"}</td>
           <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.rep?"":' <span class="pill">no rep email</span>'}</td>
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
-            ${v!=null?`<br><span class="${s.week>=s.usualToDate?"up":"down"}" style="font-size:11px">${s.week>=s.usualToDate?"+":"−"}${money0(Math.abs(s.week-s.usualToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.usualToDate)} by ${esc(DAYSHORT)}</span>`:""}</td>
-          <td class="num hide-sm">${s.usualWk?money(s.usualWk):'<span style="color:var(--dim)">—</span>'}</td>
+            ${v!=null?`<br><span class="${s.week>s.budgetToDate?"up":"down"}" style="font-size:11px">${s.week>s.budgetToDate?"+":"−"}${money0(Math.abs(s.week-s.budgetToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.budgetToDate)} budget${m.live?" by "+esc(DAYSHORT):""}</span>`:""}</td>
+          <td class="num hide-sm" title="usual ${money0(s.usualWk)}/wk">${s.budgetWk?money(s.budgetWk):'<span style="color:var(--dim)">—</span>'}</td>
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
           <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
         </tr>`
@@ -1393,10 +1425,9 @@ function renderOrderHome(){
       <div class="note" id="homenote">This list, the catalogue, drafts and favourites are
         <b>${esc(TAG.name)}</b>.
         <b>Spend so far</b> is this store's invoices for that supplier this week to date. Underneath is how that
-        compares with the same day over the last 6 weeks — like for like, because measuring a Tuesday against a
-        whole week would show almost every supplier as down until Friday. <b>Usual/wk</b> is the average over the
-        ${AVG_WEEKS} full weeks before this one — a whole-week figure, so it is what Sunday's number should land near,
-        not Tuesday's. Cost of goods only.</div>
+        compares with its budget so far — allowing for when it usually delivers, so a Monday supplier is mostly due by
+        Tuesday. <b>Budget/wk</b> is its share of spend over the last ${BUDGET_WEEKS} weeks × ${TARGET_COGS_PCT}% of this week's
+        income, so it moves with income, not habit. Hover it for the usual. Cost of goods only.</div>
     </div>
     ${productSearchCard()}`;
   wireGlobalSearch();
@@ -1422,9 +1453,10 @@ let SUPP_SORT={key:"spend",dir:-1};
 function sortSuppliers(k){ if(SUPP_SORT.key===k) SUPP_SORT.dir*=-1; else SUPP_SORT={key:k,dir:k==="name"?1:-1}; route(); }
 function avgNoteFor(d,range){
   return d.short
-    ?`<b>Usual/wk</b> is the average over the ${AVG_WEEKS} full weeks before ${fmtD(range.start)}, not this range —
-       a week divided by itself is just the week. ▲▼ marks spend more than 10% off usual <i>so far</i> — against the same
-       days of those weeks, so a Monday delivery is measured against earlier Mondays.`
+    ?`<b>Budget/wk</b> is the supplier's share of spend over the ${BUDGET_WEEKS} weeks before ${fmtD(range.start)} × ${TARGET_COGS_PCT}%
+       of ${rangeScale(range).live?"forecast ":""}income for the week (${money0(d.pot)} in all) — it follows income, not habit, so creep
+       can't become the benchmark. ▲▼ marks spend more than 10% off budget <i>so far</i>, allowing for when each supplier usually
+       delivers. Hover a figure for the usual.`
     :`<b>Avg/wk</b> is spend ÷ ${wksLabel(d.weeks)}.`;
 }
 const wksLabel=w=>{const n=Math.round(w*10)/10;return n+(n===1?" week":" weeks");};
@@ -1435,7 +1467,7 @@ function renderHome(){
   const fn=K[SUPP_SORT.key]||K.spend;
   const sup=d.sup.slice().sort((a,b)=>{const x=fn(a),y=fn(b);return (x<y?-1:x>y?1:0)*SUPP_SORT.dir||a.name.localeCompare(b.name);});
   const head=(k,l,cls)=>`<th class="s ${cls||""} ${SUPP_SORT.key===k?"act":""}" onclick="sortSuppliers('${k}')">${l}${SUPP_SORT.key===k?(SUPP_SORT.dir<0?" ▼":" ▲"):""}</th>`;
-  const avgHead=d.short?"Usual/wk":"Avg/wk";
+  const avgHead=d.short?"Budget/wk":"Avg/wk";
   document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
     ${productSearchCard({chips:false})}
     <div class="card"><div class="label">Suppliers by spend — ${esc(range.label)}</div>
@@ -1445,7 +1477,7 @@ function renderHome(){
         <td><b>${esc(x.name)}</b>${x.group&&x.group!=="Ungrouped"?` <span class="pill">${esc(x.group)}</span>`:""}${sset(x.name).portal_only?' <span class="pill">portal</span>':""}</td>
         <td class="num hide-sm">${x.n}</td>
         <td class="num"><b>${money(x.spend)}</b></td>
-        <td class="num">${x.avgWk?money(x.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(x)}</td>
+        <td class="num"${d.short?` title="${x.budget?`budget so far ${money0(x.budgetToDate)} · usual ${money0(x.usualWk)}/wk`:"no spend with them in the last "+BUDGET_WEEKS+" weeks, so no budget"}"`:""}>${x.avgWk?money(x.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(x)}</td>
         <td class="num hide-sm">${fmtD(x.last)}</td></tr>`).join("")}</tbody>
       ${sup.length?`<tfoot><tr><td><b>${sup.length} supplier${sup.length===1?"":"s"}</b></td><td class="num hide-sm">${nInv}</td>
         <td class="num"><b>${money(total)}</b></td><td class="num"></td><td class="hide-sm"></td></tr></tfoot>`:""}
@@ -1920,11 +1952,23 @@ function spendRows(range){
   const U=usualPlan(range), tdS={}, tdG={};
   if(short) INV.forEach(r=>{ if(!r.date||!supActive(r.supplier)||!U.inWin(r.date,AVG_WEEKS)) return;
     tdS[r.supplier]=(tdS[r.supplier]||0)+r.total; const g=rowGroup(r); tdG[g]=(tdG[g]||0)+r.total; });
-  const fin=(u,td)=>o=>{ o.perWk=o.spend/weeks; o.avgWk=short?(u[o.name]||0):o.perWk;
+  /* Budget (see budgetShares). The arrow is spend so far against the budget so far, and "so far"
+     keeps the like-for-like rule: the share of a usual range this supplier has normally landed by now
+     (a Monday-heavy supplier is mostly due by Tuesday). With no usual to read that from, days gone. */
+  const days=U.sc.days, pot=short?budgetPot(range):0;
+  const bS=short?budgetShares(range.start,r=>r.supplier):{}, bG=short?budgetShares(range.start,rowGroup):{};
+  const fin=(u,td,b)=>o=>{ o.perWk=o.spend/weeks;
     o.usualToDate=short?(td[o.name]||0)*U.factor(AVG_WEEKS):null;
-    o.trend=short&&o.usualToDate>0?(o.spend-o.usualToDate)/o.usualToDate:null; return o; };
-  return {sup:Object.values(bySup).map(fin(uS,tdS)).sort((a,b)=>b.spend-a.spend),
-          grp:Object.values(byGrp).map(fin(uG,tdG)).sort((a,b)=>b.spend-a.spend), weeks, short};
+    if(short){
+      const full=(u[o.name]||0)*days/7;
+      const frac=!U.sc.live?1:full>0?Math.min(1,o.usualToDate/full):U.sc.frac;
+      o.budget=(b[o.name]||0)*pot; o.budgetWk=o.budget*7/days; o.budgetToDate=o.budget*frac; o.usualWk=u[o.name]||0;
+      o.avgWk=o.budgetWk;
+      o.trend=o.budgetToDate>0?(o.spend-o.budgetToDate)/o.budgetToDate:null;
+    } else { o.avgWk=o.perWk; o.trend=null; }
+    return o; };
+  return {sup:Object.values(bySup).map(fin(uS,tdS,bS)).sort((a,b)=>b.spend-a.spend),
+          grp:Object.values(byGrp).map(fin(uG,tdG,bG)).sort((a,b)=>b.spend-a.spend), weeks, short, pot};
 }
 /* Lives in the sticky #filters strip on every reading route, so the range is one control
    and every card under it agrees. */
@@ -3273,8 +3317,9 @@ function renderHelp(){
 
     <h2>Front page — suppliers by spend</h2>
     <img src="help/cambridge/front-page.png" alt="Suppliers by spend">
-    <p>Every supplier we bought from in the range, biggest first. <b>Usual/wk</b> is what we normally spend on them
-      per week (the four full weeks before); a red ▲ means this range is more than 10% over that, green ▼ under. Tap a
+    <p>Every supplier we bought from in the range, biggest first. <b>Budget/wk</b> is what that supplier can have this
+      week: its share of our spend over the last 12 weeks, times 30% of the week's income. It goes up and down with income,
+      not with what we got used to spending. A red ▲ means more than 10% over budget so far, green ▼ under. Tap a
       column heading to sort, tap a supplier to open it.</p>
 
     <h2>Finding the wastage</h2>
