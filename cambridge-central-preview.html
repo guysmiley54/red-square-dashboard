@@ -78,9 +78,16 @@
   .legend .l4:before{background:repeating-linear-gradient(45deg,#c9c9c4 0 2px,#e4e4df 2px 4px)}
   .pace{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;background:#fbe8eb;color:var(--red);margin-left:6px;white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;letter-spacing:.01em}
   .pace.ok{background:#e6f2e9;color:var(--green)} .pace.dim{background:#eee;color:#666;font-weight:600}
+  .pace.warn{background:#fdf0dc;color:var(--amber)}
+  .why{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+  .why td{padding:7px 8px;border-bottom:1px solid #f0efec;vertical-align:top}
+  .why td.n{text-align:right;font-family:var(--mono);white-space:nowrap;width:110px}
+  .why tr.tot td{border-top:2px solid var(--ink);border-bottom:none;font-weight:700}
+  .why .eg{display:block;font-size:11px;color:var(--dim);margin-top:2px;line-height:1.45}
+  .why .pos{color:var(--red)} .why .neg{color:var(--green)}
   .bbar{position:relative;height:4px;background:#ecebe7;border-radius:2px;margin:5px 0 1px auto;width:100%;max-width:150px;min-width:70px}
   .bbar i{position:absolute;left:0;top:0;bottom:0;background:#9a9a96;border-radius:2px}
-  .bbar i.hot{background:var(--red)}
+  .bbar i.hot{background:var(--red)} .bbar i.warn{background:var(--amber)}
   .bbar b{position:absolute;top:-3px;width:2px;height:10px;background:var(--ink);border-radius:1px}
   .panels{display:grid;grid-template-columns:1fr 370px;gap:12px;align-items:start}
   .draft{position:sticky;top:104px}
@@ -162,7 +169,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v29-2310-preview"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v30-0900-preview"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1149,21 +1156,21 @@ function paceOf(spend,budget,toDate,live){
   const over=spend-budget; return over>0.5?{kind:"over",amt:over}:{kind:"done"};
 }
 function pacePill(p){
-  if(p.kind==="hot") return `<span class="pace" title="more than its budget allows by ${esc(DAYSHORT)}">${money0(p.amt)} ahead of pace</span>`;
+  if(p.kind==="hot") return `<span class="pace warn" title="more than its budget allows by ${esc(DAYSHORT)} — open the supplier for why">${money0(p.amt)} ahead of pace</span>`;
   if(p.kind==="over") return `<span class="pace">${money0(p.amt)} over</span>`;
   if(p.kind==="done") return `<span class="pace ok" title="came in under budget">✓</span>`;
   if(p.kind==="none") return `<span class="pace dim" title="no spend with them in the last ${BUDGET_WEEKS} weeks, so no budget">no budget</span>`;
   return "";
 }
-function paceBar(spend,budget,toDate,live,hot){
+function paceBar(spend,budget,toDate,live,kind){
   if(!(budget>0)) return "";
   const w=Math.min(100,Math.max(0,spend/budget*100)), t=Math.min(100,Math.max(0,toDate/budget*100));
-  return `<div class="bbar" title="${money0(spend)} of ${money0(budget)}${live?` · ${money0(toDate)} would be normal by ${esc(DAYSHORT)}`:""}"><i class="${hot?"hot":""}" style="width:${w.toFixed(1)}%"></i>${live?`<b style="left:calc(${t.toFixed(1)}% - 1px)"></b>`:""}</div>`;
+  return `<div class="bbar" title="${money0(spend)} of ${money0(budget)}${live?` · ${money0(toDate)} would be normal by ${esc(DAYSHORT)}`:""}"><i class="${kind==="hot"?"warn":kind==="over"?"hot":""}" style="width:${w.toFixed(1)}%"></i>${live?`<b style="left:calc(${t.toFixed(1)}% - 1px)"></b>`:""}</div>`;
 }
 /* One budget cell: the figure, the pill, the bar. */
 function budgetCell(o,live){
   const p=paceOf(o.spend,o.budget,o.budgetToDate,live);
-  return `${o.budgetWk?money(o.budgetWk):'<span style="color:var(--dim)">—</span>'}${pacePill(p)}${paceBar(o.spend,o.budget,o.budgetToDate,live,p.kind==="hot"||p.kind==="over")}`;
+  return `${o.budgetWk?money(o.budgetWk):'<span style="color:var(--dim)">—</span>'}${pacePill(p)}${paceBar(o.spend,o.budget,o.budgetToDate,live,p.kind)}`;
 }
 function usualWeek(before,keyOf){
   const end=mid(before), start=addD(end,-7*AVG_WEEKS), m={};
@@ -1451,7 +1458,7 @@ function renderOrderHome(){
             ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live);
               return p.kind==="blank"?"":`<br>${pacePill(p)||`<span style="font-size:11px;color:var(--dim)">${money0(s.budgetToDate)} normal by ${esc(DAYSHORT)}</span>`}`; })()}</td>
           <td class="num hide-sm" title="usual ${money0(s.usualWk)}/wk">${s.budgetWk?money(s.budgetWk):'<span style="color:var(--dim)">—</span>'}
-            ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live); return paceBar(s.week,s.budgetWk,s.budgetToDate,m.live,p.kind==="hot"||p.kind==="over"); })()}</td>
+            ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live); return paceBar(s.week,s.budgetWk,s.budgetToDate,m.live,p.kind); })()}</td>
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
           <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
         </tr>`
@@ -2432,6 +2439,90 @@ function statementCard(name,range){
 /* The supplier's usual on PRODUCT LINES — fees stripped, the AVG_WEEKS complete weeks before
    the range, scaled and pro-rated like every other usual. Computed over every line, not just
    the products bought in the range, so a product dropped altogether still lowers the usual. */
+/* WHY IT'S AHEAD (Adrian, 5 Nov 2026). A pill on its own starts an argument nobody can settle:
+   "prices went up", "we were busy". This splits the gap between what was spent with a supplier and its
+   budget-by-today into parts that add up to the dollar:
+
+     normal pace       what a normal week with them costs by today, against budget at normal takings —
+                       positive means the habit itself is over its share before anything unusual happens;
+     busy-week room    the budget moves with forecast takings; a busier week than normal is extra room
+                       (negative), a quieter one less;
+     price             same products, dearer: units bought × (price now − last price before the range);
+     quantity          more (or fewer) of the products they normally get, at the old price;
+     new items         products not bought from them before this range;
+     not in yet        products normally bought by now that haven't been;
+     other             GST, freight, fees and invoices with no line detail — invoice totals carry them,
+                       product lines don't.
+
+   Usual is the like-for-like window the rest of the page uses (same days of the last AVG_WEEKS weeks,
+   or an occasional line's 12-week rate). Only for ranges where Budget/wk applies (under AVG_WEEKS weeks). */
+function normalIncome(range){
+  const map=dailySales(SALES), s0=mid(range.start); let t=0;
+  for(let i=1;i<=7*DOW_WEEKS;i++){ const v=map[fmtISO(addD(s0,-i))]; if(v) t+=v; }
+  const days=Math.round((+mid(range.end)-+s0)/864e5)+1;
+  return t/DOW_WEEKS*days/7;
+}
+function budgetWhy(name,range,prods){
+  const d=spendRows(range); if(!d.short) return null;
+  const o=d.sup.find(x=>x.name===name); if(!o||!(o.budget>0)) return {o,none:true};
+  const U=usualPlan(range), live=U.sc.live, S=o.spend, B=o.budgetToDate, Uinv=o.usualToDate||0;
+  const ni=normalIncome(range), fi=d.pot/(TARGET_COGS_PCT/100);
+  const Bn=fi>0?B*ni/fi:B;
+  const inRange={}; prods.forEach(p=>inRange[p.key]=1);
+  let dropped=0; const droppedList={};
+  LINES.forEach(l=>{ if(l.supplier!==name||!l.date||l.date>=mid(range.start)||!(l.price>0)||!(l.qty>0)||FEE.test(l.desc)) return;
+    if(!U.inWin(l.date,AVG_WEEKS)) return; const k=l.key||prodKey(l.supplier,l.code,l.desc,l.unit); if(inRange[k]) return;
+    const v=l.total*U.factor(AVG_WEEKS); dropped+=v; droppedList[k]=droppedList[k]||{desc:l.desc,v:0}; droppedList[k].v+=v; });
+  const old=prods.filter(p=>!p.isNew), nw=prods.filter(p=>p.isNew);
+  old.forEach(p=>{ p.qtyEff=p.spend-p.extra-p.usualSpend; });
+  /* While the week runs, a usual item that has come in short so far is timing, not a saving: its shortfall
+     joins "not in yet" and only the overs count as quantity. Once the week is done, both directions are real. */
+  const short=live?old.filter(p=>p.qtyEff<-0.5):[];
+  short.forEach(p=>{ droppedList[p.key]={desc:p.desc,v:-p.qtyEff}; });
+  const qtyOf=p=>live?Math.max(0,p.qtyEff):p.qtyEff;
+  const price=old.reduce((a,p)=>a+p.extra,0), qty=old.reduce((a,p)=>a+qtyOf(p),0), newItems=nw.reduce((a,p)=>a+p.spend,0);
+  dropped+=short.reduce((a,p)=>a-p.qtyEff,0);
+  const lineGap=price+qty+newItems-dropped, other=(S-Uinv)-lineGap;
+  const top=(arr,f,n)=>arr.filter(p=>f(p)>=0.5).sort((a,b)=>f(b)-f(a)).slice(0,n||3);
+  return {o,live,S,B,gap:S-B,ni,fi,
+    rows:[
+      {k:"normal",label:"Normal pace with them",v:Uinv-Bn,
+        eg:Uinv-Bn>0.5?`A normal ${live?"week to "+DAYSHORT:"week"} with them is ${money0(Uinv)} against a budget of ${money0(Bn)} at normal takings — the habit is over their share before anything unusual happens.`
+          :`A normal ${live?"week to "+DAYSHORT:"week"} with them (${money0(Uinv)}) sits inside their budget at normal takings (${money0(Bn)}).`},
+      {k:"busy",label:fi>=ni?"Busier week — extra room":"Quieter week — less room",v:-(B-Bn),
+        eg:ni>0?`Takings ${live?"forecast at":"were"} ${money0(fi)} against a normal ${money0(ni)} (${fi>=ni?"+":"−"}${Math.abs(Math.round((fi/ni-1)*100))}%). The budget moves with takings, so ${fi>=ni?"a busy week is already allowed for here":"a quiet week means less room"}.`:""},
+      {k:"price",label:"Prices",v:price,
+        eg:top(old,p=>p.extra).map(p=>`${esc(p.desc)} +${money0(p.extra)} (was ${money(p.base)}, now ${money(p.price)})`).join(" · ")||""},
+      {k:"qty",label:qty>=0?"More of the usual items":"Fewer of the usual items",v:qty,
+        eg:(qty>=0?top(old,p=>p.qtyEff):top(old,p=>-p.qtyEff)).map(p=>`${esc(p.desc)} ${Math.round(p.qty*10)/10} vs ${Math.round(p.usualQty*10)/10} ${esc(p.unit||"")} (${p.qtyEff>=0?"+":"−"}${money0(Math.abs(p.qtyEff))})`).join(" · ")},
+      {k:"new",label:"New or one-off items",v:newItems,
+        eg:top(nw,p=>p.spend).map(p=>`${esc(p.desc)} ${money0(p.spend)}`).join(" · ")},
+      {k:"notyet",label:live?"Usual items not in yet":"Usual items not bought",v:-dropped,
+        eg:Object.values(droppedList).sort((a,b)=>b.v-a.v).slice(0,3).map(x=>`${esc(x.desc)} ${money0(x.v)}`).join(" · ")+(dropped>0.5&&live?(" — may still come this week"):"")},
+      {k:"other",label:"GST, freight, fees, unitemised",v:other,eg:"Invoice totals carry these; product lines don't."}
+    ]};
+}
+function budgetWhyCard(name,range,prods){
+  const w=budgetWhy(name,range,prods); if(!w) return "";
+  if(w.none) return w.o?`<div class="card"><div class="label">Against budget</div><div class="note" style="margin-top:0">No spend with ${esc(name)} in the ${BUDGET_WEEKS} weeks before this range, so they have no budget share yet.</div></div>`:"";
+  const sg=v=>Math.abs(v)<0.5?"–":(v>0?"+":"−")+money0(Math.abs(v));
+  const cls=v=>v>0.5?"pos":v<-0.5?"neg":"";
+  const ahead=w.gap>Math.max(w.B*PACE_PCT,PACE_MIN), behind=w.gap<-0.5;
+  const head=w.live
+    ?(ahead?`<b style="color:var(--amber)">${money0(w.gap)} ahead of pace</b>`:behind?`<b>${money0(-w.gap)} under pace</b> — so far; most of that is usually timing`:`<b>On pace</b>`)
+    :(w.gap>0.5?`<b style="color:var(--red)">${money0(w.gap)} over budget</b>`:`<b style="color:var(--green)">${money0(-w.gap)} under budget ✓</b>`);
+  const rows=w.rows.filter(r=>Math.abs(r.v)>=0.5||r.k==="normal");
+  return `<div class="card" id="vsbudget"><div class="label">Against budget — ${esc(range.label)}</div>
+    <div style="font-size:15px;margin-bottom:4px">${head}</div>
+    <div style="font-size:12px;color:var(--dim)">Spent ${money0(w.S)} against ${w.live?`${money0(w.B)} normal by ${esc(DAYSHORT)} (budget ${money0(w.o.budgetWk)} for the week)`:`a budget of ${money0(w.B)}`}.</div>
+    <table class="why"><tbody>
+      ${rows.map(r=>`<tr><td>${esc(r.label)}${r.eg?`<span class="eg">${r.eg}</span>`:""}</td><td class="n ${cls(r.v)}">${sg(r.v)}</td></tr>`).join("")}
+      <tr class="tot"><td>${w.gap>=0?"Ahead of budget":"Under budget"}${w.live?" so far":""}</td><td class="n">${sg(w.gap)}</td></tr>
+    </tbody></table>
+    <div class="note">Each line adds to the total, to the dollar. <b>Normal pace</b> is what this supplier usually costs by now (the same days of the
+      last ${AVG_WEEKS} weeks) against their budget; the rest is what's different about this ${w.live?"week so far":"week"}. Budget = their share of
+      spend over ${BUDGET_WEEKS} weeks × ${TARGET_COGS_PCT}% of takings.</div></div>`;
+}
 function usualLineSpend(name,range){
   const U=usualPlan(range), sc=U.sc, uFrom=addD(mid(range.start),-7*AVG_WEEKS), uTo=mid(range.start);
   let t=0, w=0, seen=false;
@@ -2486,12 +2577,13 @@ function renderSupplierProducts(name){
     <a class="back" onclick="go('')">All suppliers</a>
     ${sset(name).orderHere?`<div style="margin-bottom:10px"><a class="btn outline" onclick="go('s::${encodeURIComponent(name)}')">🛒 Build order</a></div>`
       :sset(name).portal_only?`<div class="note" style="margin:0 0 10px">Orders go through this supplier's own portal — no ordering here. Change that in Admin.</div>`:""}
+    ${budgetWhyCard(name,range,all)}
     ${statementCard(name,range)}
     <div class="card">
       <div class="label">Products (${rows.length}) — ${esc(range.label)}
         ${hiddenN?`<span class="chip sm ${SHOW_HIDDEN?"on":""}" onclick="toggleHidden()" style="margin-left:8px">${SHOW_HIDDEN?"hiding":"show"} ${hiddenN} turned-off</span>`:""}</div>
       ${rows.length?`<div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:6px">${money(spend)}</div>
-      ${driversNote(name,all,range)}
+      ${spendRows(range).short?"":driversNote(name,all,range)}
       <table><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}${head("qty","Qty","num")}
         ${head("spend","Spend","num")}${head("price","Price","num")}${head("was","Was","num hide-sm")}${head("change","Change","num")}</tr></thead>
       <tbody>${rows.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
@@ -3360,7 +3452,8 @@ function renderHelp(){
       week: its share of our spend over the last 12 weeks, times 30% of the week's income. It goes up and down with income,
       not with what we got used to spending. The bar shows spend against budget, and the tick is where spend would normally
       be by today. A red pill means that supplier is running ahead of its budget for the day. Nothing goes green until the
-      week is over — then a ✓ means it came in under budget. Tap a
+      week is over — then a ✓ means it came in under budget. Tap any supplier for <b>Against budget</b>: what made the gap,
+      line by line — normal pace, a busy week, prices, quantities, new items — so the conversation starts from the same facts. Tap a
       column heading to sort, tap a supplier to open it.</p>
 
     <h2>Finding the wastage</h2>
