@@ -76,6 +76,12 @@
   .legend span:before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
   .legend .l1:before{background:var(--ink)} .legend .l2:before{background:#8a8a8a} .legend .l3:before{background:var(--red)}
   .legend .l4:before{background:repeating-linear-gradient(45deg,#c9c9c4 0 2px,#e4e4df 2px 4px)}
+  .pace{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;background:#fbe8eb;color:var(--red);margin-left:6px;white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;letter-spacing:.01em}
+  .pace.ok{background:#e6f2e9;color:var(--green)} .pace.dim{background:#eee;color:#666;font-weight:600}
+  .bbar{position:relative;height:4px;background:#ecebe7;border-radius:2px;margin:5px 0 1px auto;width:100%;max-width:150px;min-width:70px}
+  .bbar i{position:absolute;left:0;top:0;bottom:0;background:#9a9a96;border-radius:2px}
+  .bbar i.hot{background:var(--red)}
+  .bbar b{position:absolute;top:-3px;width:2px;height:10px;background:var(--ink);border-radius:1px}
   .panels{display:grid;grid-template-columns:1fr 370px;gap:12px;align-items:start}
   .draft{position:sticky;top:104px}
   @media (max-width:900px){.panels{grid-template-columns:1fr}.draft{position:static}.summary{grid-template-columns:1fr}}
@@ -156,7 +162,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v28-2300-preview"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v29-2310-preview"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
@@ -1130,6 +1136,35 @@ function budgetShares(before,keyOf,venue){
 /* 30% of the income for a period — the forecast while the week is running, actual otherwise. Never
    the catch-up tally: that is a whole-ledger adjustment, not something to share out by supplier. */
 function budgetPot(period){ const m=periodModel(period,new Date(),{}); return (m.sales.forecast||0)*TARGET_COGS_PCT/100; }
+/* PACE, NOT ARROWS (Adrian, 4 Nov 2026). ▲▼ read backwards (up usually means good) and a green ▼
+   mid-week read as permission to spend when it was only timing. So, while the week runs: nothing,
+   unless a supplier is ahead of its budget-by-today by more than PACE_PCT and PACE_MIN — then a red
+   pill with the dollars. No green while the week is open. Once it is over: a quiet ✓ for under budget,
+   red "$X over" for over. The bar under the budget is spent against budget, with a tick where spend
+   would normally be by today. */
+const PACE_PCT=0.10, PACE_MIN=50;
+function paceOf(spend,budget,toDate,live){
+  if(!(budget>0)) return spend>0?{kind:"none"}:{kind:"blank"};
+  if(live){ const ahead=spend-toDate; return ahead>Math.max(toDate*PACE_PCT,PACE_MIN)?{kind:"hot",amt:ahead}:{kind:"quiet"}; }
+  const over=spend-budget; return over>0.5?{kind:"over",amt:over}:{kind:"done"};
+}
+function pacePill(p){
+  if(p.kind==="hot") return `<span class="pace" title="more than its budget allows by ${esc(DAYSHORT)}">${money0(p.amt)} ahead of pace</span>`;
+  if(p.kind==="over") return `<span class="pace">${money0(p.amt)} over</span>`;
+  if(p.kind==="done") return `<span class="pace ok" title="came in under budget">✓</span>`;
+  if(p.kind==="none") return `<span class="pace dim" title="no spend with them in the last ${BUDGET_WEEKS} weeks, so no budget">no budget</span>`;
+  return "";
+}
+function paceBar(spend,budget,toDate,live,hot){
+  if(!(budget>0)) return "";
+  const w=Math.min(100,Math.max(0,spend/budget*100)), t=Math.min(100,Math.max(0,toDate/budget*100));
+  return `<div class="bbar" title="${money0(spend)} of ${money0(budget)}${live?` · ${money0(toDate)} would be normal by ${esc(DAYSHORT)}`:""}"><i class="${hot?"hot":""}" style="width:${w.toFixed(1)}%"></i>${live?`<b style="left:calc(${t.toFixed(1)}% - 1px)"></b>`:""}</div>`;
+}
+/* One budget cell: the figure, the pill, the bar. */
+function budgetCell(o,live){
+  const p=paceOf(o.spend,o.budget,o.budgetToDate,live);
+  return `${o.budgetWk?money(o.budgetWk):'<span style="color:var(--dim)">—</span>'}${pacePill(p)}${paceBar(o.spend,o.budget,o.budgetToDate,live,p.kind==="hot"||p.kind==="over")}`;
+}
 function usualWeek(before,keyOf){
   const end=mid(before), start=addD(end,-7*AVG_WEEKS), m={};
   INV.forEach(r=>{ if(!r.date||r.date<start||r.date>=end||!supActive(r.supplier)) return;
@@ -1413,8 +1448,10 @@ function renderOrderHome(){
               title="Show invoices">${openHere?"▾":"▸"}</td>
           <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.rep?"":' <span class="pill">no rep email</span>'}</td>
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
-            ${v!=null?`<br><span class="${s.week>s.budgetToDate?"up":"down"}" style="font-size:11px">${s.week>s.budgetToDate?"+":"−"}${money0(Math.abs(s.week-s.budgetToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.budgetToDate)} budget${m.live?" by "+esc(DAYSHORT):""}</span>`:""}</td>
-          <td class="num hide-sm" title="usual ${money0(s.usualWk)}/wk">${s.budgetWk?money(s.budgetWk):'<span style="color:var(--dim)">—</span>'}</td>
+            ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live);
+              return p.kind==="blank"?"":`<br>${pacePill(p)||`<span style="font-size:11px;color:var(--dim)">${money0(s.budgetToDate)} normal by ${esc(DAYSHORT)}</span>`}`; })()}</td>
+          <td class="num hide-sm" title="usual ${money0(s.usualWk)}/wk">${s.budgetWk?money(s.budgetWk):'<span style="color:var(--dim)">—</span>'}
+            ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live); return paceBar(s.week,s.budgetWk,s.budgetToDate,m.live,p.kind==="hot"||p.kind==="over"); })()}</td>
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
           <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
         </tr>`
@@ -1425,8 +1462,8 @@ function renderOrderHome(){
       <div class="note" id="homenote">This list, the catalogue, drafts and favourites are
         <b>${esc(TAG.name)}</b>.
         <b>Spend so far</b> is this store's invoices for that supplier this week to date. Underneath is how that
-        compares with its budget so far — allowing for when it usually delivers, so a Monday supplier is mostly due by
-        Tuesday. <b>Budget/wk</b> is its share of spend over the last ${BUDGET_WEEKS} weeks × ${TARGET_COGS_PCT}% of this week's
+        compares with what is normal by today — allowing for when it usually delivers, so a Monday supplier is mostly due by
+        Tuesday. A red pill means it is more than ${PACE_PCT*100}% and ${money0(PACE_MIN)} ahead of that. <b>Budget/wk</b> is its share of spend over the last ${BUDGET_WEEKS} weeks × ${TARGET_COGS_PCT}% of this week's
         income, so it moves with income, not habit. Hover it for the usual. Cost of goods only.</div>
     </div>
     ${productSearchCard()}`;
@@ -1455,8 +1492,10 @@ function avgNoteFor(d,range){
   return d.short
     ?`<b>Budget/wk</b> is the supplier's share of spend over the ${BUDGET_WEEKS} weeks before ${fmtD(range.start)} × ${TARGET_COGS_PCT}%
        of ${rangeScale(range).live?"forecast ":""}income for the week (${money0(d.pot)} in all) — it follows income, not habit, so creep
-       can't become the benchmark. ▲▼ marks spend more than 10% off budget <i>so far</i>, allowing for when each supplier usually
-       delivers. Hover a figure for the usual.`
+       can't become the benchmark. The bar is spent against budget${rangeScale(range).live?`; the tick is where spend would normally be by
+       ${esc(DAYSHORT)}, allowing for when each supplier usually delivers. A red pill means a supplier is more than ${PACE_PCT*100}% and
+       ${money0(PACE_MIN)} ahead of that. Nothing shows green while the week is running — under so far is usually just timing`
+       :`. ✓ came in under budget; red is the amount over`}. Hover a figure for the usual.`
     :`<b>Avg/wk</b> is spend ÷ ${wksLabel(d.weeks)}.`;
 }
 const wksLabel=w=>{const n=Math.round(w*10)/10;return n+(n===1?" week":" weeks");};
@@ -1467,7 +1506,7 @@ function renderHome(){
   const fn=K[SUPP_SORT.key]||K.spend;
   const sup=d.sup.slice().sort((a,b)=>{const x=fn(a),y=fn(b);return (x<y?-1:x>y?1:0)*SUPP_SORT.dir||a.name.localeCompare(b.name);});
   const head=(k,l,cls)=>`<th class="s ${cls||""} ${SUPP_SORT.key===k?"act":""}" onclick="sortSuppliers('${k}')">${l}${SUPP_SORT.key===k?(SUPP_SORT.dir<0?" ▼":" ▲"):""}</th>`;
-  const avgHead=d.short?"Budget/wk":"Avg/wk";
+  const avgHead=d.short?"Budget/wk":"Avg/wk", liveR=rangeScale(range).live;
   document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
     ${productSearchCard({chips:false})}
     <div class="card"><div class="label">Suppliers by spend — ${esc(range.label)}</div>
@@ -1477,7 +1516,7 @@ function renderHome(){
         <td><b>${esc(x.name)}</b>${x.group&&x.group!=="Ungrouped"?` <span class="pill">${esc(x.group)}</span>`:""}${sset(x.name).portal_only?' <span class="pill">portal</span>':""}</td>
         <td class="num hide-sm">${x.n}</td>
         <td class="num"><b>${money(x.spend)}</b></td>
-        <td class="num"${d.short?` title="${x.budget?`budget so far ${money0(x.budgetToDate)} · usual ${money0(x.usualWk)}/wk`:"no spend with them in the last "+BUDGET_WEEKS+" weeks, so no budget"}"`:""}>${x.avgWk?money(x.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(x)}</td>
+        <td class="num"${d.short?` title="${x.budget?`normal by today ${money0(x.budgetToDate)} · usual ${money0(x.usualWk)}/wk`:"no spend with them in the last "+BUDGET_WEEKS+" weeks, so no budget"}"`:""}>${d.short?budgetCell(x,liveR):(x.avgWk?money(x.avgWk):'<span style="color:var(--dim)">—</span>')}</td>
         <td class="num hide-sm">${fmtD(x.last)}</td></tr>`).join("")}</tbody>
       ${sup.length?`<tfoot><tr><td><b>${sup.length} supplier${sup.length===1?"":"s"}</b></td><td class="num hide-sm">${nInv}</td>
         <td class="num"><b>${money(total)}</b></td><td class="num"></td><td class="hide-sm"></td></tr></tfoot>`:""}
@@ -1491,7 +1530,7 @@ function renderHome(){
       <table><thead><tr><th>Group</th><th class="num">Spend</th><th class="num hide-sm">${avgHead}</th><th class="num">%</th></tr></thead>
       <tbody>${d.grp.map(g=>`<tr class="click" onclick="go('grp::${encodeURIComponent(g.name)}')">
         <td><b>${esc(g.name)}</b></td><td class="num">${money(g.spend)}</td>
-        <td class="num hide-sm">${g.avgWk?money(g.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(g)}</td>
+        <td class="num hide-sm">${d.short?budgetCell(g,liveR):(g.avgWk?money(g.avgWk):'<span style="color:var(--dim)">—</span>')}</td>
         <td class="num">${total?pct1(g.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
       <div class="note">Cost of goods only — ${money(total)} over ${wksLabel(d.weeks)}. Tap a group for its suppliers.</div>
     </div>`:""}`;
@@ -3319,7 +3358,9 @@ function renderHelp(){
     <img src="help/cambridge/front-page.png" alt="Suppliers by spend">
     <p>Every supplier we bought from in the range, biggest first. <b>Budget/wk</b> is what that supplier can have this
       week: its share of our spend over the last 12 weeks, times 30% of the week's income. It goes up and down with income,
-      not with what we got used to spending. A red ▲ means more than 10% over budget so far, green ▼ under. Tap a
+      not with what we got used to spending. The bar shows spend against budget, and the tick is where spend would normally
+      be by today. A red pill means that supplier is running ahead of its budget for the day. Nothing goes green until the
+      week is over — then a ✓ means it came in under budget. Tap a
       column heading to sort, tap a supplier to open it.</p>
 
     <h2>Finding the wastage</h2>
