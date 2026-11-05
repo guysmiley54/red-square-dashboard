@@ -127,6 +127,7 @@
   <a class="hbtn" onclick="go('sales')">Sales</a>
   <a class="hbtn" onclick="go('order')">Order</a>
   <a class="hbtn" onclick="go('admin')">Admin</a>
+  <a class="hbtn" id="bvtoggle" onclick="toggleBV()" title="Budget view: spend forecast like income, a budget per supplier, and why each one is ahead">Budget view</a>
   <a class="hbtn" onclick="go('help')" title="How to use this page">?</a>
   <button onclick="loadAll()">↻</button>
 </header>
@@ -169,8 +170,21 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v30-0900-preview"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v31-1130-preview"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
+
+/* BUDGET VIEW (Adrian, 5 Nov 2026). Everything built 4–5 Nov — spend forecast like income, Budget/wk per
+   supplier, pace pills and bars, the Against budget breakdown — sits behind one switch in the header. Off,
+   the page is the Cambridge Central everyone already knows; on, it is the budget view. Remembered per
+   browser; ?budget=1 or ?budget=0 in the link sets it, so a link can be sent that opens either way. */
+let BV=false;
+try{ BV=localStorage.getItem("cc_budget_view")==="1"; }catch(e){}
+{ const q=new URLSearchParams(location.search).get("budget");
+  if(q==="1"||q==="0"){ BV=q==="1"; try{ localStorage.setItem("cc_budget_view",BV?"1":"0"); }catch(e){} } }
+function paintBV(){ const b=document.getElementById("bvtoggle"); if(!b) return;
+  b.classList.toggle("on",BV); b.textContent=BV?"Budget view ✓":"Budget view"; }
+function toggleBV(){ BV=!BV; try{ localStorage.setItem("cc_budget_view",BV?"1":"0"); }catch(e){} paintBV(); clearCatalogueCache(); route(); }
+paintBV();
 
 const SHEET_ID       = "1bICxitr-CyU7VF8TLKIZgw7gV2WTKur9AptfmskQNK4"; // BG Ops Data
 const SALES_SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
@@ -1010,7 +1024,7 @@ function periodModel(period,today,opts){
   const allowed=sales.actual*TARGET_COGS_PCT/100;           // books mode: what 30% of income to date allows
   /* Countdown: spend is forecast like income (projectSpend). Headroom is what is left once the
      usual orders still to come are counted, not budget less what has landed so far. */
-  const proj=countdown?projectSpend(period,now,open,live):null;
+  const proj=countdown&&BV?projectSpend(period,now,open,live):null;
   const projected=proj?proj.total:used;
   return {wk:period,period,live,countdown,catchup,sales,cap,open,committed,drafted,used,budget,remaining:budget-projected,
     proj,projected,expected:proj?proj.expected:0,
@@ -1340,11 +1354,15 @@ function summaryBar(m){
       <div class="sub">${m.cap.n} invoice(s) captured${m.committed?` · ${money0(m.committed)} awaiting invoice`:""}${m.drafted?` · ${money0(m.drafted)} in drafts`:""}</div>
     </div>
     <div class="tile ${over?"over":""}">
-      <div class="k">Headroom after usual orders — ${esc(ENTITY)}</div>
+${BV?`      <div class="k">Headroom after usual orders — ${esc(ENTITY)}</div>
       <div class="v">${m.budget>0?(m.remaining<0?"−":"")+money0(Math.abs(m.remaining)):"—"}</div>
       <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i><i class="b4" style="width:${seg(m.expected)}%"></i></div>
       <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Awaiting invoice ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span><span class="l4">Usual still to come ${money0(m.expected)}</span></div>
-      <div class="sub">${money0(m.projected)} projected of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${m.catchup?` ${m.catchup.tally<0?"less":"plus"} ${money0(Math.abs(m.catchup.tally))} ${m.catchup.tally<0?"over":"under"} from ${fmtD(m.catchup.from)} – ${fmtD(m.catchup.to)}`:""}${over?" — <b style='color:var(--red)'>over</b>":""}</div>
+      <div class="sub">${money0(m.projected)} projected of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${m.catchup?` ${m.catchup.tally<0?"less":"plus"} ${money0(Math.abs(m.catchup.tally))} ${m.catchup.tally<0?"over":"under"} from ${fmtD(m.catchup.from)} – ${fmtD(m.catchup.to)}`:""}${over?" — <b style='color:var(--red)'>over</b>":""}</div>`:`      <div class="k">Left to spend — ${esc(ENTITY)}</div>
+      <div class="v">${m.budget>0?money0(m.remaining):"—"}</div>
+      <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i></div>
+      <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Awaiting invoice ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span></div>
+      <div class="sub">${money0(m.used)} of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${m.catchup?` ${m.catchup.tally<0?"less":"plus"} ${money0(Math.abs(m.catchup.tally))} ${m.catchup.tally<0?"over":"under"} from ${fmtD(m.catchup.from)} – ${fmtD(m.catchup.to)}`:""}${over?" — <b style='color:var(--red)'>over</b>":""}</div>`}
     </div>
     <div class="tile">
       <div class="k">Income — ${esc(when)}</div>
@@ -1354,7 +1372,7 @@ function summaryBar(m){
     <div class="tile ${m.sales.forecast>0?cls:""}">
       <div class="k">COGS %${m.live?" — projected":""} vs ${TARGET_COGS_PCT}%</div>
       <div class="v">${m.sales.forecast>0?pct1(m.cogsProjected):"—"}</div>
-      <div class="sub">${money0(m.projected)} projected spend on ${money0(m.sales.forecast)} forecast income.${m.live&&m.sales.actual>0?` ${pct1(m.cogsActual)} on income so far.`:""} Both kitchens, one set of books.</div>
+${BV?`      <div class="sub">${money0(m.projected)} projected spend on ${money0(m.sales.forecast)} forecast income.${m.live&&m.sales.actual>0?` ${pct1(m.cogsActual)} on income so far.`:""} Both kitchens, one set of books.</div>`:`      <div class="sub">${m.live&&m.sales.actual>0?`${pct1(m.cogsActual)} on income so far. `:""}Both kitchens, one set of books.</div>`}
     </div></div>`;
 }
 /* The books to date — no forecast. Same four positions as the countdown so the eye lands in
@@ -1440,12 +1458,12 @@ function renderOrderHome(){
       <table><thead><tr>
         <th style="width:30px"></th>
         <th>Supplier</th><th class="num">Spend so far</th>
-        <th class="num hide-sm" title="Share of spend over the last ${BUDGET_WEEKS} weeks × ${TARGET_COGS_PCT}% of this week's income">Budget/wk</th>
+${BV?`        <th class="num hide-sm" title="Share of spend over the last ${BUDGET_WEEKS} weeks × ${TARGET_COGS_PCT}% of this week's income">Budget/wk</th>`:`        <th class="num hide-sm" title="Average per week over the ${AVG_WEEKS} full weeks before this one">Usual/wk</th>`}
         <th class="num hide-sm">Last delivery</th><th class="num">Draft</th>
       </tr></thead><tbody>
       ${shown.map(s=>{
         const d=DRAFTS[draftId(s.name,TAG.name)], n=d?Object.keys(d.qty||{}).length:0;
-        const v=s.budgetToDate>0?1:null;
+        const v=BV?(s.budgetToDate>0?1:null):s.vsUsual;
         const openHere=HOME_INV===s.name;
         /* The name opens the order builder; the chevron drops the invoices in place. Two
            different jobs on one row, so they get two different targets rather than one
@@ -1455,10 +1473,11 @@ function renderOrderHome(){
               title="Show invoices">${openHere?"▾":"▸"}</td>
           <td class="click" onclick="go('s::${encodeURIComponent(s.name)}')"><b>${esc(s.name)}</b>${s.rep?"":' <span class="pill">no rep email</span>'}</td>
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
-            ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live);
+${BV?`            ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live);
               return p.kind==="blank"?"":`<br>${pacePill(p)||`<span style="font-size:11px;color:var(--dim)">${money0(s.budgetToDate)} normal by ${esc(DAYSHORT)}</span>`}`; })()}</td>
           <td class="num hide-sm" title="usual ${money0(s.usualWk)}/wk">${s.budgetWk?money(s.budgetWk):'<span style="color:var(--dim)">—</span>'}
-            ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live); return paceBar(s.week,s.budgetWk,s.budgetToDate,m.live,p.kind); })()}</td>
+            ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live); return paceBar(s.week,s.budgetWk,s.budgetToDate,m.live,p.kind); })()}</td>`:`            ${v!=null?`<br><span class="${s.week>=s.usualToDate?"up":"down"}" style="font-size:11px">${s.week>=s.usualToDate?"+":"−"}${money0(Math.abs(s.week-s.usualToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.usualToDate)} by ${esc(DAYSHORT)}</span>`:""}</td>
+          <td class="num hide-sm">${s.usualWk?money(s.usualWk):'<span style="color:var(--dim)">—</span>'}</td>`}
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
           <td class="num">${n?`<b>${n} item${n>1?"s":""}</b>`:'<span style="color:var(--dim)">—</span>'}</td>
         </tr>`
@@ -1469,9 +1488,12 @@ function renderOrderHome(){
       <div class="note" id="homenote">This list, the catalogue, drafts and favourites are
         <b>${esc(TAG.name)}</b>.
         <b>Spend so far</b> is this store's invoices for that supplier this week to date. Underneath is how that
-        compares with what is normal by today — allowing for when it usually delivers, so a Monday supplier is mostly due by
+${BV?`        compares with what is normal by today — allowing for when it usually delivers, so a Monday supplier is mostly due by
         Tuesday. A red pill means it is more than ${PACE_PCT*100}% and ${money0(PACE_MIN)} ahead of that. <b>Budget/wk</b> is its share of spend over the last ${BUDGET_WEEKS} weeks × ${TARGET_COGS_PCT}% of this week's
-        income, so it moves with income, not habit. Hover it for the usual. Cost of goods only.</div>
+        income, so it moves with income, not habit. Hover it for the usual. Cost of goods only.</div>`:`        compares with the same day over the last 6 weeks — like for like, because measuring a Tuesday against a
+        whole week would show almost every supplier as down until Friday. <b>Usual/wk</b> is the average over the
+        ${AVG_WEEKS} full weeks before this one — a whole-week figure, so it is what Sunday's number should land near,
+        not Tuesday's. Cost of goods only.</div>`}
     </div>
     ${productSearchCard()}`;
   wireGlobalSearch();
@@ -1496,6 +1518,9 @@ function togglePortal(){ HIDE_PORTAL=!HIDE_PORTAL; route(); }
 let SUPP_SORT={key:"spend",dir:-1};
 function sortSuppliers(k){ if(SUPP_SORT.key===k) SUPP_SORT.dir*=-1; else SUPP_SORT={key:k,dir:k==="name"?1:-1}; route(); }
 function avgNoteFor(d,range){
+  if(d.short&&!BV) return `<b>Usual/wk</b> is the average over the ${AVG_WEEKS} full weeks before ${fmtD(range.start)}, not this range —
+       a week divided by itself is just the week. ▲▼ marks spend more than 10% off usual <i>so far</i> — against the same
+       days of those weeks, so a Monday delivery is measured against earlier Mondays.`;
   return d.short
     ?`<b>Budget/wk</b> is the supplier's share of spend over the ${BUDGET_WEEKS} weeks before ${fmtD(range.start)} × ${TARGET_COGS_PCT}%
        of ${rangeScale(range).live?"forecast ":""}income for the week (${money0(d.pot)} in all) — it follows income, not habit, so creep
@@ -1513,7 +1538,7 @@ function renderHome(){
   const fn=K[SUPP_SORT.key]||K.spend;
   const sup=d.sup.slice().sort((a,b)=>{const x=fn(a),y=fn(b);return (x<y?-1:x>y?1:0)*SUPP_SORT.dir||a.name.localeCompare(b.name);});
   const head=(k,l,cls)=>`<th class="s ${cls||""} ${SUPP_SORT.key===k?"act":""}" onclick="sortSuppliers('${k}')">${l}${SUPP_SORT.key===k?(SUPP_SORT.dir<0?" ▼":" ▲"):""}</th>`;
-  const avgHead=d.short?"Budget/wk":"Avg/wk", liveR=rangeScale(range).live;
+  const avgHead=d.short?(BV?"Budget/wk":"Usual/wk"):"Avg/wk", liveR=rangeScale(range).live;
   document.getElementById("app").innerHTML=`${warnBar()}${summaryBar(m)}
     ${productSearchCard({chips:false})}
     <div class="card"><div class="label">Suppliers by spend — ${esc(range.label)}</div>
@@ -1523,7 +1548,7 @@ function renderHome(){
         <td><b>${esc(x.name)}</b>${x.group&&x.group!=="Ungrouped"?` <span class="pill">${esc(x.group)}</span>`:""}${sset(x.name).portal_only?' <span class="pill">portal</span>':""}</td>
         <td class="num hide-sm">${x.n}</td>
         <td class="num"><b>${money(x.spend)}</b></td>
-        <td class="num"${d.short?` title="${x.budget?`normal by today ${money0(x.budgetToDate)} · usual ${money0(x.usualWk)}/wk`:"no spend with them in the last "+BUDGET_WEEKS+" weeks, so no budget"}"`:""}>${d.short?budgetCell(x,liveR):(x.avgWk?money(x.avgWk):'<span style="color:var(--dim)">—</span>')}</td>
+${BV?`        <td class="num"${d.short?` title="${x.budget?`normal by today ${money0(x.budgetToDate)} · usual ${money0(x.usualWk)}/wk`:"no spend with them in the last "+BUDGET_WEEKS+" weeks, so no budget"}"`:""}>${d.short?budgetCell(x,liveR):(x.avgWk?money(x.avgWk):'<span style="color:var(--dim)">—</span>')}</td>`:`        <td class="num">${x.avgWk?money(x.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(x)}</td>`}
         <td class="num hide-sm">${fmtD(x.last)}</td></tr>`).join("")}</tbody>
       ${sup.length?`<tfoot><tr><td><b>${sup.length} supplier${sup.length===1?"":"s"}</b></td><td class="num hide-sm">${nInv}</td>
         <td class="num"><b>${money(total)}</b></td><td class="num"></td><td class="hide-sm"></td></tr></tfoot>`:""}
@@ -1537,7 +1562,7 @@ function renderHome(){
       <table><thead><tr><th>Group</th><th class="num">Spend</th><th class="num hide-sm">${avgHead}</th><th class="num">%</th></tr></thead>
       <tbody>${d.grp.map(g=>`<tr class="click" onclick="go('grp::${encodeURIComponent(g.name)}')">
         <td><b>${esc(g.name)}</b></td><td class="num">${money(g.spend)}</td>
-        <td class="num hide-sm">${d.short?budgetCell(g,liveR):(g.avgWk?money(g.avgWk):'<span style="color:var(--dim)">—</span>')}</td>
+${BV?`        <td class="num hide-sm">${d.short?budgetCell(g,liveR):(g.avgWk?money(g.avgWk):'<span style="color:var(--dim)">—</span>')}</td>`:`        <td class="num hide-sm">${g.avgWk?money(g.avgWk):'<span style="color:var(--dim)">—</span>'}${trendMark(g)}</td>`}
         <td class="num">${total?pct1(g.spend/total*100):""}</td></tr>`).join("")}</tbody></table>
       <div class="note">Cost of goods only — ${money(total)} over ${wksLabel(d.weeks)}. Tap a group for its suppliers.</div>
     </div>`:""}`;
@@ -1738,8 +1763,9 @@ function renderBuilder(){
             <div class="tot"><span>GST est. (${Math.round(t.rate*1000)/10}%)</span><span class="num">${money(t.gst)}</span></div>
             <div class="tot big"><span>Total</span><span>${money(t.total)}</span></div>
           </div>
-          ${m.remaining<0?`<div class="note" style="color:var(--red)"><b>The week is projected ${money0(-m.remaining)} past the ${TARGET_COGS_PCT}% target</b> with this order and the usual orders counted.</div>`
-            :`<div class="note">Leaves ${money0(m.remaining)} headroom with this order and the usual orders counted.</div>`}
+${BV?`          ${m.remaining<0?`<div class="note" style="color:var(--red)"><b>The week is projected ${money0(-m.remaining)} past the ${TARGET_COGS_PCT}% target</b> with this order and the usual orders counted.</div>`
+            :`<div class="note">Leaves ${money0(m.remaining)} headroom with this order and the usual orders counted.</div>`}`:`          ${t.total>m.remaining?`<div class="note" style="color:var(--red)"><b>Takes the week ${money0(t.total-m.remaining)} past the ${TARGET_COGS_PCT}% target.</b></div>`
+            :`<div class="note">Leaves ${money0(m.remaining-t.total)} before the ${TARGET_COGS_PCT}% target.</div>`}`}
           <div style="display:grid;gap:8px;margin-top:12px">
             <div style="font-size:12px;color:var(--dim)">Sales rep: <input type="email" id="repmail" value="${esc(email)}" placeholder="rep@supplier.com.au" style="width:100%;margin-top:4px;font-size:13px;padding:7px 9px"></div>
             <label class="sw"><input type="checkbox" id="cckitchen"> CC ${esc(cfg.cc||ACCOUNTS_EMAIL)}</label>
@@ -1902,8 +1928,8 @@ function fillUsual(){
      already counted in the projection, so filling it costs no headroom (4 Nov 2026). */
   const row=m.proj&&m.proj.bySup[norm(SUPPLIER)], room=m.remaining+(row?row.expected:0);
   let cap = usual>0 ? usual : Math.max(0,room);
-  let reason = usual>0 ? "your usual "+money0(usual)+" order from them" : "the week's room";
-  if(room>0&&room<cap){ cap=room; reason="the week's room "+money0(room); }
+  let reason = usual>0 ? "your usual "+money0(usual)+" order from them" : (BV?"the week's room":"the week's remaining budget");
+  if(room>0&&room<cap){ cap=room; reason=(BV?"the week's room ":"the week's remaining ")+money0(room); }
   const plan=fillUsualPlan(cat,cap,gstRate(SUPPLIER));
   plan.picked.forEach(p=>setQty(SUPPLIER,p.key,p.fillQty));
   route();
@@ -2001,9 +2027,12 @@ function spendRows(range){
   /* Budget (see budgetShares). The arrow is spend so far against the budget so far, and "so far"
      keeps the like-for-like rule: the share of a usual range this supplier has normally landed by now
      (a Monday-heavy supplier is mostly due by Tuesday). With no usual to read that from, days gone. */
-  const days=U.sc.days, pot=short?budgetPot(range):0;
-  const bS=short?budgetShares(range.start,r=>r.supplier):{}, bG=short?budgetShares(range.start,rowGroup):{};
+  const days=U.sc.days, pot=short&&BV?budgetPot(range):0;
+  const bS=short&&BV?budgetShares(range.start,r=>r.supplier):{}, bG=short&&BV?budgetShares(range.start,rowGroup):{};
   const fin=(u,td,b)=>o=>{ o.perWk=o.spend/weeks;
+    if(!BV){ o.avgWk=short?(u[o.name]||0):o.perWk;
+      o.usualToDate=short?(td[o.name]||0)*U.factor(AVG_WEEKS):null;
+      o.trend=short&&o.usualToDate>0?(o.spend-o.usualToDate)/o.usualToDate:null; return o; }
     o.usualToDate=short?(td[o.name]||0)*U.factor(AVG_WEEKS):null;
     if(short){
       const full=(u[o.name]||0)*days/7;
@@ -2577,13 +2606,12 @@ function renderSupplierProducts(name){
     <a class="back" onclick="go('')">All suppliers</a>
     ${sset(name).orderHere?`<div style="margin-bottom:10px"><a class="btn outline" onclick="go('s::${encodeURIComponent(name)}')">🛒 Build order</a></div>`
       :sset(name).portal_only?`<div class="note" style="margin:0 0 10px">Orders go through this supplier's own portal — no ordering here. Change that in Admin.</div>`:""}
-    ${budgetWhyCard(name,range,all)}
-    ${statementCard(name,range)}
+    ${BV?budgetWhyCard(name,range,all)+"\n    ":""}${statementCard(name,range)}
     <div class="card">
       <div class="label">Products (${rows.length}) — ${esc(range.label)}
         ${hiddenN?`<span class="chip sm ${SHOW_HIDDEN?"on":""}" onclick="toggleHidden()" style="margin-left:8px">${SHOW_HIDDEN?"hiding":"show"} ${hiddenN} turned-off</span>`:""}</div>
       ${rows.length?`<div style="font-size:20px;font-weight:700;font-family:var(--mono);margin-bottom:6px">${money(spend)}</div>
-      ${spendRows(range).short?"":driversNote(name,all,range)}
+      ${BV&&spendRows(range).short?"":driversNote(name,all,range)}
       <table><thead><tr>${head("name","Product")}${head("cat","Category","hide-sm")}${head("qty","Qty","num")}
         ${head("spend","Spend","num")}${head("price","Price","num")}${head("was","Was","num hide-sm")}${head("change","Change","num")}</tr></thead>
       <tbody>${rows.map(p=>`<tr class="click" onclick="go('rprod::${encodeURIComponent(p.key)}')">
@@ -3421,6 +3449,12 @@ function renderHelp(){
     <img src="help/cambridge/switch.png" alt="The Cambridge / Luma switch">
     <div class="cap">${B(1)} On Order and Sales only. Everything else is both kitchens together.</div>
 
+    <h2>Budget view</h2>
+    <p>The <b>Budget view</b> button in the header switches the page between the usual view and the budget view, for you
+      only — it is remembered on this device. In the budget view spend is forecast the same way income is, every supplier
+      has a <b>Budget/wk</b> (its share of our spend × 30% of the week's income), an amber pill shows any supplier running ahead
+      of budget for the day, and each supplier page opens with <b>Against budget</b> — what made the gap, line by line.</p>
+
     <h2>The date range</h2>
     <img src="help/cambridge/range-bar.png" alt="The range bar">
     <p>The grey bar sits at the top of the front page, Reports and every supplier page, and <b>everything below it
@@ -3436,25 +3470,30 @@ function renderHelp(){
 
     <h2>The four boxes at the top</h2>
     <img src="help/cambridge/header-week.png" alt="The header in the current week">
-    <p>In the <b>current week</b> this is the countdown against the 30% target: what has been spent, the headroom left
+${BV?`    <p>In the <b>current week</b> this is the countdown against the 30% target: what has been spent, the headroom left
       once the usual orders for the rest of the week are counted, income so far with a forecast for the rest of the week,
       and where COGS is projected to land. Spend is forecast the same way income is — the rest of the week is assumed to
       bring each supplier's usual deliveries — so the COGS % is a real projection on Monday, not a low number that climbs
       all week. If <b>Headroom</b> goes red we are on track to be over for the week. <b>catch-up</b> folds this month's over- or under-spend so
-      far into the week's envelope — use it after a heavy week to see what you have to claw back.</p>
+      far into the week's envelope — use it after a heavy week to see what you have to claw back.</p>`:`    <p>In the <b>current week</b> this is the countdown against the 30% target: what has been spent, what is left to
+      spend, income so far with a forecast for the rest of the week, and where COGS is projected to land. If
+      <b>Left to spend</b> goes red we are over for the week. <b>catch-up</b> folds this month's over- or under-spend so
+      far into the week's envelope — use it after a heavy week to see what you have to claw back.</p>`}
     <img src="help/cambridge/header-month.png" alt="The header for a month">
     <p>For <b>any other range</b> there is no forecast, just the books: what was spent, the <b>tally</b> against 30% of
       income (green is under, red is over — the amount to claw back next period), income, and the actual COGS %.</p>
 
     <h2>Front page — suppliers by spend</h2>
     <img src="help/cambridge/front-page.png" alt="Suppliers by spend">
-    <p>Every supplier we bought from in the range, biggest first. <b>Budget/wk</b> is what that supplier can have this
+${BV?`    <p>Every supplier we bought from in the range, biggest first. <b>Budget/wk</b> is what that supplier can have this
       week: its share of our spend over the last 12 weeks, times 30% of the week's income. It goes up and down with income,
       not with what we got used to spending. The bar shows spend against budget, and the tick is where spend would normally
       be by today. A red pill means that supplier is running ahead of its budget for the day. Nothing goes green until the
       week is over — then a ✓ means it came in under budget. Tap any supplier for <b>Against budget</b>: what made the gap,
       line by line — normal pace, a busy week, prices, quantities, new items — so the conversation starts from the same facts. Tap a
-      column heading to sort, tap a supplier to open it.</p>
+      column heading to sort, tap a supplier to open it.</p>`:`    <p>Every supplier we bought from in the range, biggest first. <b>Usual/wk</b> is what we normally spend on them
+      per week (the four full weeks before); a red ▲ means this range is more than 10% over that, green ▼ under. Tap a
+      column heading to sort, tap a supplier to open it.</p>`}
 
     <h2>Finding the wastage</h2>
     <ol>
