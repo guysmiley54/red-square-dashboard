@@ -98,6 +98,10 @@
   .bvchip{display:none}
   @media (max-width:760px){ #bvtoggle{display:none} .bvchip{display:inline-block}
     header{overflow-x:auto;-webkit-overflow-scrolling:touch} header>*{flex-shrink:0} #buildtag{display:none} }
+  /* Phones: the budget cell stacks — figure, then the pill, then the bar — and the pill drops "ahead of pace",
+     so the supplier table fits the screen (5 Nov 2026). */
+  @media (max-width:600px){ .pace{display:table;margin:3px 0 0 auto} .pace .pl{display:none}
+    .bbar{min-width:56px;max-width:84px} }
   .qty{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden}
   .qty button{width:38px;height:38px;border:none;background:#fff;font-size:19px;font-weight:700;cursor:pointer;line-height:1}
   .qty button:active{background:#eee}
@@ -175,7 +179,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v32-1215-preview"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v33-1315-preview"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 /* BUDGET VIEW (Adrian, 5 Nov 2026). Everything built 4–5 Nov — spend forecast like income, Budget/wk per
@@ -1176,8 +1180,8 @@ function paceOf(spend,budget,toDate,live){
   const over=spend-budget; return over>0.5?{kind:"over",amt:over}:{kind:"done"};
 }
 function pacePill(p){
-  if(p.kind==="hot") return `<span class="pace warn" title="more than its budget allows by ${esc(DAYSHORT)} — open the supplier for why">${money0(p.amt)} ahead of pace</span>`;
-  if(p.kind==="over") return `<span class="pace">${money0(p.amt)} over</span>`;
+  if(p.kind==="hot") return `<span class="pace warn" title="more than its budget allows by ${esc(DAYSHORT)} — open the supplier for why">+${money0(p.amt)}<span class="pl"> ahead of pace</span></span>`;
+  if(p.kind==="over") return `<span class="pace">+${money0(p.amt)}<span class="pl"> over</span></span>`;
   if(p.kind==="done") return `<span class="pace ok" title="came in under budget">✓</span>`;
   if(p.kind==="none") return `<span class="pace dim" title="no spend with them in the last ${BUDGET_WEEKS} weeks, so no budget">no budget</span>`;
   return "";
@@ -1190,7 +1194,7 @@ function paceBar(spend,budget,toDate,live,kind){
 /* One budget cell: the figure, the pill, the bar. */
 function budgetCell(o,live){
   const p=paceOf(o.spend,o.budget,o.budgetToDate,live);
-  return `${o.budgetWk?money(o.budgetWk):'<span style="color:var(--dim)">—</span>'}${pacePill(p)}${paceBar(o.spend,o.budget,o.budgetToDate,live,p.kind)}`;
+  return `${o.budgetWk?money0(o.budgetWk):'<span style="color:var(--dim)">—</span>'}${pacePill(p)}${paceBar(o.spend,o.budget,o.budgetToDate,live,p.kind)}`;
 }
 function usualWeek(before,keyOf){
   const end=mid(before), start=addD(end,-7*AVG_WEEKS), m={};
@@ -1481,7 +1485,7 @@ ${BV?`        <th class="num hide-sm" title="Share of spend over the last ${BUDG
           <td class="num">${s.week?money(s.week):'<span style="color:var(--dim)">—</span>'}
 ${BV?`            ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live);
               return p.kind==="blank"?"":`<br>${pacePill(p)||`<span style="font-size:11px;color:var(--dim)">${money0(s.budgetToDate)} normal by ${esc(DAYSHORT)}</span>`}`; })()}</td>
-          <td class="num hide-sm" title="usual ${money0(s.usualWk)}/wk">${s.budgetWk?money(s.budgetWk):'<span style="color:var(--dim)">—</span>'}
+          <td class="num hide-sm" title="usual ${money0(s.usualWk)}/wk">${s.budgetWk?money0(s.budgetWk):'<span style="color:var(--dim)">—</span>'}
             ${(()=>{ const p=paceOf(s.week,s.budgetWk,s.budgetToDate,m.live); return paceBar(s.week,s.budgetWk,s.budgetToDate,m.live,p.kind); })()}</td>`:`            ${v!=null?`<br><span class="${s.week>=s.usualToDate?"up":"down"}" style="font-size:11px">${s.week>=s.usualToDate?"+":"−"}${money0(Math.abs(s.week-s.usualToDate))}</span><span style="font-size:11px;color:var(--dim)"> vs ${money0(s.usualToDate)} by ${esc(DAYSHORT)}</span>`:""}</td>
           <td class="num hide-sm">${s.usualWk?money(s.usualWk):'<span style="color:var(--dim)">—</span>'}</td>`}
           <td class="num hide-sm">${fmtD(s.last)} <span style="color:var(--dim)">${s.daysSince}d</span></td>
