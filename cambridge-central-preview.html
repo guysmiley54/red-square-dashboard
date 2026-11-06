@@ -180,7 +180,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v34-1330-preview"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v35-1310-preview"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 /* BUDGET VIEW (Adrian, 5 Nov 2026). Everything built 4–5 Nov — spend forecast like income, Budget/wk per
@@ -974,21 +974,35 @@ function gstRate(supplier){
 function projectSpend(period,today,open,live){
   const t=mid(today||new Date()), s0=mid(period.start), h0=addD(s0,-7*AVG_WEEKS);
   const sup={};
-  const S=n=>{ const k=norm(n); return sup[k]||(sup[k]={name:n,invoiced:0,pending:0,usualWk:0,usualDay:Array(7).fill(0),invDay:{}}); };
+  /* REGULAR DAYS ONLY, AND A DAY THAT HAS LANDED IS DONE (Adrian, 6 Nov 2026). On a Friday afternoon the first
+     version still expected $2,983, and about half of it was phantom: PFD's Friday was in but sat below their
+     average Friday so it topped it up; one-off bills (a single Saturday Asahi order, the accountant) were spread
+     across every week as a fraction. Now, per supplier and weekday over the AVG_WEEKS weeks before:
+       - a weekday is REGULAR if they delivered on it in at least REG_WEEKS of those weeks, and is expected at
+         their average on the days they did deliver — not diluted by the weeks they didn't;
+       - anything else is occasional and not expected; it counts the moment its invoice lands;
+       - a day on which an invoice from them has already landed is done — one delivery a day. */
+  const S=n=>{ const k=norm(n); return sup[k]||(sup[k]={name:n,invoiced:0,pending:0,usualWk:0,dayAmt:{},invDay:{}}); };
   INV.forEach(r=>{
     if(!r.date||!supActive(r.supplier)) return;
-    if(r.date>=h0&&r.date<s0){ const o=S(r.supplier); o.usualDay[(r.date.getDay()+6)%7]+=r.total/AVG_WEEKS; o.usualWk+=r.total/AVG_WEEKS; }
+    if(r.date>=h0&&r.date<s0){ const o=S(r.supplier), w=Math.floor((+mid(r.date)-+h0)/(7*864e5)), d=(r.date.getDay()+6)%7, k=w+"|"+d;
+      o.dayAmt[k]=(o.dayAmt[k]||0)+r.total; o.usualWk+=r.total/AVG_WEEKS; }
     else if(r.date>=period.start&&r.date<=period.end){ const o=S(r.supplier), k=fmtISO(r.date); o.invoiced+=r.total; o.invDay[k]=(o.invDay[k]||0)+r.total; }
   });
+  Object.values(sup).forEach(o=>{ o.usualDay=Array(7).fill(0); o.regular=Array(7).fill(false); o.seen=Array(7).fill(0);
+    for(let d=0;d<7;d++){ let n=0,t=0; for(let w=0;w<AVG_WEEKS;w++){ const v=o.dayAmt[w+"|"+d]; if(v>0.5){ n++; t+=v; } }
+      o.seen[d]=n; if(n>=REG_WEEKS){ o.regular[d]=true; o.usualDay[d]=t/n; } } });
   (open||[]).forEach(o=>{ S(o.supplier).pending+=o.total||0; });
   if(live) Object.values(DRAFTS).forEach(d=>{ if(!d||!d.supplier) return; const v=orderTotals(d.supplier,d.tag).total; if(v) S(d.supplier).pending+=v; });
   let total=0, invoiced=0, pending=0, expected=0;
   const bySup={};
   Object.keys(sup).forEach(k=>{
-    const o=sup[k]; let rest=0;
+    const o=sup[k]; let rest=0; o.days=[];
     for(let d=mid(period.start); +d<=+period.end; d=addD(d,1)){
       if(+d<+t) continue;
-      rest+=Math.max(0,o.usualDay[(d.getDay()+6)%7]-(o.invDay[fmtISO(d)]||0));
+      const iso=fmtISO(d), dow=(d.getDay()+6)%7;
+      if(o.invDay[iso]!==undefined||!o.regular[dow]) continue;      // landed already, or not a day they deliver
+      rest+=o.usualDay[dow]; o.days.push({date:d,amt:o.usualDay[dow],seen:o.seen[dow]});
     }
     o.rest=rest; o.expected=Math.max(0,rest-o.pending); o.projected=o.invoiced+o.pending+o.expected;
     total+=o.projected; invoiced+=o.invoiced; pending+=o.pending; expected+=o.expected;
@@ -1003,6 +1017,23 @@ function projectSpend(period,today,open,live){
    live week is a countdown; anything else is the books to date, no forecast anywhere, and
    the fourth tile is the TALLY: 30% of income to date minus spend to date. Negative is the
    amount to claw back; the week countdown is where it gets clawed back. */
+const REG_WEEKS=3;
+/* Who the forecast still expects this week, and why — opened from "Usual still to come". */
+function showExpected(){
+  const m=weekModel(); if(!m.proj) return;
+  const rows=Object.values(m.proj.bySup).filter(o=>o.expected>0.5).sort((a,b)=>b.expected-a.expected);
+  const dn=d=>d.toLocaleDateString("en-AU",{weekday:"short"});
+  modal(`<div class="label">Still expected this week — ${money0(m.expected)}</div>
+    ${rows.length?`<table><thead><tr><th>Supplier</th><th>When</th><th class="num">Expected</th></tr></thead><tbody>
+      ${rows.map(o=>`<tr><td><b>${esc(o.name)}</b>${o.pending>0.5?`<br><span style="font-size:11px;color:var(--dim)">${money0(o.pending)} already ordered or in a draft counts towards it</span>`:""}</td>
+        <td>${o.days.map(d=>`${dn(d.date)} <span style="font-size:11px;color:var(--dim)">(${d.seen} of ${AVG_WEEKS} wks, ${money0(d.amt)})</span>`).join("<br>")}</td>
+        <td class="num"><b>${money0(o.expected)}</b></td></tr>`).join("")}</tbody></table>`
+      :`<div class="note">Nothing more expected — every supplier's regular days this week have landed.</div>`}
+    <div class="note">A supplier is expected only on a weekday they delivered in at least ${REG_WEEKS} of the last ${AVG_WEEKS} weeks, at their
+      average on those days. Once an invoice from them lands on a day, that day is done. One-off orders aren't forecast — they count
+      when the invoice arrives.</div>
+    <div style="margin-top:12px"><a class="btn outline" onclick="closeModal()">Close</a></div>`);
+}
 function periodModel(period,today,opts){
   opts=opts||{};
   const now=today||new Date(), t=mid(now);
@@ -1367,7 +1398,7 @@ function summaryBar(m){
 ${BV?`      <div class="k">Headroom after usual orders — ${esc(ENTITY)}</div>
       <div class="v">${m.budget>0?(m.remaining<0?"−":"")+money0(Math.abs(m.remaining)):"—"}</div>
       <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i><i class="b4" style="width:${seg(m.expected)}%"></i></div>
-      <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Awaiting invoice ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span><span class="l4">Usual still to come ${money0(m.expected)}</span></div>
+      <div class="legend"><span class="l1">Invoiced ${money0(m.cap.cogs)}</span><span class="l2">Awaiting invoice ${money0(m.committed)}</span><span class="l3">Draft ${money0(m.drafted)}</span><span class="l4" style="cursor:pointer;text-decoration:underline dotted" onclick="showExpected()" title="Who's still expected this week">Usual still to come ${money0(m.expected)}</span></div>
       <div class="sub">${money0(m.projected)} projected of ${money0(m.budget)} — ${TARGET_COGS_PCT}% of forecast income${m.catchup?` ${m.catchup.tally<0?"less":"plus"} ${money0(Math.abs(m.catchup.tally))} ${m.catchup.tally<0?"over":"under"} from ${fmtD(m.catchup.from)} – ${fmtD(m.catchup.to)}`:""}${over?" — <b style='color:var(--red)'>over</b>":""}</div>`:`      <div class="k">Left to spend — ${esc(ENTITY)}</div>
       <div class="v">${m.budget>0?money0(m.remaining):"—"}</div>
       <div class="bar"><i class="b1" style="width:${seg(m.cap.cogs)}%"></i><i class="b2" style="width:${seg(m.committed)}%"></i><i class="b3" style="width:${seg(m.drafted)}%"></i></div>
