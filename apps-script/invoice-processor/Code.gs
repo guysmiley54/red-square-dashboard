@@ -73,8 +73,20 @@ var CONFIG = {
   // Cambridge; Glenorchy deliveries say "Reference: Glenorchy" or "Notes: Deliver to
   // Glenorchy". Address matching had put 8 of 19 invoices at the wrong café.
   // match is tested against the supplier name the model read AND the sender's address.
+  // BDD / Bega (8 Nov 2026): every invoice is billed to the Cambridge payer account and has
+  // no delivery address block, only Invoice to / Sold to. Until 2 Nov the model put that
+  // address in deliver_to; adding bill_to to the prompt that day made it file the block as
+  // bill_to instead, deliver_to came back null, and every BDD invoice defaulted to Glenorchy
+  // (6 invoices, 3 of them Cambridge). The order ref BDD prints (STO_<sold-to account>_<date>)
+  // is deterministic: 218342 is Cambridge, 233659 is Glenorchy, 97 of 97 refs 14 Aug - 6 Nov.
+  // orderRef rules are tried before venue_ref; with no match the rule falls through to
+  // fallback, then the deliver_to address.
   VENUE_BY_REFERENCE: [
-    { match: /valhalla/i, fallback: "Red Square Cambridge" }
+    { match: /valhalla/i, fallback: "Red Square Cambridge" },
+    { match: /bdd australia|bega/i, orderRef: [
+        { re: /218342/, venue: "Red Square Cambridge" },
+        { re: /233659/, venue: "Red Square Glenorchy" }
+      ] }
   ],
   // Senders that bill OTHER people's companies to this inbox as well as ours (2 Nov 2026:
   // Bentleys sent 9 invoices since August, 6 of them for Joe Goc's entities; Allan Hall
@@ -110,6 +122,8 @@ var EXTRACT_PROMPT = [
   'order_ref: the CUSTOMER order number / order reference printed on the invoice, if it shows one. Southern Foodservice tax invoices print the Pepper order code (6 alphanumeric characters, e.g. RXUUDE, 6WCGX5), usually labelled Order, Order No, Customer Order or Your Order. This is NOT the invoice number and NOT a delivery docket number. Return null if no such reference appears.',
   "",
   'venue_ref: copy word for word any Reference, Ref, Notes or delivery-instruction text printed on the invoice that names a site, branch or delivery location (e.g. "Reference: GLENORCHY", "Notes: Deliver to Glenorchy"). This is NOT the bill-to or ship-to address - report that in deliver_to as usual. Return null if the invoice has no such text.',
+  "",
+  'deliver_to: the full DELIVERY / ship-to address printed on the invoice (street, suburb, state). If the invoice prints no separate delivery address, use the address under "Invoice To", "Sold To" or "Bill To" instead - never null when any customer address is printed.',
   "",
   'bill_to: the CUSTOMER name the invoice is addressed to - the company or person under "Bill To", "Invoice To", "To", "Customer" or at the top of the address block (e.g. "B & G Fitness Pty Ltd", "Goc Holdings Pty Ltd"). Word for word, the name only, no address. This is the customer, never the supplier issuing the invoice. Return null if no customer name is printed.',
   "",
@@ -767,15 +781,20 @@ function savePdf_(att, j) {
 
 /**
  * Which café an invoice belongs to. In order: Overheads.gs's venue_override (supplier site
- * IDs); a VENUE_BY_REFERENCE supplier's Reference/Notes text, else its fallback; otherwise the
- * deliver_to address as before.
+ * IDs); a VENUE_BY_REFERENCE supplier's order-ref rules, then its Reference/Notes text, then
+ * its fallback; otherwise the deliver_to address as before.
  */
 function resolveVenue_(j, fromEmail) {
   if (j.venue_override) return j.venue_override;
   var who = String(j.supplier || "") + " " + String(fromEmail || "");
   var rules = CONFIG.VENUE_BY_REFERENCE || [];
   for (var i = 0; i < rules.length; i++) {
-    if (rules[i].match.test(who)) return venueFromText_(j.venue_ref) || rules[i].fallback;
+    if (!rules[i].match.test(who)) continue;
+    var byRef = rules[i].orderRef || [], ref = String(j.order_ref || "");
+    for (var r = 0; r < byRef.length; r++) {
+      if (byRef[r].re.test(ref)) return byRef[r].venue;
+    }
+    return venueFromText_(j.venue_ref) || rules[i].fallback || detectVenue_(j.deliver_to);
   }
   return detectVenue_(j.deliver_to);
 }
