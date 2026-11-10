@@ -181,7 +181,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="build-v36-1700-preview"; console.log("Cambridge Central "+BUILD_ID);
+const BUILD_ID="build-v37-1715-preview"; console.log("Cambridge Central "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 /* BUDGET VIEW (Adrian, 5 Nov 2026). Everything built 4–5 Nov — spend forecast like income, Budget/wk per
@@ -2559,8 +2559,8 @@ function weekCheck(m,group){
   const odd=[];
   list.forEach(s=>{ const p=s.p; if(!p) return;
     Object.keys(p.invDay).forEach(iso=>{ const a=p.invDay[iso], dt=gvizDate(iso); if(!dt) return; const dow=(dt.getDay()+6)%7;
-      if(+dt>+t&&a>=WC_MIN){
-        odd.push({s,v:a+1e6,txt:`<b>${esc(s.name)}</b> ${money0(a)} invoiced for ${dn(dt)} ${dt.getDate()} ${dt.toLocaleDateString("en-AU",{month:"short"})} — ahead of today.${p.regular[dow]?"":` They deliver ${dn(dt)} in ${p.seen[dow]} of the last ${AVG_WEEKS} weeks.`}${p.days.length?` If it's really their ${p.days.map(x=>dn(x.date)).join(" or ")} order, the forecast is counting it twice (still expecting ${money0(p.expected)}) — check with whoever ordered.`:""}`}); return; }
+      if(+dt>+t&&a>=WC_MIN&&!p.regular[dow]){
+        odd.push({s,v:a+1e6,txt:`<b>${esc(s.name)}</b> ${money0(a)} invoiced for ${dn(dt)} ${dt.getDate()} ${dt.toLocaleDateString("en-AU",{month:"short"})} — ahead of today, on a day they deliver in ${p.seen[dow]} of the last ${AVG_WEEKS} weeks.${p.days.length?` If it's really their ${p.days.map(x=>dn(x.date)).join(" or ")} order, the forecast is counting it twice (still expecting ${money0(p.expected)}) — check with whoever ordered.`:""}`}); return; }
       if(!p.regular[dow]){ if(a<WC_MIN) return;
         odd.push({s,v:a,txt:p.usualWk<0.5?`<b>${esc(s.name)}</b> ${money0(a)} on ${dn(dt)} — no orders with them in the ${AVG_WEEKS} weeks before, so it's on top of everything usual.`
           :`<b>${esc(s.name)}</b> ${money0(a)} on ${dn(dt)} — they deliver ${dn(dt)} in ${p.seen[dow]} of the last ${AVG_WEEKS} weeks, so it isn't in the usual.`}); }
