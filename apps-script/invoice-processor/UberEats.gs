@@ -59,7 +59,7 @@
  *   through lane 2 of Code.gs, both of which would send it to the model and book it again.
  *
  * ENTRY POINTS (editor dropdown)
- *   ueSetup()        once: installs the hourly trigger on ueProcessLocked
+ *   ueSetup()        once: installs the WEEKLY trigger on ueProcessLocked (Mon 3am Hobart)
  *   ueDryRun()       parses the newest UE.DRY_RUN_COUNT summaries and LOGS what it would
  *                    write. Writes nothing. Run this first and read the execution log.
  *   ueProcessLocked() what the trigger runs. Shares the script lock with
@@ -75,7 +75,7 @@
  */
 
 var UE = {
-  VERSION: "ubereats-111400",
+  VERSION: "ubereats-111355",
   SUPPLIER: "Uber Eats",
   CATEGORY: "Overheads",
   // Subject-anchored so the marketing mail from the same domain is never looked at.
@@ -101,11 +101,18 @@ var UE_MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8
 
 /* ---------------------------------------------------------------- entry points */
 
+/* Weekly, not hourly (Adrian, 11 Nov 2026): the emails arrive once a week, Sunday ~11pm
+   AEDT. Monday 3am is empty - the sales feed is in quiet hours, Sunday's staff reports are
+   done, nothing else is scheduled - and the 60-day query means a missed week is caught the
+   next Monday. Replaces any existing ueProcessLocked trigger so re-running is safe. */
 function ueSetup() {
-  var have = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === "ueProcessLocked"; });
-  if (have) { Logger.log("Trigger already installed."); return; }
-  ScriptApp.newTrigger("ueProcessLocked").timeBased().everyHours(1).create();
-  Logger.log("Installed hourly trigger: ueProcessLocked");
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "ueProcessLocked") { ScriptApp.deleteTrigger(t); removed++; }
+  });
+  ScriptApp.newTrigger("ueProcessLocked").timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(3).inTimezone("Australia/Hobart").create();
+  Logger.log("Installed weekly trigger: ueProcessLocked, Mondays 3am Hobart" + (removed ? " (replaced " + removed + ")" : ""));
 }
 
 function ueProcessLocked() {
