@@ -67,13 +67,15 @@
  *   ueBackfill()     one-off: same as ueProcess but with UE.BACKFILL_QUERY (no date cap).
  *                    Run until it reports 0 new.
  *   ueRetryFailed()  removes this file's own FAILED log rows so ueBackfill re-reads them.
+ *   ueRedoChecks()   removes Uber rows written CHECK (+ lines + log rows) so ueBackfill
+ *                    rewrites them with the current parser.
  *
  * Uses from Code.gs: getSheets_, processedMessageIds_, existingInvoiceKeys_, isDupInvoice_,
  * markInvoice_, writeInvoice_, logProcessed_, CONFIG.DEFAULT_VENUE. No Code.gs change needed.
  */
 
 var UE = {
-  VERSION: "ubereats-111340",
+  VERSION: "ubereats-111400",
   SUPPLIER: "Uber Eats",
   CATEGORY: "Overheads",
   // Subject-anchored so the marketing mail from the same domain is never looked at.
@@ -128,6 +130,43 @@ function ueRetryFailed() {
     if (String(vals[i][4]) === "FAILED" && /^ubereats:/.test(String(vals[i][5]))) { log.deleteRow(i + 2); gone++; }
   }
   Logger.log("Removed " + gone + " FAILED ubereats row(s). Now run ueBackfill.");
+}
+
+/**
+ * Removes every Uber Eats Invoices row written CHECK, its InvoiceLines, and the
+ * ProcessedEmails rows that produced them, so the next ueBackfill re-reads those emails
+ * with the current parser. Only touches rows whose supplier is UE.SUPPLIER and whose
+ * invoice number starts "UBER-". Logs what it removed. Run ueBackfill afterwards.
+ */
+function ueRedoChecks() {
+  var sh = getSheets_(), inv = sh.inv, lin = sh.lin, log = sh.log;
+  var last = inv.getLastRow();
+  if (last < 2) { Logger.log("Invoices empty."); return; }
+  var rows = inv.getRange(2, 1, last - 1, 12).getValues(), nums = {}, gone = 0;
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var num = String(rows[i][3]).replace(/^'/, "");
+    if (String(rows[i][2]) === UE.SUPPLIER && /^UBER-/.test(num) && String(rows[i][11]) === "CHECK") {
+      nums[num] = true; inv.deleteRow(i + 2); gone++;
+    }
+  }
+  var keys = Object.keys(nums);
+  if (!keys.length) { Logger.log("No CHECK Uber Eats rows."); return; }
+  var ll = lin.getLastRow(), lgone = 0;
+  if (ll >= 2) {
+    var lv = lin.getRange(2, 1, ll - 1, 1).getValues();
+    for (var j = lv.length - 1; j >= 0; j--) {
+      if (nums[String(lv[j][0]).replace(/^'/, "")]) { lin.deleteRow(j + 2); lgone++; }
+    }
+  }
+  var gl = log.getLastRow(), ggone = 0;
+  if (gl >= 2) {
+    var gv = log.getRange(2, 1, gl - 1, 6).getValues();
+    for (var k = gv.length - 1; k >= 0; k--) {
+      var note = String(gv[k][5]);
+      if (keys.some(function (n) { return note.indexOf(n + " ") === 0 || note.indexOf(n) === 0; })) { log.deleteRow(k + 2); ggone++; }
+    }
+  }
+  Logger.log("Removed " + gone + " CHECK invoice(s) [" + keys.join(", ") + "], " + lgone + " line(s), " + ggone + " log row(s). Now run ueBackfill.");
 }
 
 function ueDryRun() {
@@ -302,8 +341,28 @@ function ueParse_(html, subject) {
     chargeback: cb[0], chargebackOrders: count("Net Chargeback Amount") || 0, chargebackTax: cb[1],
     adjustments: money("Adjustments", false),
     amendmentsTotal: money("Total Amendments", false) || money("Amendments", false),
-    netPayout: money("Net Payout", true)
+    netPayout: money("Net Payout", false)
   };
+  // 31 Aug - 13 Sep 2026: the breakdown's "Net Payout" row was printed EMPTY; the figure is
+  // only in the header card ("Orders 45 | Net Payout $1,445.97"), which sits before the
+  // breakdown. Fall back to the first "Net Payout $x" anywhere in the body.
+  if (!p.netPayout) {
+    var np = /Net Payout\s*(-?)\$\s*([\d,]+\.\d{2})/i.exec(text);
+    if (!np) throw new Error("no 'Net Payout' anywhere in body (" + subject + ")");
+    p.netPayout = (np[1] === "-" ? -1 : 1) * Number(np[2].replace(/,/g, ""));
+  }
+  // Aug 2026 (Luma): "Total Marketing Spends -$152.60" printed with NO "Ad Spends" line under
+  // it, so the section total had an unexplained remainder. When the parts don't reach the
+  // printed section total and no Ad Spends line exists, the remainder IS the ad spend.
+  if (p.marketingTotal && !/Ad Spends/i.test(block)) {
+    var partsInc = p.offers + p.offersTax + p.adSpend + p.adSpendTax;
+    var rem = ueRound_(p.marketingTotal - partsInc);
+    if (Math.abs(rem) > UE.TOL) {
+      if (legacy) { p.adSpend = ueRound_(rem / 1.1); p.adSpendTax = ueRound_(rem - p.adSpend); }
+      else { p.adSpend = rem; p.adSpendTax = 0; }
+      p.adSpendImplied = true;
+    }
+  }
   return p;
 }
 
@@ -358,7 +417,7 @@ function ueInvoice_(p) {
     items.push(["Marketplace fees - " + p.orders + " orders" + (pct ? ", " + pct + "% of ex-GST sales" : "") + (p.legacy ? " (GST derived at 1/11 - old email layout)" : ""),
                 p.orders, "order", perOrder, mktFee, "MKTFEE", 0]);
   }
-  if (ads) items.push(["Ad spend", 1, "ea", ads, ads, "ADS", 0]);
+  if (ads) items.push(["Ad spend" + (p.adSpendImplied ? " (from Marketing section total - no Ad Spends line printed)" : ""), 1, "ea", ads, ads, "ADS", 0]);
   if (offers) items.push(["Offers on items", 1, "ea", offers, offers, "OFFERS", 0]);
   if (other) items.push(["Other charges", 1, "ea", other, other, "OTHER", 0]);
   if (cb) items.push(["Chargebacks - " + p.chargebackOrders + " order" + (p.chargebackOrders === 1 ? "" : "s") + " refunded to customers",
