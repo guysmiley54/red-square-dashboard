@@ -66,13 +66,14 @@
  *                    processInvoicesLocked so the two never write at once.
  *   ueBackfill()     one-off: same as ueProcess but with UE.BACKFILL_QUERY (no date cap).
  *                    Run until it reports 0 new.
+ *   ueRetryFailed()  removes this file's own FAILED log rows so ueBackfill re-reads them.
  *
  * Uses from Code.gs: getSheets_, processedMessageIds_, existingInvoiceKeys_, isDupInvoice_,
  * markInvoice_, writeInvoice_, logProcessed_, CONFIG.DEFAULT_VENUE. No Code.gs change needed.
  */
 
 var UE = {
-  VERSION: "ubereats-091230",
+  VERSION: "ubereats-111340",
   SUPPLIER: "Uber Eats",
   CATEGORY: "Overheads",
   // Subject-anchored so the marketing mail from the same domain is never looked at.
@@ -113,6 +114,21 @@ function ueProcessLocked() {
 
 function ueProcess() { ueRun_(UE.QUERY, false); }
 function ueBackfill() { ueRun_(UE.BACKFILL_QUERY, false); }
+
+/**
+ * Removes this file's own FAILED rows from ProcessedEmails (notes starting "ubereats:") so
+ * the next ueBackfill reads those emails again. Touches nothing else in the tab. Use after a
+ * parser fix - 11 Nov 2026: 12 pre-September emails failed on a layout with no GST lines.
+ */
+function ueRetryFailed() {
+  var log = getSheets_().log, last = log.getLastRow();
+  if (last < 2) { Logger.log("ProcessedEmails empty."); return; }
+  var vals = log.getRange(2, 1, last - 1, 6).getValues(), gone = 0;
+  for (var i = vals.length - 1; i >= 0; i--) {
+    if (String(vals[i][4]) === "FAILED" && /^ubereats:/.test(String(vals[i][5]))) { log.deleteRow(i + 2); gone++; }
+  }
+  Logger.log("Removed " + gone + " FAILED ubereats row(s). Now run ueBackfill.");
+}
 
 function ueDryRun() {
   var threads = GmailApp.search(UE.QUERY, 0, 20), n = 0;
@@ -228,31 +244,62 @@ function ueParse_(html, subject) {
   var sm = /Sales\s*\((\d+)\s*Orders?\)\s*(-?)\$\s*([\d,]+\.\d{2})/i.exec(block);
   if (!sm) throw new Error("no 'Sales (N Orders)' line (" + subject + ")");
   var orders = Number(sm[1]);
-  var salesEx = (sm[2] === "-" ? -1 : 1) * Number(sm[3].replace(/,/g, ""));
-  var salesTax = money("Tax on Sales", true);
-  // Gross: the Earnings total when printed (newer layout), else sales + tax.
-  var grossInc = /Total Earnings|Gross Sales/i.test(block)
-    ? (money("Total Earnings", false) || money("Gross Sales", false)) : 0;
-  if (!grossInc) grossInc = ueRound_(salesEx + salesTax);
+  var salesLine = (sm[2] === "-" ? -1 : 1) * Number(sm[3].replace(/,/g, ""));
+
+  // THREE layouts (11 Nov 2026, from the first backfill):
+  //   legacy (to ~13 Sep 2026): no GST anywhere in the breakdown. "Sales (N Orders)" is the
+  //       GST-INCLUSIVE total, and every fee line is inclusive too. The ex/GST split of sales
+  //       is only in the daily table's Total row; the fees' GST is not printed at all.
+  //   earnings (to ~25 Oct): "Sales" ex GST + "Tax on Sales", "Total Earnings", fee GST lines.
+  //   gross (from ~1 Nov): "Gross Sales" header, section headers carry their totals.
+  // Legacy is told by the absence of "Tax on Sales" in the block. Its fee GST is derived at
+  // 1/11 (every Uber fee line in the later layouts carries 10% GST), and the row's marketplace
+  // line says so.
+  var legacy = !/Tax on Sales/i.test(block);
+  var salesEx, salesTax, grossInc;
+  if (legacy) {
+    grossInc = salesLine;
+    // Daily table: "Total | orders | sales ex | tax | sales inc"
+    var dt = /Total\s+\d+\s+\$\s*([\d,]+\.\d{2})\s+\$\s*([\d,]+\.\d{2})\s+\$\s*([\d,]+\.\d{2})/i.exec(text.slice(0, bStart));
+    if (dt && Math.abs(Number(dt[3].replace(/,/g, "")) - grossInc) <= 0.01) {
+      salesEx = Number(dt[1].replace(/,/g, "")); salesTax = Number(dt[2].replace(/,/g, ""));
+    } else {
+      salesEx = ueRound_(grossInc / 1.1); salesTax = ueRound_(grossInc - salesEx);
+    }
+  } else {
+    salesEx = salesLine;
+    salesTax = money("Tax on Sales", true);
+    grossInc = /Total Earnings|Gross Sales/i.test(block)
+      ? (money("Total Earnings", false) || money("Gross Sales", false)) : 0;
+    if (!grossInc) grossInc = ueRound_(salesEx + salesTax);
+  }
+
+  // Uber prints deductions negative and credits positive. Stored as printed; the invoice
+  // step turns them into costs. In the legacy layout each printed figure is inclusive and
+  // is split here so the fields mean the same thing whatever the layout.
+  function pair(incLabel, taxLabel) {
+    var v = money(incLabel, false);
+    if (!legacy) return [v, money(taxLabel, false)];
+    var ex = ueRound_(v / 1.1);
+    return [ex, ueRound_(v - ex)];
+  }
+  var mk = pair("Marketplace Fees", "Tax on Marketplace Fees");
+  if (!mk[0] && !/Marketplace Fees/i.test(block)) throw new Error("no 'Marketplace Fees' in payout breakdown (" + subject + ")");
+  var oc = pair("Other Charges", "Tax On Other Charges");
+  var of = pair("Offers On Items", "Tax on offer spends");
+  var ad = pair("Ad Spends", "Tax on Net Ad Spends");
+  var cb = pair("Net Chargeback Amount", "Net Tax On Chargeback");
 
   var p = {
-    store: store, address: address, from: from, to: to,
+    store: store, address: address, from: from, to: to, legacy: legacy,
     orders: orders, salesEx: salesEx, salesTax: salesTax, grossInc: grossInc,
-    // Uber prints deductions negative and credits positive. Stored as printed; the
-    // invoice step turns them into costs.
-    mktFee: money("Marketplace Fees", true),
-    mktFeeTax: money("Tax on Marketplace Fees", false),
-    otherCharges: money("Other Charges", false),
-    otherChargesTax: money("Tax On Other Charges", false),
+    mktFee: mk[0], mktFeeTax: mk[1],
+    otherCharges: oc[0], otherChargesTax: oc[1],
     uberFeesTotal: money("Total Uber Fees", false) || money("Uber Fees", false),
-    offers: money("Offers On Items", false),
-    offersTax: money("Tax on offer spends", false),
-    adSpend: money("Ad Spends", false),
-    adSpendTax: money("Tax on Net Ad Spends", false),
+    offers: of[0], offersTax: of[1],
+    adSpend: ad[0], adSpendTax: ad[1],
     marketingTotal: money("Total Marketing Spends", false) || money("Marketing", false),
-    chargeback: money("Net Chargeback Amount", false),
-    chargebackOrders: count("Net Chargeback Amount") || 0,
-    chargebackTax: money("Net Tax On Chargeback", false),
+    chargeback: cb[0], chargebackOrders: count("Net Chargeback Amount") || 0, chargebackTax: cb[1],
     adjustments: money("Adjustments", false),
     amendmentsTotal: money("Total Amendments", false) || money("Amendments", false),
     netPayout: money("Net Payout", true)
@@ -308,7 +355,7 @@ function ueInvoice_(p) {
   if (mktFee || p.orders) {
     var perOrder = p.orders ? Math.round(mktFee / p.orders * 10000) / 10000 : 0;
     var pct = p.salesEx ? Math.round(mktFee / p.salesEx * 1000) / 10 : 0;
-    items.push(["Marketplace fees - " + p.orders + " orders" + (pct ? ", " + pct + "% of ex-GST sales" : ""),
+    items.push(["Marketplace fees - " + p.orders + " orders" + (pct ? ", " + pct + "% of ex-GST sales" : "") + (p.legacy ? " (GST derived at 1/11 - old email layout)" : ""),
                 p.orders, "order", perOrder, mktFee, "MKTFEE", 0]);
   }
   if (ads) items.push(["Ad spend", 1, "ea", ads, ads, "ADS", 0]);
