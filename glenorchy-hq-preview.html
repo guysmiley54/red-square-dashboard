@@ -179,7 +179,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v30-0850-preview"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v31-0905-preview"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 /* BUDGET VIEW (Adrian, 5 Nov 2026). Everything built 4–5 Nov — spend forecast like income, Budget/wk per
@@ -2582,9 +2582,12 @@ function weekCheck(m,group){
       if(one.length) r.push(`${money0(one.reduce((a,i)=>a+p.invDay[i],0))} invoiced outside their usual days (${one.map(dayName).join(", ")})`);
       const big=Object.keys(p.invDay).filter(iso=>{ const dt=gvizDate(iso); if(!dt) return false; const w=(dt.getDay()+6)%7; return p.regular[w]&&p.invDay[iso]-p.usualDay[w]>=WC_MIN&&p.invDay[iso]>p.usualDay[w]*WC_BIG; });
       if(big.length) r.push(`${big.map(dayName).join(", ")} delivery above their usual`);
+      const mild=Object.keys(p.invDay).filter(iso=>{ const dt=gvizDate(iso); if(!dt||big.indexOf(iso)>-1) return false; const w=(dt.getDay()+6)%7; return p.regular[w]&&p.invDay[iso]-p.usualDay[w]>=50; });
+      if(mild.length) r.push(mild.map(iso=>`${dayName(iso)} ${money0(p.invDay[iso])} against a usual ${money0(p.usualDay[(gvizDate(iso).getDay()+6)%7])}`).join(", "));
       if(s.budget>0.5&&p.usualWk>s.budget*1.1&&p.usualWk-s.budget>=50) r.push(`a normal week with them is ${money0(p.usualWk)} against a budget of ${money0(s.budget)}`);
       if(p.expected>0.5) r.push(`${money0(p.expected)} still expected (${p.days.map(d=>dn(d.date)).join(", ")})`);
     } else if(s.budget>0.5) r.push("nothing from them this week");
+    if(!r.length) r.push(`${money0(s.proj)} projected against a budget of ${money0(s.budget)}`);
     return r.join(" · ");
   };
   const over=list.filter(s=>s.d>=25).sort((a,b)=>b.d-a.d), top=over.slice(0,6), restL=list.filter(s=>top.indexOf(s)<0);
