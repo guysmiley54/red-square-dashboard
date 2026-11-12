@@ -107,7 +107,12 @@
   .legend{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0;font-weight:400}
   .legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
   .loading{padding:60px 20px;text-align:center;color:var(--dim)}
-  @media(max-width:700px){ .hide-sm{display:none} .wrap{padding:12px} }
+  @media(max-width:700px){ .hide-sm{display:none} .wrap{padding:12px}
+    header{flex-wrap:wrap;gap:8px 10px;padding:10px 12px}
+    header h1{white-space:nowrap}
+    header .bld{order:5;flex:1 0 40%;white-space:nowrap}
+    header .sp{order:6;margin-left:0;gap:6px}
+    header button{padding:6px 9px} }
   @media print{
     header,#filters,#reportpanel,.chip,#q{display:none !important}
     body{background:#fff}
@@ -146,7 +151,7 @@
 /* Build marker. supplier-explorer.html has carried one for a while and sales-explorer has
    not, which made "is the deployed file the one we edited?" a diff rather than a glance.
    Logged on load and hung off window so it can be read from the console. */
-const BUILD = "test-131000";
+const BUILD = "test-131045";
 console.log("sales-explorer " + BUILD);
 const SHEET_ID = "1QEUnzY43v3wVc6dP0oGPqgL_mvLRVGHnMYwtO3QMJY4"; // BG Sales Data
 /* Feed source switch. The page reads PosSales in BG POS Data, written by the POS Feed Apps Script
@@ -479,14 +484,14 @@ async function fetchDaysText(days){
 }
 /* Parse one answer into the cache. Every day ASKED for is replaced, including with nothing, so a
    day with no trade is remembered as empty and two overlapping fetches cannot double a day. */
-function ingestDays(text,days){
+function ingestDays(text,days,atMs){
   const grid=parseCsv(text.trim());
   const head=(grid.shift()||[]).map(h=>h.trim().toLowerCase());
   const missingCols=FEED_COLS.filter(c=>head.indexOf(c)<0);
   if(missingCols.length){ const e=new Error("columns"); e.cols=missingCols; e.head=head; throw e; }
   const by={}; days.forEach(function(k){ by[k]=[]; });
   mapRows(grid,head).forEach(function(r){ if(by[r.day]) by[r.day].push(r); });
-  const at=Date.now();
+  const at=atMs||Date.now();
   days.forEach(function(k){ DAYS[k]=by[k]; DAY_AT[k]=at; });
   const held=Object.keys(DAYS);
   if(held.length>DAYS_KEEP){
@@ -561,12 +566,19 @@ function refreshToday(){
   if(ae&&/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return false;
   const epoch=CACHE_EPOCH;
   PENDING[t]=1;
+  UPDATING=true; paintBld();
   fetchDaysText([t]).then(function(txt){
     if(epoch!==CACHE_EPOCH) return;
     delete PENDING[t];
+    UPDATING=false; UPDATE_FAILED=false;
     ingestDays(txt,[t]);
+    if(SNAP&&SNAP.sales[0].days.indexOf(t)>-1){ SNAP.sales[1]={days:[t],t:txt,at:Date.now()}; writeSnap(SNAP); }
     if(!missingDays().length) renderNow();      // otherwise a fetch for the view is out and will draw
-  }).catch(function(){ if(epoch===CACHE_EPOCH) delete PENDING[t]; });
+  }).catch(function(){
+    if(epoch!==CACHE_EPOCH) return;
+    delete PENDING[t];
+    UPDATING=false; UPDATE_FAILED=true; paintBld();
+  });
   return true;
 }
 setInterval(refreshToday,REFRESH_MS);
@@ -577,17 +589,34 @@ document.addEventListener("visibilitychange",function(){
 
 async function load(force){
   renderSource();
-  document.getElementById("app").innerHTML='<div class="loading">Loading '+esc(FEED.label)+'&hellip;</div>';
+  const snap=force?null:readSnap();
+  const painted=snap?(await loadFrom(snap,false))===true:false;
+  if(!painted) document.getElementById("app").innerHTML='<div class="loading">Loading '+esc(FEED.label)+'&hellip;</div>';
+  await loadFrom(null,painted);
+}
+/* One pass of the load. snap: read everything from the device copy instead of the network.
+   keep: figures are already on screen, so do not blank them, and fail quietly.
+   Returns true when it drew. */
+async function loadFrom(snap,keep){
   const epoch=++CACHE_EPOCH;
+  const got={};
   // The three lookup tabs and the sales rows are independent, so they are fetched together
   // rather than one after another. fetchTab never rejects - a missing tab is null.
-  const pItem=fetchTab(ITEM_TAB,ITEM_GID), pOver=fetchTab(OVER_TAB,OVER_GID), pShift=fetchTab("DeputyShifts");
+  const pItem=snap?Promise.resolve(snap.item):fetchTab(ITEM_TAB,ITEM_GID),
+        pOver=snap?Promise.resolve(snap.over):fetchTab(OVER_TAB,OVER_GID),
+        pShift=snap?Promise.resolve(snap.shift):fetchTab("DeputyShifts");
   let text=null, firstDays=[], firstP=null;
   if(true){
-    READY=false; DAYS={}; DAY_AT={}; PENDING={}; ROWS=[];
-    firstDays=neededDays();
-    firstDays.forEach(function(k){ PENDING[k]=1; });
-    firstP=fetchDaysText(firstDays).then(function(t){ return {t:t}; },function(e){ return {e:e}; });
+    if(!keep){ READY=false; DAYS={}; DAY_AT={}; PENDING={}; ROWS=[]; }
+    if(snap){
+      firstDays=snap.sales[0].days;
+      firstP=Promise.resolve({t:snap.sales[0].t});
+    }else{
+      firstDays=neededDays();
+      firstDays.forEach(function(k){ PENDING[k]=1; });
+      if(keep){ UPDATING=true; paintBld(); }
+      firstP=fetchDaysText(firstDays).then(function(t){ return {t:t}; },function(e){ return {e:e}; });
+    }
   }else{
     const bust=force?("&_="+Date.now()):"";
     const u="https://docs.google.com/spreadsheets/d/"+FEED.id+"/gviz/tq?tqx=out:csv&headers=1&sheet="+FEED.tab+bust;
@@ -630,7 +659,7 @@ async function load(force){
 
   const im={}; let imN=0; let imFound=false;
   try{
-    const mTxt=await pItem;
+    const mTxt=await pItem; got.item=mTxt;
     if(mTxt){
       imFound=true;
       const mg=parseCsv(mTxt.trim());
@@ -650,7 +679,7 @@ async function load(force){
   // dashboard falls back to what ImPOS sent rather than showing nothing.
   const oi={}, od={}; let oN=0; let oFound=false, oRows=0, oHead="";
   try{
-    const oTxt=await pOver;
+    const oTxt=await pOver; got.over=oTxt;
     if(oTxt){
       oFound=true;
       const og=parseCsv(oTxt.trim());
@@ -695,7 +724,7 @@ async function load(force){
      figure. Same trap as the item map. */
   const sh_=[]; let shOk_=false;
   try{
-    const sTxt=await pShift;
+    const sTxt=await pShift; got.shift=sTxt;
     if(sTxt){
       const sg=parseCsv(sTxt.trim());
       const sh=(sg.shift()||[]).map(h=>String(h).trim().toLowerCase());
@@ -738,14 +767,34 @@ async function load(force){
   if(true){
     const r=await firstP;
     if(epoch!==CACHE_EPOCH) return;             // a newer load() has taken over
-    firstDays.forEach(function(k){ delete PENDING[k]; });
+    if(!snap) firstDays.forEach(function(k){ delete PENDING[k]; });
+    const quietFail=function(){ UPDATING=false; UPDATE_FAILED=true; paintBld(); };
+    if(keep&&r.e){ quietFail(); return; }       // the device copy stays up, marked as not updated
     READY=true;
-    afterRows();                                // sets the date-picker bounds before the filter bar is drawn
-    renderFilters();
+    if(!keep){ afterRows(); renderFilters(); }  // sets the date-picker bounds before the filter bar is drawn
     if(r.e){ showLoadError(r.e); return; }
-    try{ ingestDays(r.t,firstDays); }catch(e){ showLoadError(e); return; }
+    const held={d:DAYS,a:DAY_AT};
+    try{
+      // Behind a painted view every cached day is dropped, so nothing mapped with the device
+      // copy's lookups outlives it; the days on screen are re-ingested in the same tick.
+      if(keep){ DAYS={}; DAY_AT={}; }
+      if(snap) snap.sales.forEach(function(p){ if(p&&p.t) ingestDays(p.t,p.days,p.at); });
+      else ingestDays(r.t,firstDays);
+    }catch(e){
+      if(keep){ DAYS=held.d; DAY_AT=held.a; quietFail(); return; }
+      showLoadError(e); return;
+    }
+    if(snap) SNAP=snap;
+    else{
+      UPDATING=false; UPDATE_FAILED=false;
+      SNAP={floor:apiFloor(), item:got.item||null, over:got.over||null, shift:got.shift||null,
+            sales:[{days:firstDays,t:r.t,at:Date.now()}]};
+      writeSnap(SNAP);
+    }
+    paintBld();
+    if(keep) renderFilters();
     render();
-    return;
+    return true;
   }
 
   const grid=parseCsv(text.trim());
@@ -822,9 +871,38 @@ function afterRows(){
     });
     if(!DAY_MAX||todayNow>DAY_MAX) DAY_MAX=todayNow;
   }
-  const at=DAY_AT[todayNow]?new Date(DAY_AT[todayNow]):null;
-  document.getElementById("bld").textContent=ROWS.length.toLocaleString()+" rows"+
-    (at?" \u00b7 today as at "+("0"+at.getHours()).slice(-2)+":"+("0"+at.getMinutes()).slice(-2):"");
+  paintBld();
+}
+/* The header status: "3,361 rows - as at 09:17". The time is when today's figures were READ, so a
+   view painted from the device says how old it is. On a phone only the time shows. */
+let UPDATING=false, UPDATE_FAILED=false;
+function paintBld(){
+  const b=document.getElementById("bld"); if(!b) return;
+  const t=dkey(new Date()), at=DAY_AT[t]?new Date(DAY_AT[t]):null;
+  const hm=at?("0"+at.getHours()).slice(-2)+":"+("0"+at.getMinutes()).slice(-2):"";
+  b.innerHTML='<span class="hide-sm">'+ROWS.length.toLocaleString()+' rows'+(at?' \u00b7 ':'')+'</span>'+
+    (at?'as at '+hm:'')+(UPDATING?' \u00b7 updating\u2026':(UPDATE_FAILED?' \u00b7 couldn\u2019t update':''));
+}
+
+/* ---- Instant open (13 Nov 2026) ---------------------------------------------------------------
+   The default view's raw answers are kept on the device: the sales rows for today and its
+   comparison day, today's latest background refresh, and the three lookup tabs. load() paints from
+   that copy first - no network - then runs the normal load behind it and redraws.
+   The copy is used only if it covers the days the default view needs, so the first open of a new
+   day loads normally. Refresh (load(true)) ignores it. One copy per source. */
+const SNAP_KEY="se-snap-v1-"+SRC;
+let SNAP=null;
+function readSnap(){
+  try{
+    const sn=JSON.parse(localStorage.getItem(SNAP_KEY)||"null");
+    if(!sn||sn.floor!==apiFloor()||!sn.sales||!sn.sales.length||!sn.sales[0].t) return null;
+    const have={}; sn.sales[0].days.forEach(function(k){ have[k]=1; });
+    return neededDays().every(function(k){ return have[k]; })?sn:null;
+  }catch(e){ return null; }
+}
+function writeSnap(sn){
+  try{ localStorage.setItem(SNAP_KEY,JSON.stringify(sn)); }
+  catch(e){ try{ localStorage.removeItem(SNAP_KEY); }catch(e2){ /* storage unavailable: no instant open */ } }
 }
 
 /* Bounds for the picker. DAY_MIN/DAY_MAX are the real extent of the feed, but clamping to
