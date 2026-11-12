@@ -93,7 +93,8 @@
   .draft{position:sticky;top:104px}
   @media (max-width:900px){.panels{grid-template-columns:1fr}.draft{position:static}.summary{grid-template-columns:1fr}}
   @media (max-width:600px){.hide-sm{display:none}td,th{padding:7px 5px}#filters{position:static}}
-  /* "On track?" — the budget view switch, in the pill beside the name (Adrian, 5 Nov 2026). Outlined when off,
+  /* "Crystal Ball 🪩" (was "On track?", renamed 13 Nov 2026 — "it can tell the future") — the budget view switch,
+     in the pill beside the name (Adrian, 5 Nov 2026). Outlined when off,
      filled when on. On phones the header swipes sideways so every button can be reached. */
   #bvtoggle{font-size:11px;font-weight:700;border:1.5px solid var(--amber);color:#f3b46b;border-radius:99px;padding:3px 10px;
     cursor:pointer;white-space:nowrap;letter-spacing:.02em;background:none;line-height:1.2}
@@ -130,7 +131,7 @@
 <header>
   <div class="brand" onclick="go('')" style="display:flex;align-items:center;gap:10px;cursor:pointer">
     <div class="sq"></div><h1>Glenorchy HQ</h1>
-    <span id="bvtoggle" role="button" tabindex="0" onclick="event.stopPropagation();toggleBV()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();toggleBV()}" title="Are we on track for 30%? Spend forecast like income, a budget per supplier, and why anyone is ahead">On track?</span>
+    <span id="bvtoggle" role="button" tabindex="0" onclick="event.stopPropagation();toggleBV()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();toggleBV()}" title="Where the week will land against 30% — spend forecast like income, a budget per supplier, and why anyone is ahead">Crystal Ball 🪩</span>
     <span id="buildtag" style="font-size:9px;color:#666"></span></div>
   <div class="tag" id="tagpick"></div>
   <span class="spacer"></span>
@@ -177,7 +178,7 @@
 
    The page is PUBLIC. No credential belongs in it.
    ===================================================================================== */
-const BUILD_ID="ghq-v28-1320-preview"; console.log("Glenorchy HQ "+BUILD_ID);
+const BUILD_ID="ghq-v29-0845-preview"; console.log("Glenorchy HQ "+BUILD_ID);
 {const e=document.getElementById("buildtag"); if(e) e.textContent=BUILD_ID;}
 
 /* BUDGET VIEW (Adrian, 5 Nov 2026). Everything built 4–5 Nov — spend forecast like income, Budget/wk per
@@ -3484,8 +3485,8 @@ function renderHelp(){
       sales view. ${B(3)}<b>Order</b> — the ordering tool, if you use it. ${B(4)}<b>Admin</b> — supplier settings. ${B(5)}<b>?</b> — this page.
       The <b>Glenorchy HQ</b> logo is the front page: suppliers by spend. <b>↻</b> reloads the numbers.</p>
 
-    <h2>On track?</h2>
-    <p>Tap <b>On track?</b> next to the name at the top to switch the page between the usual view and the budget view, for you
+    <h2>Crystal Ball 🪩</h2>
+    <p>Tap <b>Crystal Ball 🪩</b> next to the name at the top to switch the page between the usual view and the budget view, for you
       only — it is remembered on this device. In the budget view spend is forecast the same way income is, every supplier
       has a <b>Budget/wk</b> (its share of our spend × 30% of the week's income), an amber pill shows any supplier running ahead
       of budget for the day, and each supplier page opens with <b>Against budget</b> — what made the gap, line by line.</p>
