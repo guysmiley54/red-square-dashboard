@@ -30,7 +30,7 @@ var CONFIG = {
   // before 11 Sep 2026 neither ever reached this query. Keep this list in step with the
   // senders in OH_PROFILES (Overheads.gs). Supagas is labelled already, and its pod@
   // dockets must NOT be added - they carry litres that reappear on the statement.
-  SEARCH_QUERY: '(deliveredto:accounts@redsquarecafe.com.au OR to:accounts@redsquarecafe.com.au OR label:supplier-invoices OR from:(shellenergy.com.au OR scootz.cresswell@gmail.com)) filename:pdf newer_than:14d',
+  SEARCH_QUERY: '(deliveredto:accounts@redsquarecafe.com.au OR to:accounts@redsquarecafe.com.au OR label:supplier-invoices OR from:(shellenergy.com.au OR scootz.cresswell@gmail.com)) filename:pdf newer_than:14d -subject:"failed to process"',
   // Lane 2: invoices that arrive as the EMAIL BODY with no PDF attached.
   // Matched three ways, so a missing label can't hide an invoice:
   //   1. label:supplier-invoices                — anything you file by hand
@@ -43,7 +43,10 @@ var CONFIG = {
   // added, those orders only got in if they happened to carry the supplier-invoices
   // label, and any that weren't labelled were silently missed.
   // The -filename:pdf guard keeps lane 2 off anything lane 1 already handles.
-  BODY_QUERY: '(label:supplier-invoices OR from:(southernfood.com.au OR usepepper.com) OR deliveredto:accounts@redsquarecafe.com.au OR to:accounts@redsquarecafe.com.au) -filename:pdf newer_than:14d',
+  // -subject:"failed to process" (both lanes) keeps this script's own alert emails out:
+  // they go to accounts@ and quote invoice fields, and on 27 Nov 2026 lane 2 read one as a
+  // Southern invoice (caught only because 5658149 was already in the sheet).
+  BODY_QUERY: '(label:supplier-invoices OR from:(southernfood.com.au OR usepepper.com) OR deliveredto:accounts@redsquarecafe.com.au OR to:accounts@redsquarecafe.com.au) -filename:pdf newer_than:14d -subject:"failed to process"',
   // Senders whose body-only emails are ALWAYS invoices. These bypass the lane 2
   // pre-filter entirely, so a wording change on their template can never cause a miss.
   // Match is a substring of the sender, so a bare domain covers every address under it.
