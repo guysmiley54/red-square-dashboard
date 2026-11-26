@@ -229,9 +229,13 @@ function processInvoices() {
  * overloaded or down. For these the email is left unlogged so the next run picks it up again.
  * Returns true if the error was one of these.
  */
+function isTransientMsg_(m) {
+  return /Service invoked too many times|Bandwidth quota exceeded|API (429|5\d\d)\b|overloaded|Address unavailable|timed out|Timeout/i.test(String(m || ""));
+}
+
 function deferTransient_(e, deferred) {
   var m = String(e && e.message ? e.message : e);
-  if (!/Service invoked too many times|Bandwidth quota exceeded|API (429|5\d\d)\b|overloaded|Address unavailable|timed out|Timeout/i.test(m)) return false;
+  if (!isTransientMsg_(m)) return false;
   deferred.hit = true;
   deferred.count++;
   if (!deferred.why) deferred.why = m.slice(0, 200);
@@ -358,12 +362,24 @@ function processAttachments_(apiKey, sheets, existing, msg, notes, lane) {
     notes.push("skipped (" + prof.id + " notice, not a bill)");
     return;
   }
-  msg.getAttachments().forEach(function (att) {
+  var allAtts = msg.getAttachments();
+  // When the email carries a PDF, the PDF is the invoice. Small images alongside it are
+  // logos and signature graphics (Savour Foods, 24 Nov 2026: a 202KB logo was sent to the
+  // model, which rightly said "no invoice here", and the email was logged FAILED even though
+  // its PDF had already been added). Photos of a paper invoice are bigger than this and
+  // rarely come with a PDF.
+  var hasPdf = allAtts.some(isPdfAtt_);
+  // One bad attachment must not stop the others being read, or the whole email being
+  // logged: errors are collected and thrown together once every attachment has been tried.
+  var attErrors = [];
+  allAtts.forEach(function (att) {
+   try {
     var ct = att.getContentType();
     var isPdf = isPdfAtt_(att);
     var isImg = !isPdf && /^image\/(jpeg|png|gif|webp)$/.test(ct);
     if (!isPdf && !isImg) return;
     if (isImg && att.getSize() < 50 * 1024) return;
+    if (isImg && hasPdf && att.getSize() < 300 * 1024) return;
     if (att.getSize() > 20 * 1024 * 1024) { notes.push(att.getName() + ": too large, skipped"); return; }
 
     // Checked BEFORE the API call, on purpose: it costs nothing, it cannot be talked out
@@ -424,7 +440,15 @@ function processAttachments_(apiKey, sheets, existing, msg, notes, lane) {
     var pdfUrl = savePdf_(att, result);
     writeInvoice_(sheets, result, msg.getFrom(), att.getName(), pdfUrl, msg.getDate(), route_(msg, lane || 1));
     notes.push(att.getName() + ": added " + result.invoice_number);
+   } catch (e) {
+    var em = String(e && e.message ? e.message : e);
+    // Quota / overload errors are about the API, not this file: rethrow at once so the
+    // caller defers the whole email (deferTransient_) instead of burning more calls.
+    if (isTransientMsg_(em)) throw e;
+    attErrors.push(em);
+   }
   });
+  if (attErrors.length) throw new Error(attErrors.join("; "));
 }
 
 // ---------------------------------------------------------------- bill-to guard
@@ -511,7 +535,48 @@ function route_(msg, lane) {
 // extraPrompt: appended after EXTRACT_PROMPT. Used by Overheads.gs to admit invoice /
 // statement hybrids and multi-site bills for overhead suppliers only - COGS suppliers get
 // the base prompt, unchanged, so their statements are still skipped.
+// Wrapper: one automatic retry when the model's reply can't be read as JSON. Those failures
+// are usually a one-off slip (Southern 5658149, 27 Nov 2026: a 3-line invoice the same run
+// handled four of without trouble). API errors are not retried here - deferTransient_ owns
+// those - and neither is a max_tokens cut-off, which would only repeat.
 function extractFromContent_(apiKey, contentBlocks, model, extraPrompt) {
+  try {
+    return extractOnce_(apiKey, contentBlocks, model, extraPrompt);
+  } catch (e) {
+    if (!e || !e.parseFailure || e.maxTokens) throw e;
+    Logger.log("Unreadable model reply, retrying once: " + e.message.slice(0, 200));
+    try {
+      return extractOnce_(apiKey, contentBlocks, model, extraPrompt);
+    } catch (e2) {
+      if (e2 && e2.parseFailure) e2.message = "failed twice. " + e2.message;
+      throw e2;
+    }
+  }
+}
+
+// The JSON object inside a reply: from the first "{" to the last "}". Drops anything the
+// model wrapped around it (a sentence before, a note after, code fences).
+function jsonSlice_(text) {
+  var a = text.indexOf("{"), b = text.lastIndexOf("}");
+  return (a !== -1 && b > a) ? text.slice(a, b + 1) : "";
+}
+
+// Enough of a bad reply to diagnose it from the alert email: its start and its end, where
+// the break usually is, plus why the model stopped.
+function replyExcerpt_(text, stopReason) {
+  var t = String(text || "").replace(/\s+/g, " ");
+  var shown = t.length <= 600 ? t : t.slice(0, 300) + " ... " + t.slice(-300);
+  return '[stop_reason=' + (stopReason || "?") + ', ' + t.length + ' chars] "' + shown + '"';
+}
+
+function parseFailure_(msg, stopReason) {
+  var err = new Error(msg);
+  err.parseFailure = true;
+  err.maxTokens = stopReason === "max_tokens";
+  return err;
+}
+
+function extractOnce_(apiKey, contentBlocks, model, extraPrompt) {
   var payload = {
     model: model || CONFIG.MODEL,
     max_tokens: 8000,
@@ -530,18 +595,18 @@ function extractFromContent_(apiKey, contentBlocks, model, extraPrompt) {
   var body = JSON.parse(resp.getContentText());
   if (code !== 200) throw new Error("API " + code + ": " + (body.error && body.error.message ? body.error.message : resp.getContentText().slice(0, 200)));
 
-  var text = body.content.filter(function (b) { return b.type === "text"; })
-    .map(function (b) { return b.text; }).join("\n")
-    .replace(/```json|```/g, "").trim();
-  // If the model answered in prose instead of JSON (e.g. "I need to see the document"),
-  // there is nothing to repair - the input was unusable. Surface what it actually said
-  // so the ProcessedEmails note is diagnosable instead of "Unexpected token 'I'".
-  if (!/^[\[{]/.test(text)) {
-    var stopReason = body.stop_reason || "";
+  var raw = body.content.filter(function (b) { return b.type === "text"; })
+    .map(function (b) { return b.text; }).join("\n");
+  var stopReason = body.stop_reason || "";
+  var text = jsonSlice_(raw.replace(/```json|```/g, ""));
+  // No JSON object at all: the model answered in prose (e.g. "I need to see the document")
+  // or was cut off before closing it. Surface what it actually said so the note is
+  // diagnosable instead of "Unexpected token 'I'".
+  if (!text) {
     var hint = stopReason === "max_tokens"
       ? "response hit max_tokens - invoice may be too long"
-      : "model returned prose, not JSON";
-    throw new Error(hint + ': "' + text.slice(0, 200).replace(/\s+/g, " ") + '"');
+      : (raw.indexOf("{") !== -1 ? "model JSON never closed" : "model returned prose, not JSON");
+    throw parseFailure_(hint + ": " + replyExcerpt_(raw, stopReason), stopReason);
   }
 
   try {
@@ -559,9 +624,10 @@ function extractFromContent_(apiKey, contentBlocks, model, extraPrompt) {
     } catch (e2) {
       // Still broken - report the payload, not just the parser's complaint, and flag
       // truncation (the usual cause of a JSON reply that starts valid and stops mid-field).
-      var trunc = (body.stop_reason === "max_tokens") ? " [truncated at max_tokens]" : "";
-      throw new Error("could not parse model JSON" + trunc + ': "' +
-        repaired.slice(0, 200).replace(/\s+/g, " ") + '"');
+      var trunc = (stopReason === "max_tokens") ? " [truncated at max_tokens]" : "";
+      throw parseFailure_("could not parse model JSON" + trunc + " (" +
+        String(e2 && e2.message ? e2.message : e2).slice(0, 120) + "): " +
+        replyExcerpt_(raw, stopReason), stopReason);
     }
   }
 }

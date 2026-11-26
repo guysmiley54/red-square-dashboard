@@ -122,9 +122,32 @@ function orderDupeCore_(apply) {
 // Called from writeInvoice_ when a tax invoice reports an order_ref. Marks the
 // earlier order row superseded so the pair never both count. Returns a note or "".
 
+// Suppliers whose orders reach the inbox as their own row before the tax invoice does.
+// orderKey turns a reference into the key both documents share, or "" if the reference is
+// not an order of that kind. It is applied to the invoice's order_ref AND to each earlier
+// row's invoice_number, so the two only meet on a real order.
+//   Southern: Pepper order code (letters in it) vs all-digit tax invoice; the invoice
+//             prints the code as is.
+//   Doppio:   Ordermentum notification (notifications@ordermentum.com, ref OMO106903, no
+//             PDF) vs the Doppio tax invoice, whose order_ref is DP_ plus that number
+//             (DP_OMO106903). Added 27 Nov 2026; OMO106903 had been superseded by hand.
+var ORDER_PAIRS = [
+  { supplier: /SOUTHERN/i,
+    orderKey: function (ref) { return isOrderRef_(ref) ? ref.toUpperCase() : ""; } },
+  { supplier: /DOPPIO/i,
+    orderKey: function (ref) { var m = /OMO[\s_\-]*(\d+)/i.exec(ref); return m ? "OMO" + m[1] : ""; } }
+];
+
 function supersedeOrderRow_(invSheet, supplier, orderRef) {
   var ref = String(orderRef || "").replace(/^'/, "").trim();
-  if (!ref || !isOrderRef_(ref)) return "";
+  if (!ref) return "";
+  var pair = null;
+  for (var p = 0; p < ORDER_PAIRS.length; p++) {
+    if (ORDER_PAIRS[p].supplier.test(String(supplier || ""))) { pair = ORDER_PAIRS[p]; break; }
+  }
+  if (!pair) return "";
+  var key = pair.orderKey(ref);
+  if (!key) return "";
 
   var last = invSheet.getLastRow();
   if (last < 2) return "";
@@ -132,15 +155,13 @@ function supersedeOrderRow_(invSheet, supplier, orderRef) {
   var n = last - start + 1;
   var rows = invSheet.getRange(start, 1, n, DEDUPE.COL_ORDER_REF).getValues();
 
-  var want = String(supplier || "").toUpperCase();
   for (var i = rows.length - 1; i >= 0; i--) {
-    if (String(rows[i][10] || "") === "superseded") continue;
-    if (String(rows[i][2] || "").toUpperCase().indexOf(DEDUPE.SUPPLIER_MATCH) < 0) continue;
-    if (want && String(rows[i][2] || "").toUpperCase().indexOf(want.slice(0, 8)) < 0) continue;
-    if (String(rows[i][3] || "").replace(/^'/, "").trim().toUpperCase() !== ref.toUpperCase()) continue;
+    if (String(rows[i][10] || "") !== "invoice") continue;   // skips superseded and credits
+    if (!pair.supplier.test(String(rows[i][2] || ""))) continue;
+    if (pair.orderKey(String(rows[i][3] || "").replace(/^'/, "").trim()) !== key) continue;
 
     invSheet.getRange(start + i, DEDUPE.COL_TYPE).setValue("superseded");
-    return "order " + ref + " superseded by this invoice";
+    return "order " + key + " superseded by this invoice";
   }
   return "";
 }
